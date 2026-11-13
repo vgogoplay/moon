@@ -2216,7 +2216,9 @@ function decodeBackupPayload(rawCodeStr) {
 }
 
 function buildCurrentBackupCode() {
-    // 僅打包有填寫的欄位與與預設值不同的隱私設定，讓代碼大幅精簡且 100% 完整保留所有資料
+    if (typeof buildBackupCodeFromParts === 'function') {
+        return buildBackupCodeFromParts(appState.playerId || null, appState.profile, appState.privacy);
+    }
     const compactProfile = {};
     if (appState.profile && typeof appState.profile === 'object') {
         Object.entries(appState.profile).forEach(([k, v]) => {

@@ -695,7 +695,7 @@
 
         function getBatchScheduleInfo(batchNum) {
             const b = Math.max(1, Number(batchNum || 1));
-            const baseMonday = new Date(2026, 10, 9, 0, 0, 0, 0); // 2026/11/09 (一) -> 第1屆11/11(三)、第1屆11/14(六)
+            const baseMonday = new Date(2026, 10, 9, 0, 0, 0, 0);
             const monday = new Date(baseMonday);
             monday.setDate(baseMonday.getDate() + (b - 1) * 7);
 
@@ -725,7 +725,7 @@
         }
 
         function calcAutoBatchNumber(now = new Date()) {
-            const baseMonday = new Date(2026, 10, 9, 0, 0, 0, 0); // 2026/11/09 (一)
+            const baseMonday = new Date(2026, 10, 9, 0, 0, 0, 0);
             const currentMonday = getMondayOfWeek(now);
             const weekMs = 7 * 24 * 60 * 60 * 1000;
             const diffWeeks = Math.round((currentMonday.getTime() - baseMonday.getTime()) / weekMs);
@@ -829,6 +829,103 @@
             renderAdminAll();
         }
 
+
+        // ==================== 🔑 玩家專屬備份／還原通行碼產生與複製（供玩家遺忘時提供） ====================
+        const SYSTEM_ONLY_USER_KEYS = new Set([
+            'id', 'privacy', 'backupCode', 'isWarned', 'warningReason',
+            'isMatchBanned', 'isChatBanned', 'registeredSessions', 'registeredSession',
+            'exactMatchCriteria', 'matchedHistory', 'matchedSession',
+            'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt'
+        ]);
+
+        function encodeBackupPayload(payloadObj) {
+            const jsonStr = JSON.stringify(payloadObj);
+            if (typeof TextEncoder !== 'undefined') {
+                const bytes = new TextEncoder().encode(jsonStr);
+                let binary = '';
+                for (let i = 0; i < bytes.length; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                return btoa(binary);
+            }
+            return btoa(unescape(encodeURIComponent(jsonStr)));
+        }
+
+        function generatePlayerBackupCode(userObj) {
+            if (!userObj || !userObj.id) return '';
+            const compactProfile = {};
+            Object.entries(userObj).forEach(([k, v]) => {
+                if (SYSTEM_ONLY_USER_KEYS.has(k)) return;
+                if (v !== '' && v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)) {
+                    compactProfile[k] = v;
+                }
+            });
+            if (!compactProfile.region && compactProfile.city) {
+                compactProfile.region = inferRegionByCity(compactProfile.city);
+            }
+
+            const compactPrivacy = {};
+            if (userObj.privacy && typeof userObj.privacy === 'object') {
+                Object.entries(userObj.privacy).forEach(([k, v]) => {
+                    if (v && k !== 'ig') {
+                        compactPrivacy[k] = v;
+                    }
+                });
+            }
+
+            return encodeBackupPayload({
+                playerId: String(userObj.id),
+                profile: compactProfile,
+                privacy: compactPrivacy
+            });
+        }
+
+        async function copyTextToClipboardAdmin(textVal, successLabel = '已複製') {
+            if (!textVal) return false;
+            let copied = false;
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(textVal);
+                    copied = true;
+                }
+            } catch (e) {}
+
+            if (!copied) {
+                const tmp = document.createElement('textarea');
+                tmp.value = textVal;
+                tmp.style.position = 'fixed';
+                tmp.style.opacity = '0';
+                document.body.appendChild(tmp);
+                tmp.focus();
+                tmp.select();
+                try {
+                    copied = document.execCommand('copy');
+                } catch (e) {}
+                document.body.removeChild(tmp);
+            }
+            return copied;
+        }
+
+        async function copyPlayerBackupCode(playerId) {
+            const users = getUsers();
+            const u = users.find(item => String(item.id) === String(playerId));
+            if (!u) return;
+
+            const code = generatePlayerBackupCode(u);
+            if (u.backupCode !== code) {
+                u.backupCode = code;
+                saveUsers(users);
+            }
+
+            const ok = await copyTextToClipboardAdmin(code);
+            appendLog(`<span class="text-pink-300">[備份碼查詢]</span> 已取得玩家 <strong>${u.nickname} (ID:${u.id})</strong> 的備份／還原通行碼${ok ? '並複製到剪貼簿' : ''}。`);
+            if (ok) {
+                alert(`✅ 已複製玩家「${u.nickname} (ID:${u.id})」的專屬備份／還原通行碼！\n\n可直接貼上傳送給該玩家於前台「個人與隱私 → 備份/還原碼」貼上還原。`);
+            } else {
+                viewPlayerDetail(playerId);
+            }
+        }
+
         function getUsers() {
             const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
             let migrated = false;
@@ -862,6 +959,15 @@
                     });
                 }
             });
+            users.forEach(u => {
+                if (u && u.id) {
+                    const expectedCode = generatePlayerBackupCode(u);
+                    if (expectedCode && u.backupCode !== expectedCode) {
+                        u.backupCode = expectedCode;
+                        migrated = true;
+                    }
+                }
+            });
             if (migrated) {
                 localStorage.setItem(USERS_KEY, JSON.stringify(users));
             }
@@ -869,6 +975,13 @@
         }
 
         function saveUsers(users) {
+            if (Array.isArray(users)) {
+                users.forEach(u => {
+                    if (u && u.id) {
+                        u.backupCode = generatePlayerBackupCode(u);
+                    }
+                });
+            }
             localStorage.setItem(USERS_KEY, JSON.stringify(users));
             CloudSync.syncUsersArray(users);
             renderAdminAll();
@@ -883,7 +996,6 @@
             renderAdminAll();
         }
 
-        // ==================== 管理員發送信件／文字給前台玩家 ====================
         function sendAdminMailboxMessage() {
             const rawTarget = document.getElementById('mailTargetPlayerId').value.trim();
             const title = document.getElementById('mailTitleInput').value.trim();
@@ -972,7 +1084,6 @@
             return copy;
         }
 
-        // ==================== 個別玩家「禁止配對 / 解除限制」控制 ====================
         function togglePlayerMatchBan(playerId) {
             const users = getUsers();
             const target = users.find(u => String(u.id) === String(playerId));
@@ -988,7 +1099,6 @@
             }
         }
 
-        // ==================== 個別玩家「禁止發話 / 解除禁言」控制 ====================
         function togglePlayerChatBan(playerId) {
             const users = getUsers();
             const target = users.find(u => String(u.id) === String(playerId));
@@ -1004,7 +1114,6 @@
             }
         }
 
-        // ==================== 禁止字眼與警告帳號管理 ====================
         function addBannedRule() {
             const field = document.getElementById('banFieldSelect').value;
             const keyword = document.getElementById('banKeywordInput').value.trim();
@@ -1023,7 +1132,6 @@
             saveBannedRules(getBannedRules().filter(r => r.id !== ruleId));
         }
 
-        // ==================== 刪除玩家整個資料 ====================
         function deletePlayerEntirely(playerId) {
             const users = getUsers();
             const target = users.find(u => String(u.id) === String(playerId));
@@ -1045,7 +1153,6 @@
                 }
             });
 
-            // 同步清空該玩家所有配對的聊天歷史紀錄
             const allChats = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
             Object.keys(allChats).forEach(k => {
                 if (k.split('__').includes(String(playerId))) {
@@ -1059,7 +1166,6 @@
             appendLog(`<span class="text-rose-400">[刪除玩家資料]</span> 已將玩家 <strong>${target.nickname} (ID:${target.id})</strong> 的整個資料徹底刪除。`);
         }
 
-        // ==================== 指定玩家 ID 一鍵填滿全部資料 ====================
         function adminFillPlayerFullData() {
             let targetId = document.getElementById('fillTargetPlayerId').value.trim();
             const frontendState = JSON.parse(localStorage.getItem(FRONTEND_STORAGE_KEY) || '{}');
@@ -1160,7 +1266,6 @@
         }
 
         function triggerFrontendTestEvent(type, targetPlayerId = '') {
-            // 若為調整天數測試指令，同步更新 yuelao_users 內所有已配對紀錄的 matchedAt，確保雙方分頁天數完全一致
             if (type === 'MINUS_ONE_DAY' || type === 'EXPIRE_TO_ZERO_DAYS') {
                 const users = getUsers();
                 const dayMs = 24 * 60 * 60 * 1000;
@@ -1199,7 +1304,6 @@
             appendLog(`<span class="text-sky-300">[連動前台指令]</span> 已發送 <strong>${type}</strong>${targetDesc}，前台視窗將即時同步更新！`);
         }
 
-        // ==================== 20:00 倒數計時與自動到點觸發配對 ====================
         function checkAutoSchedule2000() {
             const now = new Date();
             let target = new Date(now);
@@ -1237,7 +1341,6 @@
             }
         }
 
-        // ==================== 彈性解除已配對中的好友 ====================
         function unmatchPlayerPair(userId, specificPartnerId = null) {
             const users = getUsers();
             const userA = users.find(u => String(u.id) === String(userId));
@@ -1277,7 +1380,6 @@
                 }
             }
 
-            // 直接解除配對時，清空雙方聊天歷史紀錄
             const pairKey = [String(userId), String(targetPartnerId)].sort().join('__');
             const allChats = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
             if (Object.prototype.hasOwnProperty.call(allChats, pairKey)) {
@@ -1290,7 +1392,6 @@
             appendLog(`<span class="text-amber-300">[彈性解除配對]</span> 管理員已解除 <strong>${userA.nickname}</strong> ⇄ <strong>${partnerName}</strong> 的好友關係並清空聊天紀錄，前台名單已同步更新。`);
         }
 
-        // ==================== 單項條件比對（支援：先選地區配對全區所有縣市、或指定單一縣市） ====================
         function checkSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
             if (!candidate) return false;
             if (key === 'region') {
@@ -1359,7 +1460,6 @@
             userB.matchedAt = nowTs;
         }
 
-        // ==================== 執行選定場次 20:00 配對 ====================
         function runSessionMatch(isAuto = false) {
             const targetSession = document.getElementById('adminSessionSelect').value;
             const batchName = extractBatchLabel(targetSession);
@@ -1449,7 +1549,6 @@
             saveUsers(users);
         }
 
-        // ==================== 秘密強制配對管理 ====================
         function addSecretForceMatch() {
             const adminId = document.getElementById('forceAdminId').value.trim();
             const targetId = document.getElementById('forceTargetId').value.trim();
@@ -1491,7 +1590,6 @@
             renderAdminAll();
         }
 
-        // ==================== 測試資料匯入 ====================
         function getSelectedAdminSession() {
             const sel = document.getElementById('adminSessionSelect');
             if (sel && sel.value) return normalizeSessionLabel(sel.value);
@@ -1558,11 +1656,28 @@
         }
 
         function viewPlayerDetail(playerId) {
-            const u = getUsers().find(item => String(item.id) === String(playerId));
+            const users = getUsers();
+            const u = users.find(item => String(item.id) === String(playerId));
             if (!u) return;
+            const latestCode = generatePlayerBackupCode(u);
+            if (u.backupCode !== latestCode) {
+                u.backupCode = latestCode;
+                saveUsers(users);
+            }
             document.getElementById('detailModalTitle').textContent = `🆔 玩家 ID：${u.id}（${u.nickname}）完整資料記錄`;
-            const entries = Object.entries(u).filter(([k]) => k !== 'privacy');
-            document.getElementById('detailModalBody').innerHTML = entries.map(([k, v]) => `
+            const entries = Object.entries(u).filter(([k]) => k !== 'privacy' && k !== 'backupCode');
+            const backupBannerHtml = `
+                <div class="md:col-span-2 p-3.5 rounded-2xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-300 space-y-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <span class="text-xs font-bold text-[#8f4452]">🔑 玩家專屬備份／還原通行碼（若玩家遺忘可複製提供給對方）</span>
+                        <button type="button" onclick="copyPlayerBackupCode('${u.id}')" class="px-3 py-1 rounded-xl bg-[#c96a7b] text-white text-xs font-bold shadow-2xs hover:opacity-95 transition">
+                            📋 一鍵複製備份碼
+                        </button>
+                    </div>
+                    <textarea rows="3" readonly onclick="this.select()" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-[11px] font-mono text-gray-700 resize-none break-all">${latestCode}</textarea>
+                </div>
+            `;
+            document.getElementById('detailModalBody').innerHTML = backupBannerHtml + entries.map(([k, v]) => `
                 <div class="p-2.5 rounded-xl bg-pink-50/50 border border-pink-100">
                     <span class="text-[11px] text-[#c96a7b] font-mono block">${k}</span>
                     <span class="font-semibold break-all">${typeof v === 'object' && v !== null ? JSON.stringify(v) : (v ?? '未填')}</span>
@@ -1642,7 +1757,6 @@
                 lockBtn.textContent = '解除鎖定（開放填寫資料）';
             }
 
-            // 男女生人數限制開關狀態渲染
             const limitInput = document.getElementById('genderLimitMaxInput');
             if (limitInput && document.activeElement !== limitInput) {
                 limitInput.value = sysCfg.genderLimitMax;
@@ -1668,7 +1782,6 @@
                 genderLimitBtn.textContent = '開啟「男女生人數限制」';
             }
 
-            // 渲染後台已發送信件列表
             const sentMails = getMailbox();
             const mailListBox = document.getElementById('adminSentMailsList');
             if (sentMails.length === 0) {
@@ -1855,6 +1968,7 @@
                             <td class="p-3.5 text-xs space-y-1">${statusParts.join('<br>')}</td>
                             <td class="p-3.5 text-xs space-x-1 whitespace-nowrap">
                                 <button onclick="viewPlayerDetail('${u.id}')" class="px-2 py-1 rounded-lg border border-pink-200 text-[#8f4452] hover:bg-pink-50">詳情</button>
+                                <button onclick="copyPlayerBackupCode('${u.id}')" title="一鍵複製此玩家的備份／還原通行碼" class="px-2 py-1 rounded-lg bg-pink-100 border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-200">🔑 備份碼</button>
                                 <button onclick="togglePlayerMatchBan('${u.id}')" class="px-2 py-1 rounded-lg font-semibold text-white ${u.isMatchBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-700 hover:bg-gray-800'}">
                                     ${u.isMatchBanned ? '✅ 解除配對限制' : '🚫 禁止配對'}
                                 </button>

@@ -1,4 +1,4 @@
-/* data.js - SCHEMA_VERSION 14：男女生人數限制開關、性別限選男女、地區與縣市聯動 */
+/* data.js - SCHEMA_VERSION 25：男女生人數限制開關、性別限選男女、地區與縣市聯動、玩家專屬備份還原碼雲端紀錄 */
 
 const SCHEMA_VERSION = 25;
 // 🧪 測試階段開關：true = 全部欄位暫時免必填；正式上線時改為 false 即可恢復全部必填驗證
@@ -229,7 +229,6 @@ const CloudSync = {
             clearTimeout(timer);
             if (!res.ok) return false;
             const data = await res.json();
-            // 若在 GET 期間有新的本地寫入發生，捨棄此次舊快照避免覆蓋剛保存的資料
             if (this.inFlightWrites > 0 || this.writeEpoch !== epochBefore) {
                 return false;
             }
@@ -271,7 +270,6 @@ const CloudSync = {
             es.addEventListener('put', handleEvent);
             es.addEventListener('patch', handleEvent);
             es.onerror = () => {
-                // 若串流暫時中斷，背景定時輪詢會自動接手並在恢復後重連
             };
             this.eventSource = es;
         } catch (e) {}
@@ -727,6 +725,62 @@ const FIELD_SECTIONS = [
     }
 ];
 
+// 共享備份還原碼編碼器（前／後台一致格式，供玩家遺忘時由後台查詢提供）
+function encodeBackupPayloadShared(payloadObj) {
+    const jsonStr = JSON.stringify(payloadObj);
+    if (typeof TextEncoder !== 'undefined') {
+        const bytes = new TextEncoder().encode(jsonStr);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    }
+    return btoa(unescape(encodeURIComponent(jsonStr)));
+}
+
+function buildBackupCodeFromParts(playerId, profileObj, privacyObj) {
+    const allowedProfileKeys = new Set(['region', 'statusOther', 'hobbiesOther']);
+    FIELD_SECTIONS.forEach(sec => {
+        sec.fields.forEach(f => {
+            allowedProfileKeys.add(f.key);
+            if (f.allowOther) allowedProfileKeys.add(`${f.key}Other`);
+        });
+    });
+
+    const compactProfile = {};
+    if (profileObj && typeof profileObj === 'object') {
+        Object.entries(profileObj).forEach(([k, v]) => {
+            if (!allowedProfileKeys.has(k)) return;
+            if (v !== '' && v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)) {
+                compactProfile[k] = v;
+            }
+        });
+    }
+
+    const defaultPrivacy = {};
+    FIELD_SECTIONS.forEach(sec => {
+        sec.fields.forEach(f => {
+            defaultPrivacy[f.key] = f.alwaysOpen ? 'open' : (sec.defaultPrivacy || 'closed');
+        });
+    });
+
+    const compactPrivacy = {};
+    if (privacyObj && typeof privacyObj === 'object') {
+        Object.entries(privacyObj).forEach(([k, v]) => {
+            if (v && v !== defaultPrivacy[k]) {
+                compactPrivacy[k] = v;
+            }
+        });
+    }
+
+    return encodeBackupPayloadShared({
+        playerId: playerId ? String(playerId) : null,
+        profile: compactProfile,
+        privacy: compactPrivacy
+    });
+}
+
 // 4. 唯一玩家 ID 分配器（男 10001 起 / 女 20001 起）
 const IdAllocator = {
     allocate(gender) {
@@ -1071,13 +1125,19 @@ const Store = {
             const idx = users.findIndex(u => String(u.id) === String(state.playerId));
             const existingRecord = idx >= 0 ? users[idx] : {};
 
+            const mergedProfileForRecord = {
+                ...state.profile,
+                nickname: (state.profile.nickname && String(state.profile.nickname).trim()) || `玩家_${state.playerId}`,
+                region: state.profile.region || inferRegionByCity(state.profile.city)
+            };
+            const generatedBackupCode = buildBackupCodeFromParts(state.playerId, mergedProfileForRecord, state.privacy);
+
             const record = {
                 ...existingRecord,
                 id: String(state.playerId),
-                ...state.profile,
-                nickname: (state.profile.nickname && String(state.profile.nickname).trim()) || `玩家_${state.playerId}`,
-                region: state.profile.region || inferRegionByCity(state.profile.city),
+                ...mergedProfileForRecord,
                 privacy: state.privacy,
+                backupCode: generatedBackupCode,
                 isWarned: !!state.isWarnedAccount,
                 warningReason: state.warningReason || '',
                 isMatchBanned: Boolean(existingRecord.isMatchBanned),
