@@ -1136,7 +1136,7 @@ document.getElementById('profileForm').addEventListener('submit', function(e) {
     }
     showMiniNotice(
         '✨ 保存成功',
-        `你的個人資料已成功保存並同步至後台！\n玩家專屬 ID：${appState.playerId}\n\n現在可前往「緣分首頁」勾選場次報名配對。`
+        `玩家專屬 ID：${appState.playerId}\n\n現在可前往「緣分首頁」勾選場次報名配對。`
     );
 });
 
