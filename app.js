@@ -2018,8 +2018,7 @@ function respondSevenDayDecision(isContinue) {
         Store.save(appState);
         refreshAllUI();
         if (completed) {
-            showMiniNotice('🌸 繼續配對成功', `你與 ${friend.nickname} 皆已按下繼續配對！
-緣分已再延後 7 天（剩餘 7 天），現在可以繼續在聊天室聊天了！`);
+            showMiniNotice('🌸 繼續配對成功', `你與 ${friend.nickname} 皆已按下繼續配對！\n緣分已再延後 7 天（剩餘 7 天），現在可以繼續在聊天室聊天了！`);
         } else {
             showMiniNotice('💖 已送出繼續意願', `你已按下「繼續配對」，只要 ${friend.nickname} 也按下繼續配對，就會立即再延後 7 天並開放聊天！`);
         }
@@ -2179,37 +2178,174 @@ function submitEveningConfession() {
     );
 }
 
-function exportBackupCode() {
-    const code = btoa(unescape(encodeURIComponent(JSON.stringify({
-        playerId: appState.playerId,
-        profile: appState.profile,
-        privacy: appState.privacy
-    }))));
-    const input = prompt('🔑 這是你的「紅線永久通行碼」（複製保存即可在任何手機還原資料；若要還原，請貼上通行碼並按確定）：', code);
-    if (input && input !== code) {
-        try {
-            const restored = JSON.parse(decodeURIComponent(escape(atob(input.trim()))));
-            if (restored.profile) {
-                if (restored.playerId) appState.playerId = restored.playerId;
-                appState.profile = { ...appState.profile, ...restored.profile };
-                if (!appState.profile.region && appState.profile.city) {
-                    appState.profile.region = inferRegionByCity(appState.profile.city);
-                }
-                appState.privacy = { ...appState.privacy, ...(restored.privacy || {}) };
-                FIELD_SECTIONS.forEach(sec => {
-                    sec.fields.forEach(f => {
-                        if (f.alwaysOpen) appState.privacy[f.key] = 'open';
-                    });
-                });
-                appState.privacy.ig = 'closed';
-                Store.save(appState);
-                renderProfileForm();
-                refreshAllUI();
-                showMiniNotice('🌸 還原成功', '通行碼還原成功！你的個人資料與隱私設定已載入。');
-            }
-        } catch (err) {
-            showMiniNotice('⚠️ 格式錯誤', '通行碼格式不正確，請確認是否完整複製。');
+// ==================== 紅線永久通行碼（改用專用多行視窗，解決瀏覽器 prompt 2000 字截斷問題） ====================
+function encodeBackupPayload(payloadObj) {
+    const jsonStr = JSON.stringify(payloadObj);
+    if (typeof TextEncoder !== 'undefined') {
+        const bytes = new TextEncoder().encode(jsonStr);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
         }
+        return btoa(binary);
+    }
+    return btoa(unescape(encodeURIComponent(jsonStr)));
+}
+
+function decodeBackupPayload(rawCodeStr) {
+    // 自動清除 LINE / 瀏覽器複製時可能夾帶的換行、空白或全形空白，並補齊 Base64 尾端 '='
+    let cleaned = String(rawCodeStr || '').replace(/[\s　]+/g, '');
+    if (!cleaned) throw new Error('EMPTY_CODE');
+    cleaned = cleaned.replace(/-/g, '+').replace(/_/g, '/');
+    while (cleaned.length % 4 !== 0) {
+        cleaned += '=';
+    }
+
+    const binary = atob(cleaned);
+    let jsonStr = '';
+    if (typeof TextDecoder !== 'undefined') {
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        jsonStr = new TextDecoder('utf-8').decode(bytes);
+    } else {
+        jsonStr = decodeURIComponent(escape(binary));
+    }
+    return JSON.parse(jsonStr);
+}
+
+function buildCurrentBackupCode() {
+    // 僅打包有填寫的欄位與與預設值不同的隱私設定，讓代碼大幅精簡且 100% 完整保留所有資料
+    const compactProfile = {};
+    if (appState.profile && typeof appState.profile === 'object') {
+        Object.entries(appState.profile).forEach(([k, v]) => {
+            if (v !== '' && v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)) {
+                compactProfile[k] = v;
+            }
+        });
+    }
+    const defaultPrivacy = Store.getDefaultState().privacy;
+    const compactPrivacy = {};
+    if (appState.privacy && typeof appState.privacy === 'object') {
+        Object.entries(appState.privacy).forEach(([k, v]) => {
+            if (v && v !== defaultPrivacy[k]) {
+                compactPrivacy[k] = v;
+            }
+        });
+    }
+    return encodeBackupPayload({
+        playerId: appState.playerId || null,
+        profile: compactProfile,
+        privacy: compactPrivacy
+    });
+}
+
+function exportBackupCode() {
+    const exportBox = document.getElementById('backupExportTextarea');
+    const importBox = document.getElementById('backupImportTextarea');
+    if (exportBox) {
+        exportBox.value = buildCurrentBackupCode();
+    }
+    if (importBox) {
+        importBox.value = '';
+    }
+    const modal = document.getElementById('backupModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeBackupModal() {
+    const modal = document.getElementById('backupModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+async function copyBackupCodeToClipboard() {
+    const exportBox = document.getElementById('backupExportTextarea');
+    if (!exportBox || !exportBox.value) return;
+    exportBox.focus();
+    exportBox.select();
+    exportBox.setSelectionRange(0, exportBox.value.length);
+
+    let copied = false;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(exportBox.value);
+            copied = true;
+        }
+    } catch (e) {}
+
+    if (!copied) {
+        try {
+            copied = document.execCommand('copy');
+        } catch (e) {}
+    }
+
+    if (copied) {
+        showMiniNotice('📋 複製成功', '已完整複製你的紅線永久通行碼！可至其他瀏覽器或手機貼上還原。');
+    } else {
+        showMiniNotice('💡 請手動複製', '已為你全選通行碼文字框，請按 Ctrl+C（或長按選單「複製」）。');
+    }
+}
+
+function restoreFromBackupCode() {
+    const importBox = document.getElementById('backupImportTextarea');
+    const rawInput = importBox ? importBox.value : '';
+    if (!rawInput || !rawInput.trim()) {
+        showMiniNotice('⚠️ 尚未貼上通行碼', '請先在下方文字框貼上你要還原的 eyJ... 通行碼！');
+        return;
+    }
+
+    try {
+        const restored = decodeBackupPayload(rawInput);
+        if (!restored || typeof restored !== 'object' || !restored.profile) {
+            throw new Error('INVALID_PAYLOAD');
+        }
+
+        const freshBase = Store.getDefaultState();
+        if (restored.playerId) {
+            appState.playerId = String(restored.playerId);
+        }
+        appState.profile = { ...freshBase.profile, ...restored.profile };
+        if (!appState.profile.region && appState.profile.city) {
+            appState.profile.region = inferRegionByCity(appState.profile.city);
+        }
+        appState.privacy = { ...freshBase.privacy, ...(restored.privacy || {}) };
+        FIELD_SECTIONS.forEach(sec => {
+            sec.fields.forEach(f => {
+                if (f.alwaysOpen) appState.privacy[f.key] = 'open';
+            });
+        });
+        appState.privacy.ig = 'closed';
+
+        // 若雲端/後台已有該玩家 ID 的報名場次與條件，一併同步載入避免覆蓋
+        if (appState.playerId) {
+            const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            const cloudUser = users.find(u => String(u.id) === String(appState.playerId));
+            if (cloudUser) {
+                if (Array.isArray(cloudUser.registeredSessions)) {
+                    appState.registeredSessions = Array.from(new Set(cloudUser.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+                }
+                if (cloudUser.exactMatchCriteria && typeof cloudUser.exactMatchCriteria === 'object') {
+                    appState.exactMatchCriteria = { ...cloudUser.exactMatchCriteria };
+                }
+                appState.isWarnedAccount = Boolean(cloudUser.isWarned);
+                appState.warningReason = cloudUser.warningReason || '';
+                appState.isChatBanned = Boolean(cloudUser.isChatBanned);
+            }
+        }
+
+        Store.save(appState);
+        syncFromSharedStorage();
+        renderProfileForm();
+        refreshAllUI();
+        closeBackupModal();
+        showMiniNotice('🌸 還原成功', `通行碼還原成功！${appState.playerId ? `（玩家專屬 ID：${appState.playerId}）` : ''}你的個人資料與隱私設定已載入。`);
+    } catch (err) {
+        showMiniNotice('⚠️ 格式錯誤', '通行碼格式不正確或文字不完整（請確認在原本的瀏覽器重新開啟「備份/還原碼」並點擊「一鍵複製全部」）。');
     }
 }
 
