@@ -4,6 +4,7 @@ let appState = Store.load();
 let lastControlsSnapshot = JSON.stringify(Store.getSystemConfig());
 let lastGenderQuotaSnapshot = JSON.stringify(Store.getGenderQuotaStatus());
 let lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
+let lastUsersStatsSnapshot = '';
 let lastActiveBatch = getCurrentBatchNumber();
 let lastRenderedChatSignature = '';
 
@@ -136,7 +137,8 @@ function syncFromSharedStorage() {
         const me = users.find(u => String(u.id) === String(appState.playerId));
 
         // 2. 若雲端已初始化且玩家資料已被後台管理員整筆刪除，同步重置前台本地狀態
-        if (!me && (typeof CloudSync === 'undefined' || CloudSync.initialized)) {
+        const isPendingSync = (typeof CloudSync !== 'undefined' && typeof CloudSync.isUserPending === 'function' && CloudSync.isUserPending(appState.playerId));
+        if (!me && !isPendingSync && (typeof CloudSync === 'undefined' || CloudSync.initialized)) {
             appState = Store.getDefaultState();
             appState.lastProcessedTestCmdId = JSON.parse(localStorage.getItem('yuelao_test_event') || '{}').id || null;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
@@ -281,6 +283,10 @@ function syncFromSharedStorage() {
         if (chatsChanged) {
             Store.save(appState);
         }
+        const curUsersRaw = localStorage.getItem(USERS_KEY) || '[]';
+        if (curUsersRaw !== lastUsersStatsSnapshot) {
+            renderHomeStatsCharts();
+        }
         if (!document.getElementById('tab-friends').classList.contains('hidden')) {
             renderFriendsSection();
         }
@@ -412,6 +418,139 @@ function renderRandomMoment() {
     document.getElementById('momentTitle').textContent = item.title;
     document.getElementById('momentText').textContent = item.text;
 }
+
+// ==================== 前台首頁：即時男女比例與 MBTI 統計圖表 ====================
+function renderHomeStatsCharts() {
+    const totalBadge = document.getElementById('homeStatsTotalBadge');
+    const donutBox = document.getElementById('genderDonutChartBox');
+    const mbtiGrid = document.getElementById('mbtiBarChartGrid');
+    if (!totalBadge || !donutBox || !mbtiGrid) return;
+
+    const rawUsersStr = localStorage.getItem(USERS_KEY) || '[]';
+    lastUsersStatsSnapshot = rawUsersStr;
+
+    let users = [];
+    try {
+        users = JSON.parse(rawUsersStr);
+        if (!Array.isArray(users)) users = [];
+    } catch (e) {
+        users = [];
+    }
+
+    const validUsers = users.filter(u => u && typeof u === 'object' && u.id);
+    const totalCount = validUsers.length;
+    let maleCount = 0;
+    let femaleCount = 0;
+
+    const standardMbtis = [
+        'INTJ', 'INTP', 'ENTJ', 'ENTP',
+        'INFJ', 'INFP', 'ENFJ', 'ENFP',
+        'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ',
+        'ISTP', 'ISFP', 'ESTP', 'ESFP'
+    ];
+    const mbtiCounts = {};
+    standardMbtis.forEach(code => { mbtiCounts[code] = 0; });
+    let untestedMbtiCount = 0;
+
+    validUsers.forEach(u => {
+        if (u.gender === '男') maleCount++;
+        else if (u.gender === '女') femaleCount++;
+
+        const rawMbti = String(u.mbti || '').trim().toUpperCase();
+        if (!rawMbti || rawMbti.includes('不知道') || rawMbti.includes('沒測過')) {
+            untestedMbtiCount++;
+        } else if (Object.prototype.hasOwnProperty.call(mbtiCounts, rawMbti)) {
+            mbtiCounts[rawMbti]++;
+        } else {
+            mbtiCounts[rawMbti] = (mbtiCounts[rawMbti] || 0) + 1;
+        }
+    });
+
+    const genderTotal = maleCount + femaleCount;
+    const malePct = genderTotal > 0 ? Math.round((maleCount / genderTotal) * 100) : 0;
+    const femalePct = genderTotal > 0 ? (100 - malePct) : 0;
+
+    totalBadge.textContent = `總計 ${totalCount} 人`;
+    document.getElementById('genderRatioSummaryTag').textContent = `男 ${maleCount} 女 ${femaleCount}`;
+    document.getElementById('statMaleText').textContent = `${maleCount} 人 (${malePct}%)`;
+    document.getElementById('statFemaleText').textContent = `${femaleCount} 人 (${femalePct}%)`;
+    document.getElementById('statMaleBar').style.width = `${malePct}%`;
+    document.getElementById('statFemaleBar').style.width = `${femalePct}%`;
+
+    // SVG 雙色圓環圖（男：天藍色 #38bdf8 / 女：櫻花粉 #fb7185）
+    const radius = 52;
+    const circumference = 2 * Math.PI * radius;
+    const maleArc = genderTotal > 0 ? (maleCount / genderTotal) * circumference : 0;
+    const femaleArc = genderTotal > 0 ? (femaleCount / genderTotal) * circumference : 0;
+
+    donutBox.innerHTML = `
+        <svg viewBox="0 0 132 132" class="w-36 h-36 -rotate-90">
+            <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#fce7f3" stroke-width="16"></circle>
+            ${genderTotal > 0 ? `
+                <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#fb7185" stroke-width="16"
+                    stroke-dasharray="${femaleArc} ${circumference}" stroke-dashoffset="0"></circle>
+                <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#38bdf8" stroke-width="16"
+                    stroke-dasharray="${maleArc} ${circumference}" stroke-dashoffset="${-femaleArc}"></circle>
+            ` : ''}
+        </svg>
+        <div class="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+            <span class="text-[10px] text-gray-400 font-medium">已登記人數</span>
+            <span class="text-lg font-bold font-serif-jp text-[#8f4452] leading-tight">${totalCount} 人</span>
+        </div>
+    `;
+
+    // 整理 MBTI 長條圖資料（人數由高到低排序，讓有統計到的 MBTI 優先顯示在最前面）
+    const mbtiEntries = Object.entries(mbtiCounts).sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return standardMbtis.indexOf(a[0]) - standardMbtis.indexOf(b[0]);
+    });
+
+    const maxMbtiVal = Math.max(1, ...mbtiEntries.map(item => item[1]));
+    const activeEntries = mbtiEntries.filter(item => item[1] > 0);
+
+    const activePillsEl = document.getElementById('mbtiActivePills');
+    if (activeEntries.length > 0) {
+        activePillsEl.innerHTML = activeEntries.slice(0, 6).map(([code, cnt]) => `
+            <span class="px-2 py-0.5 rounded-full bg-rose-50 border border-pink-200 text-[#8f4452] font-bold">
+                ${code} ${cnt}
+            </span>
+        `).join('');
+    } else {
+        activePillsEl.innerHTML = `<span class="text-gray-400">尚無 MBTI 紀錄</span>`;
+    }
+
+    const barPalette = {
+        'IN': 'from-purple-400 to-indigo-400',
+        'EN': 'from-rose-400 to-pink-500',
+        'IS': 'from-teal-400 to-emerald-400',
+        'ES': 'from-amber-400 to-orange-400'
+    };
+
+    mbtiGrid.innerHTML = mbtiEntries.map(([code, cnt]) => {
+        const widthPct = cnt > 0 ? Math.max(8, Math.round((cnt / maxMbtiVal) * 100)) : 0;
+        const prefix = code.slice(0, 2);
+        const grad = barPalette[prefix] || 'from-[#e79aa8] to-[#c96a7b]';
+        const isActive = cnt > 0;
+        return `
+            <div class="flex items-center gap-2 text-xs ${isActive ? '' : 'opacity-50'}">
+                <span class="w-11 font-mono font-bold shrink-0 ${isActive ? 'text-[#8f4452]' : 'text-gray-400'}">${code}</span>
+                <div class="flex-1 h-2.5 rounded-full bg-pink-50 border border-pink-100/80 overflow-hidden">
+                    <div class="h-full rounded-full bg-gradient-to-r ${grad} transition-all duration-500" style="width: ${widthPct}%"></div>
+                </div>
+                <span class="w-9 text-right font-mono font-bold shrink-0 ${isActive ? 'text-[#c96a7b]' : 'text-gray-400'}">${cnt} 人</span>
+            </div>
+        `;
+    }).join('');
+
+    const untestedNote = document.getElementById('mbtiUntestedNote');
+    if (untestedMbtiCount > 0) {
+        untestedNote.textContent = `* 另有 ${untestedMbtiCount} 位玩家選擇「不知道 / 沒測過」MBTI`;
+        untestedNote.classList.remove('hidden');
+    } else {
+        untestedNote.classList.add('hidden');
+    }
+}
+
 
 function switchTab(tabName) {
     document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
@@ -1417,6 +1556,7 @@ function refreshAllUI() {
     }
 
     document.getElementById('navFriendDot').classList.toggle('hidden', appState.friends.length === 0);
+    renderHomeStatsCharts();
     renderFriendsSection();
 }
 
