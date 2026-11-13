@@ -693,11 +693,11 @@ function renderProfileForm() {
         ${topNoticeHtml}
         ${FIELD_SECTIONS.map((sec, sIdx) => `
             <div class="space-y-4">
-                <h3 class="text-base font-bold font-serif-jp text-[#8f4452] border-b border-pink-100 pb-2">${sec.title}</h3>
+                <h3 class="text-lg font-bold font-serif-jp text-[#8f4452] border-b border-pink-100 pb-2">${sec.title}</h3>
 
                 ${sIdx === 0 ? `
                     <div class="p-4 rounded-2xl ${isLocked ? 'bg-gray-100 border-gray-300' : 'bg-gradient-to-r from-pink-50 to-rose-50/80 border-pink-200'} border space-y-2">
-                        <label class="text-xs font-bold ${isLocked ? 'text-gray-500' : 'text-[#8f4452]'} block">玩家專屬 ID</label>
+                        <label class="text-sm md:text-base font-bold ${isLocked ? 'text-gray-500' : 'text-[#8f4452]'} block">玩家專屬 ID</label>
                         <input type="text" value="${idDisplay}" readonly class="input-jp font-mono font-bold text-sm ${isLocked ? '!bg-gray-200 !text-gray-500 !border-gray-300' : ''}">
                     </div>
                 ` : ''}
@@ -870,7 +870,7 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
         <div id="field-card-${field.key}" class="${fullWidthClass} p-3.5 rounded-2xl ${isProfileLocked ? 'bg-gray-50/90 border-gray-200' : 'bg-white/75 border-pink-100/90'} border space-y-2">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                    <label class="text-xs font-bold ${isProfileLocked ? 'text-gray-400' : 'text-[#5e464a]'}">
+                    <label class="text-sm md:text-base font-bold leading-snug ${isProfileLocked ? 'text-gray-400' : 'text-[#5e464a]'}">
                         ${field.label} ${isFieldRequired(field) ? '<span class="text-rose-500">*</span>' : ''}
                     </label>
                     ${field.subtitle ? `<p class="text-[11px] text-gray-400">${field.subtitle}</p>` : ''}
