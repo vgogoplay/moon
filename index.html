@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>月老牽線計畫 🌸 戀愛手札與七日紅線</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="pb-24 md:pb-12">
+    <!-- 櫻花飄落背景容器 -->
+    <div id="sakuraContainer" class="sakura-bg" aria-hidden="true"></div>
+
+    <!-- 頂部品牌與狀態列 -->
+    <header class="sticky top-0 z-30 glass-header px-4 py-3">
+        <div class="max-w-4xl mx-auto flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2.5">
+                <span class="text-2xl animate-pulse-slow">🌸</span>
+                <div>
+                    <h1 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452] leading-tight">月老牽線計畫</h1>
+                    <p class="text-[11px] text-[#c96a7b] tracking-widest">THREADS 單身七日紅線企劃</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-1.5 sm:gap-2">
+                <button type="button" onclick="openMailboxModal()" class="relative text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 transition shadow-2xs font-medium">
+                    ✉️ 信件
+                    <span id="mailboxUnreadBadge" class="hidden -top-1.5 -right-1.5 absolute min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow">0</span>
+                </button>
+                <button type="button" onclick="openReportModal()" class="text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 transition shadow-2xs">
+                    📮 問題回報
+                </button>
+                <div id="headerStatusBadge" class="hidden sm:block text-xs px-3 py-1.5 rounded-full bg-pink-50 border border-pink-200 text-[#8f4452] font-medium">
+                    讀取緣分狀態中...
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 輕量化小視窗通知氣泡 -->
+    <div id="miniNoticeWindow" class="hidden mini-window !max-w-sm border-pink-300">
+        <div class="flex items-start justify-between gap-3">
+            <div class="space-y-1">
+                <h4 id="miniNoticeTitle" class="text-sm font-bold font-serif-jp text-[#8f4452]">🌸 系統提示</h4>
+                <p id="miniNoticeBody" class="text-xs text-gray-600 leading-relaxed whitespace-pre-line"></p>
+            </div>
+            <button type="button" onclick="closeMiniNotice()" class="text-gray-400 hover:text-gray-700 text-base leading-none">✕</button>
+        </div>
+        <div class="mt-3 text-right">
+            <button type="button" onclick="closeMiniNotice()" class="btn-sakura px-4 py-1.5 rounded-xl text-xs font-bold">
+                我知道了
+            </button>
+        </div>
+    </div>
+
+    <!-- 主內容區 -->
+    <main class="max-w-4xl mx-auto px-4 pt-6 relative z-10">
+
+        <!-- 警告帳號橫幅 -->
+        <div id="warningAccountBanner" class="hidden mb-6 p-4 rounded-2xl bg-rose-50 border-2 border-rose-400 text-center space-y-1 shadow-sm">
+            <p class="text-sm md:text-base font-bold text-rose-700">⚠️ 目前警告帳號 不提供配對</p>
+            <p id="warningAccountReason" class="text-xs text-rose-600">系統偵測到您的個人資料包含受限制的內容，請修正後重新保存。</p>
+        </div>
+
+        <!-- ==================== 分頁 1：緣分首頁與報名 ==================== -->
+        <section id="tab-home" class="tab-view active space-y-6">
+            <!-- 隨機戀愛點滴時刻卡片 -->
+            <div id="momentCard" class="glass-card rounded-3xl p-6 md:p-8 relative overflow-hidden transition-all duration-500">
+                <div class="flex items-center justify-between mb-4">
+                    <span id="momentTag" class="text-xs px-3 py-1 rounded-full bg-rose-100/80 text-[#9e4756] font-medium tracking-wider">
+                        ✨ 心動時刻
+                    </span>
+                    <button type="button" onclick="renderRandomMoment()" class="text-xs text-[#b6737d] hover:text-[#8f4452] flex items-center gap-1 transition">
+                        <span>換一段戀愛語錄</span> ↻
+                    </button>
+                </div>
+                <div class="flex flex-col md:flex-row items-center gap-6">
+                    <div id="momentArt" class="w-24 h-24 md:w-28 md:h-28 rounded-2xl bg-gradient-to-br from-pink-50 to-rose-100 border border-pink-200/80 flex items-center justify-center text-5xl shrink-0 shadow-inner">
+                        💌
+                    </div>
+                    <div class="text-center md:text-left space-y-2 flex-1">
+                        <h2 id="momentTitle" class="text-lg md:text-xl font-bold font-serif-jp text-[#7a3542]">
+                            在幾千人的擦肩裡，剛好停在了你面前
+                        </h2>
+                        <p id="momentText" class="text-sm text-gray-600 leading-relaxed font-serif-jp">
+                            有些相遇不需要太長的開場白，只要在週三或週六的晚上，兩條紅線輕輕交會就夠了。
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 報名與活動排程主控制台 -->
+            <div class="glass-card rounded-3xl p-6 md:p-8 text-center space-y-5">
+                <div class="inline-flex flex-wrap justify-center items-center gap-2 px-3.5 py-1.5 rounded-full bg-pink-50 border border-pink-200 text-xs text-[#8f4452]">
+                    <span id="currentPeriodBadge" class="font-bold">目前開放：讀取中...</span>
+                    <span>｜每週一更新下一屆（星期三 / 星期六 20:00 自動配對）</span>
+                </div>
+
+                <div>
+                    <p class="text-xs text-gray-500 mb-1">距離下一次月老牽線開獎還有</p>
+                    <div id="nextMatchCountdown" class="text-2xl md:text-3xl font-bold font-serif-jp text-[#c96a7b] tracking-wider">
+                        計算中...
+                    </div>
+                </div>
+
+                <div id="registrationAlertBox" class="max-w-lg mx-auto p-4 rounded-2xl bg-white/80 border border-pink-100 text-sm text-gray-600 leading-relaxed"></div>
+
+                <div class="pt-1 flex flex-wrap justify-center gap-3">
+                    <button id="mainApplyBtn" type="button" onclick="handleApplyClick()" class="btn-sakura px-10 py-4 rounded-2xl font-bold text-base md:text-lg shadow-lg tracking-wider">
+                        🌸 我要報名參加配對
+                    </button>
+                </div>
+            </div>
+
+            <!-- 首頁下方：原創暖心語錄與紅線小約定 -->
+            <div class="glass-card rounded-3xl p-6 md:p-8 space-y-6">
+                <div class="text-center space-y-3 font-serif-jp">
+                    <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 border border-pink-200/80 text-xs text-[#b55868]">
+                        <span>🕯️</span>
+                        <span>寫給正在等待相遇的你</span>
+                    </div>
+                    <p class="text-sm md:text-base text-[#6d3b43] leading-loose">
+                        微涼的晚風裡，總有一盞燈是為晚歸的人留著。<br class="hidden sm:inline">
+                        與其在無止盡的滑動裡消耗期待，不如花幾分鐘寫下真實的自己，讓月老在週三與週六的夜色裡，為你牽起一段為期七天的溫柔相遇。<br class="hidden sm:inline">
+                        或許就在下個轉角，會有人端著熱飲、帶著剛剛好的笑容，走進你的日常。
+                    </p>
+                </div>
+
+                <div class="border-t border-dashed border-pink-200 pt-6 space-y-4">
+                    <h3 class="text-center text-sm md:text-base font-bold font-serif-jp text-[#8f4452] tracking-widest">
+                        ── 寫下紅線之前，給彼此的小約定 ──
+                    </h3>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs md:text-sm text-gray-600">
+                        <div class="p-4 rounded-2xl bg-white/80 border border-pink-100 flex items-start gap-3">
+                            <span class="w-6 h-6 rounded-full bg-pink-100 text-[#8f4452] font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">1</span>
+                            <p class="leading-relaxed"><strong class="text-[#8f4452]">一人一封紅線：</strong>請由本人真誠填寫資料，若重複註冊或填寫異常資訊，系統將列入警告帳號並取消配對資格。</p>
+                        </div>
+
+                        <div class="p-4 rounded-2xl bg-white/80 border border-pink-100 flex items-start gap-3">
+                            <span class="w-6 h-6 rounded-full bg-pink-100 text-[#8f4452] font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">2</span>
+                            <p class="leading-relaxed"><strong class="text-[#8f4452]">七日限定的溫柔：</strong>每一次牽線都是難得的相遇，請帶著尊重與禮貌開啟第一句破冰對話。</p>
+                        </div>
+
+                        <div class="p-4 rounded-2xl bg-white/80 border border-pink-100 flex items-start gap-3">
+                            <span class="w-6 h-6 rounded-full bg-pink-100 text-[#8f4452] font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">3</span>
+                            <p class="leading-relaxed"><strong class="text-[#8f4452]">守護彼此的安全：</strong>若決定從線上走到線下見面，請務必約在明亮人多的公共場所，並讓親友知道行程。</p>
+                        </div>
+
+                        <div class="p-4 rounded-2xl bg-white/80 border border-pink-100 flex items-start gap-3">
+                            <span class="w-6 h-6 rounded-full bg-pink-100 text-[#8f4452] font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">4</span>
+                            <p class="leading-relaxed"><strong class="text-[#8f4452]">把步調交給時間：</strong>七天後無論選擇繼續同行或各自祝福，每一次真誠交流都是更認識自己的過程。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 分頁 2：好友名單與七日對話 ==================== -->
+        <section id="tab-friends" class="tab-view hidden space-y-6">
+            <div class="glass-card rounded-3xl p-5 md:p-6">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+                    <div>
+                        <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">💌 我的七日限定好友名單</h2>
+                        <p class="text-xs text-gray-500">
+                            好友數量無上限（除非解除配對），每天 20:00 剩餘天數 -1；降至 0 天時雙方皆按繼續才保留，否則雙方清空好友。<br>
+                            <span class="text-[#c96a7b] font-semibold">✨ 特別提醒：當好友名單擁有 2 個以上好友時，每隔 2 天 20:00 將會觸發「心動抉擇」全新事件！</span>
+                        </p>
+                    </div>
+                    <span id="friendCountBadge" class="text-xs px-3 py-1 rounded-full bg-pink-100 text-[#8f4452] font-semibold">0 位好友</span>
+                </div>
+                <div id="friendsListContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+            </div>
+
+            <!-- 選定好友的互動空間 -->
+            <div id="activeChatWorkspace" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <!-- 左側：對方公開檔案卡片 -->
+                <div class="lg:col-span-5 glass-card rounded-3xl p-5 space-y-4 h-fit">
+                    <div class="flex items-center justify-between border-b border-pink-100 pb-3">
+                        <div>
+                            <h3 id="partnerCardName" class="text-lg font-bold font-serif-jp text-[#8f4452]">對方檔案</h3>
+                            <p id="partnerCardTimer" class="text-xs text-[#c96a7b] font-medium mt-0.5">剩餘 7 天</p>
+                        </div>
+                        <span class="text-2xl">🎀</span>
+                    </div>
+                    <div class="bg-pink-50/70 p-3 rounded-xl text-xs text-[#7a3b46] leading-relaxed">
+                        🔒 「性別」與「破冰提問」為固定顯示；「IG 帳號」於雙方 7 天後成為好友時自動開放；其餘欄位顯示對方「開放給好友」的資料。
+                    </div>
+                    <div id="partnerUnlockedFields" class="space-y-2.5 max-h-[420px] overflow-y-auto pr-1 text-xs"></div>
+                </div>
+
+                <!-- 右側：戀愛對話窗 -->
+                <div class="lg:col-span-7 glass-card rounded-3xl p-5 flex flex-col h-[560px]">
+                    <!-- 管理員禁止發話提示橫幅 -->
+                    <div id="chatBannedBanner" class="hidden mb-3 p-3.5 rounded-2xl bg-rose-100 border border-rose-400 text-center">
+                        <p class="text-xs font-bold text-rose-700">🚫 目前聊天室已禁止發話，請聯繫管理員</p>
+                    </div>
+
+                    <!-- 20:00 心動抉擇未完成時的聊天鎖定橫幅 -->
+                    <div id="confessionLockBanner" class="hidden mb-3 p-3.5 rounded-2xl bg-rose-50 border border-rose-300 flex flex-wrap items-center justify-between gap-2">
+                        <p class="text-xs font-semibold text-[#8f4452]">
+                            🔒 已觸發今日 20:00 心動抉擇，完成選擇後才能繼續在好友名單上聊天！
+                        </p>
+                        <button type="button" onclick="openEveningConfessionModal()" class="btn-sakura px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0">
+                            💘 立即選擇心動對象
+                        </button>
+                    </div>
+
+                    <!-- 剩餘 0 天到期續緣詢問橫幅（觸發時聊天室禁止發話） -->
+                    <div id="sevenDayDecisionBanner" class="hidden mb-3 p-4 rounded-2xl bg-gradient-to-r from-rose-50 to-pink-100 border border-pink-300 space-y-2.5">
+                        <p class="text-sm font-bold font-serif-jp text-[#8f4452]">⏳ 剩餘 0 天！你們要不要繼續配對？</p>
+                        <p id="sevenDayDecisionStatus" class="text-xs text-gray-600">目前聊天室已暫停發話；兩個人都按「繼續配對」才配對成功，其中一人沒按則兩邊好友名單清空刪除。</p>
+                        <div class="flex gap-2 pt-1">
+                            <button type="button" onclick="respondSevenDayDecision(true)" class="btn-sakura px-4 py-2 rounded-xl text-xs font-semibold">
+                                💖 繼續配對
+                            </button>
+                            <button type="button" onclick="respondSevenDayDecision(false)" class="px-4 py-2 rounded-xl bg-white border border-gray-200 text-gray-600 text-xs hover:bg-gray-50">
+                                🍃 不繼續（雙方清空好友）
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between border-b border-pink-100 pb-3 mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                            <span id="chatHeaderTitle" class="font-bold text-sm text-[#8f4452]">與對方的專屬對話</span>
+                        </div>
+                        <span class="text-[11px] text-[#c96a7b] font-medium">✨ 擁有 2 位以上好友每隔 2 天 20:00 開啟心動事件</span>
+                    </div>
+
+                    <div id="chatMessagesBox" class="flex-1 overflow-y-auto space-y-3 p-2 bg-[#fffafb] rounded-2xl border border-pink-100/60"></div>
+
+                    <form id="chatSendForm" onclick="handleLockedChatClick()" class="mt-3 flex gap-2">
+                        <input type="text" id="chatInput" class="input-jp flex-1" placeholder="寫下想對他說的話..." required>
+                        <button type="submit" id="chatSendBtn" class="btn-sakura px-5 py-2.5 rounded-xl text-sm font-semibold shrink-0">
+                            傳送 💌
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 分頁 3：我的個人檔案與隱私設定 ==================== -->
+        <section id="tab-profile" class="tab-view hidden space-y-6">
+            <div class="glass-card rounded-3xl p-6 md:p-8">
+                <div class="flex flex-col gap-4 border-b border-pink-100 pb-5 mb-6">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div>
+                            <h2 class="text-xl font-bold font-serif-jp text-[#8f4452]">📝 我的個人資料與隱私控制</h2>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <strong>A. 基本資料</strong>預設為不開放（僅「性別」固定開啟）；<strong>B、C、D 區塊</strong>預設為開放給好友，可自行調整（個人隱私開放或隱藏不受資料鎖定限制）。
+                            </p>
+                        </div>
+                        <div class="flex flex-wrap gap-2 shrink-0">
+                            <button type="button" onclick="exportBackupCode()" class="text-xs px-3 py-2 rounded-xl bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
+                                🔑 備份/還原碼
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 一鍵全開 / 全隱藏隱私快速控制列（不受資料鎖定影響） -->
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-pink-50/70 p-3.5 rounded-2xl border border-pink-200/80">
+                        <span class="text-xs font-semibold text-[#8f4452]">🎛️ 隱私快速批次設定：</span>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="setAllFieldsPrivacy('open')" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-semibold shadow-2xs hover:opacity-95 transition">
+                                🌸 欄位全部開啟
+                            </button>
+                            <button type="button" onclick="setAllFieldsPrivacy('closed')" class="px-3.5 py-1.5 rounded-xl bg-white border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 transition">
+                                🙈 欄位全部隱藏
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <form id="profileForm" class="space-y-8" novalidate>
+                    <div id="dynamicProfileSections" class="space-y-8"></div>
+
+                    <div class="sticky bottom-20 md:bottom-4 z-20 glass-card p-4 rounded-2xl border border-pink-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <span id="profileCompletenessText" class="text-xs font-medium text-[#8f4452]">
+                            尚未完成所有必填資料
+                        </span>
+                        <button type="submit" class="w-full sm:w-auto btn-sakura px-8 py-3 rounded-xl font-bold text-sm shadow-md">
+                            保存
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <!-- 底部導航列 -->
+    <nav class="fixed bottom-0 inset-x-0 z-30 glass-header border-t border-pink-200/80 px-4 py-2">
+        <div class="max-w-md mx-auto grid grid-cols-3 gap-2">
+            <button type="button" onclick="switchTab('home')" data-tab-btn="home" class="nav-btn active">
+                <span class="text-lg">🌸</span>
+                <span class="text-xs font-medium">緣分首頁</span>
+            </button>
+            <button type="button" onclick="switchTab('friends')" data-tab-btn="friends" class="nav-btn relative">
+                <span class="text-lg">💌</span>
+                <span class="text-xs font-medium">好友名單</span>
+                <span id="navFriendDot" class="hidden absolute top-1.5 right-6 w-2 h-2 rounded-full bg-rose-500"></span>
+            </button>
+            <button type="button" onclick="switchTab('profile')" data-tab-btn="profile" class="nav-btn">
+                <span class="text-lg">🔐</span>
+                <span class="text-xs font-medium">個人與隱私</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- 輕量化小視窗 0：玩家信件箱（接收管理員發送的信件與文字） -->
+    <div id="mailboxModal" class="hidden mini-window !max-w-md max-h-[82vh] overflow-y-auto space-y-3.5">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">✉️ 月老信箱（管理員信件）</h3>
+                <p class="text-[11px] text-gray-400">點擊信件可查看管理員發送的完整內容</p>
+            </div>
+            <button type="button" onclick="closeMailboxModal()" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+        </div>
+
+        <div id="mailboxListView" class="space-y-2 max-h-72 overflow-y-auto pr-0.5"></div>
+
+        <div id="mailboxDetailView" class="hidden space-y-3">
+            <button type="button" onclick="backToMailboxList()" class="text-xs text-[#c96a7b] hover:underline font-semibold">
+                ← 返回信件列表
+            </button>
+            <div class="p-3.5 rounded-2xl bg-pink-50/70 border border-pink-200 space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                    <h4 id="mailDetailTitle" class="text-sm font-bold text-[#8f4452]"></h4>
+                    <span id="mailDetailTime" class="text-[10px] text-gray-400 shrink-0"></span>
+                </div>
+                <div id="mailDetailBody" class="text-xs text-gray-700 leading-relaxed whitespace-pre-line pt-1 border-t border-pink-100"></div>
+            </div>
+        </div>
+
+        <div class="pt-1 text-right border-t border-pink-100">
+            <button type="button" onclick="closeMailboxModal()" class="px-4 py-1.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                關閉信箱
+            </button>
+        </div>
+    </div>
+
+    <!-- 輕量化小視窗 1：報名場次與完全吻合條件 -->
+    <div id="registerModal" class="hidden mini-window !max-w-lg max-h-[82vh] overflow-y-auto space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🌸 報名參加配對</h3>
+                <p class="text-[11px] text-gray-500">有報名的玩家才會進入配對池，未報名者不會參與配對</p>
+            </div>
+            <button type="button" onclick="closeRegisterModal()" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+        </div>
+
+        <div class="space-y-1.5">
+            <label class="block text-xs font-bold text-[#8f4452]">
+                1. 請選擇要參加的配對場次（必選，可複選）<span class="text-rose-500">*</span>
+            </label>
+            <p class="text-[11px] text-gray-400">*每週一系統將自動釋出下一屆的星期三、星期六場次</p>
+            <div id="sessionOptionsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1"></div>
+        </div>
+
+        <div class="space-y-2 pt-2.5 border-t border-pink-100">
+            <label class="block text-xs font-bold text-[#8f4452]">
+                2. 希望對方哪個欄位要「完全吻合」？（選填，其中一項符合即可配對）
+            </label>
+            <div id="exactMatchOptionsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1"></div>
+        </div>
+
+        <div class="flex gap-2 pt-2.5 border-t border-pink-100">
+            <button type="button" onclick="closeRegisterModal()" class="w-1/3 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600">
+                取消
+            </button>
+            <button type="button" onclick="confirmRegistration()" class="w-2/3 btn-sakura py-2.5 rounded-xl text-xs font-bold shadow">
+                ✨ 確認送出報名
+            </button>
+        </div>
+    </div>
+
+    <!-- 輕量化小視窗 2：問題回報 -->
+    <div id="reportModal" class="hidden mini-window !max-w-sm space-y-3.5">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">📮 玩家問題回報</h3>
+                <p class="text-[11px] text-gray-400">此表單內容僅後台管理員可見</p>
+            </div>
+            <button type="button" onclick="closeReportModal()" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+        </div>
+
+        <form id="issueReportForm" class="space-y-3">
+            <div>
+                <label class="block text-xs font-semibold text-[#8f4452] mb-1">問題類型 <span class="text-rose-500">*</span></label>
+                <select id="reportCategory" class="input-jp !py-2 !text-xs" required>
+                    <option value="配對與報名問題">配對與報名問題</option>
+                    <option value="好友名單與聊天異常">好友名單與聊天異常</option>
+                    <option value="個人資料與隱私顯示">個人資料與隱私顯示</option>
+                    <option value="功能建議與許願">功能建議與許願</option>
+                    <option value="其他問題">其他問題</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-[#8f4452] mb-1">你的玩家 ID 或暱稱（選填）</label>
+                <input type="text" id="reportContact" class="input-jp !py-2 !text-xs" placeholder="若已產生玩家 ID 會自動帶入">
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-[#8f4452] mb-1">問題內容描述 <span class="text-rose-500">*</span></label>
+                <textarea id="reportContent" rows="3" class="input-jp !text-xs resize-none" placeholder="請描述你遇到的狀況..." required></textarea>
+            </div>
+
+            <div class="flex gap-2 pt-1">
+                <button type="button" onclick="closeReportModal()" class="w-1/3 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">
+                    取消
+                </button>
+                <button type="submit" class="w-2/3 btn-sakura py-2 rounded-xl text-xs font-bold shadow">
+                    送出問題回報
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- 輕量化小視窗 3：每隔 2 天 20:00 心動抉擇 -->
+    <div id="confessionModal" class="hidden mini-window !max-w-sm space-y-4">
+        <div class="text-center space-y-1">
+            <span class="text-2xl">🌙</span>
+            <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">20:00 心動抉擇</h3>
+            <p class="text-[11px] text-gray-500 leading-relaxed">
+                你擁有 2 位以上好友且已到達每隔 2 天 20:00 結算時刻，<strong>請選擇一人</strong>說出今天讓人心動的話。<br>
+                <span class="text-rose-500">（完成選擇前無法聊天；其餘好友將收到你已發送好感給「另外一位好友」的通知）</span>
+            </p>
+        </div>
+
+        <div class="space-y-2">
+            <label class="block text-xs font-semibold text-[#8f4452]">1. 選擇今天最讓你心動的對象：</label>
+            <div id="confessionTargetList" class="space-y-1.5 max-h-40 overflow-y-auto"></div>
+        </div>
+
+        <div>
+            <label class="block text-xs font-semibold text-[#8f4452] mb-1">2. 寫下今天讓人心動的一句話：</label>
+            <textarea id="confessionMessageInput" rows="2" class="input-jp !text-xs resize-none" placeholder="寫下心動的話..."></textarea>
+        </div>
+
+        <div class="flex gap-2">
+            <button type="button" onclick="closeEveningConfessionModal()" class="w-1/3 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">
+                稍後再選
+            </button>
+            <button type="button" onclick="submitEveningConfession()" class="w-2/3 btn-sakura py-2 rounded-xl text-xs font-bold shadow">
+                💘 確認發送
+            </button>
+        </div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1968 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>月老神社後台 ⛩️ 玩家管理・男女生人數限制・禁止配對與發話・信件中心</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background: linear-gradient(180deg, #fff8f9 0%, #faf4f5 100%);
+            min-height: 100vh;
+            color: #4a3b3c;
+        }
+        .font-serif-jp { font-family: 'Noto Serif TC', serif; }
+        .card-jp {
+            background: rgba(255, 255, 255, 0.94);
+            border: 1px solid #f5dce2;
+            box-shadow: 0 8px 30px rgba(201, 106, 123, 0.08);
+        }
+        .sim-btn {
+            font-size: 0.75rem;
+            padding: 0.45rem 0.85rem;
+            border-radius: 9999px;
+            background: #fff;
+            border: 1px solid #f3cdd5;
+            color: #8f4452;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .sim-btn:hover {
+            background: #fff0f4;
+            border-color: #c96a7b;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <!-- ==================== 🔐 後台管理員登入驗證視窗 ==================== -->
+    <div id="adminLoginOverlay" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gradient-to-br from-[#fff4f6] via-[#ffe6ec] to-[#fdf2f5]">
+        <div class="card-jp rounded-3xl w-full max-w-sm p-7 md:p-8 space-y-5 border-2 border-pink-200 shadow-2xl">
+            <div class="text-center space-y-1.5">
+                <div class="w-14 h-14 mx-auto rounded-2xl bg-pink-50 border border-pink-200 flex items-center justify-center text-3xl shadow-inner">
+                    ⛩️
+                </div>
+                <p class="text-[11px] tracking-[0.22em] text-[#c96a7b] font-serif-jp pt-1">YUELAO ADMIN ACCESS</p>
+                <h2 class="text-xl font-bold font-serif-jp text-[#8f4452]">月老牽線計畫・後台驗證</h2>
+                <p class="text-xs text-gray-500">請輸入管理員帳號與密碼以進入後台管理中心</p>
+            </div>
+
+            <form id="adminLoginForm" onsubmit="handleAdminLogin(event)" class="space-y-3.5">
+                <div>
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1">管理員帳號</label>
+                    <input type="text" id="adminLoginAccount" autocomplete="username" placeholder="請輸入管理員帳號" class="w-full p-3 rounded-xl border border-pink-200 bg-white text-sm focus:outline-none focus:border-[#c96a7b]" required>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1">管理員密碼</label>
+                    <input type="password" id="adminLoginPassword" autocomplete="current-password" placeholder="請輸入管理員密碼" class="w-full p-3 rounded-xl border border-pink-200 bg-white text-sm focus:outline-none focus:border-[#c96a7b]" required>
+                </div>
+
+                <div id="adminLoginError" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-700 font-bold text-center">
+                    🚫 帳號或密碼錯誤，無法訪問後台管理中心！
+                </div>
+
+                <button type="submit" class="w-full py-3 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-sm font-bold shadow-md hover:opacity-95 transition">
+                    🔓 登入後台管理中心
+                </button>
+            </form>
+        </div>
+    </div>
+
+
+    <div id="adminMainContent" class="hidden max-w-7xl mx-auto space-y-6">
+        <!-- 頂部控制列 -->
+        <div class="card-jp rounded-2xl p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs tracking-[0.2em] text-[#c96a7b] font-serif-jp">YUELAO ADMIN CENTER</span>
+                    <span id="adminCurrentBatchBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-rose-100 text-[#8f4452] font-bold">目前系統：第 1 屆</span>
+                    <span id="cloudStatusBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-700 font-semibold">
+                        ☁️ Firebase 雲端連線中...
+                    </span>
+                    <span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold">
+                        ⏰ 自動配對排程已啟用（每週三 / 週六 20:00 到點自動執行）
+                    </span>
+                </div>
+                <h1 class="text-2xl md:text-3xl font-bold font-serif-jp text-[#8f4452] mt-1">⛩️ 月老牽線計畫・後台管理中心</h1>
+                <p id="adminCountdownText" class="text-xs text-[#c96a7b] font-semibold mt-1">距離下次 20:00 自動配對：計算中...</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <button onclick="advanceToNextBatch()" class="px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-xs font-semibold hover:bg-amber-100 transition">
+                    🔄 刷新至下一屆（釋放鎖定名單）
+                </button>
+                <button onclick="clearAllAdminData()" class="px-3.5 py-2.5 rounded-xl border border-gray-200 text-gray-500 text-xs hover:bg-gray-50 transition">
+                    清空全部資料
+                </button>
+                <button onclick="logoutAdmin()" class="px-3.5 py-2.5 rounded-xl bg-rose-50 border border-rose-200 text-[#8f4452] text-xs font-semibold hover:bg-rose-100 transition">
+                    🔒 登出
+                </button>
+            </div>
+        </div>
+
+        <!-- 數據概覽 -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="card-jp rounded-2xl p-4">
+                <p class="text-xs text-gray-500">資料庫總玩家數</p>
+                <p class="text-2xl font-bold text-[#8f4452] mt-1" id="statTotal">0 人</p>
+            </div>
+            <div class="card-jp rounded-2xl p-4">
+                <p class="text-xs text-gray-500">已報名場次人數</p>
+                <p class="text-2xl font-bold text-[#c96a7b] mt-1" id="statRegistered">0 人</p>
+            </div>
+            <div class="card-jp rounded-2xl p-4">
+                <p class="text-xs text-gray-500">已配對成功對數</p>
+                <p class="text-2xl font-bold text-emerald-600 mt-1" id="statMatched">0 對</p>
+            </div>
+            <div class="card-jp rounded-2xl p-4">
+                <p class="text-xs text-gray-500">玩家問題回報數</p>
+                <p class="text-2xl font-bold text-amber-600 mt-1" id="statReports">0 則</p>
+            </div>
+        </div>
+
+        <!-- ==================== 各屆報名名單 & 禁止配對 / 禁止發話 / 解除配對 / 刪除資料 ==================== -->
+        <div class="card-jp rounded-2xl overflow-hidden">
+            <div class="p-5 border-b border-pink-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">📋 玩家完整資料庫與管理操作</h2>
+                    <p class="text-xs text-gray-500">前台玩家填完必填資料按「保存」後將即時同步顯示於此；可設定禁止配對、禁止發話、解除配對或刪除資料</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <button onclick="renderAdminAll()" class="px-3 py-2 rounded-lg bg-pink-50 border border-pink-200 text-[#8f4452] font-semibold hover:bg-pink-100">
+                        ↻ 立即刷新名單
+                    </button>
+                    <select id="filterBatchRoster" onchange="renderAdminAll()" class="p-2 rounded-lg border border-pink-200 bg-white font-semibold text-[#8f4452]">
+                        <option value="all">顯示全部玩家</option>
+                    </select>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs md:text-sm">
+                    <thead>
+                        <tr class="bg-pink-50/70 text-[#8f4452] border-b border-pink-100 text-xs">
+                            <th class="p-3.5">唯一玩家 ID</th>
+                            <th class="p-3.5">暱稱 / IG / 年齡</th>
+                            <th class="p-3.5">性別 / MBTI / 居住地區縣市</th>
+                            <th class="p-3.5">報名場次</th>
+                            <th class="p-3.5">希望吻合條件</th>
+                            <th class="p-3.5">配對與限制狀態</th>
+                            <th class="p-3.5">管理操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="playersTableBody" class="divide-y divide-pink-50"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ==================== 🎛️ 前台系統開關控制 ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-pink-200 bg-gradient-to-r from-white to-pink-50/60 space-y-3">
+            <div>
+                <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🎛️ 前台系統開關控制（即時連動前台畫面狀態）</h2>
+                <p class="text-xs text-gray-500">可即時控制活動報名開關、個人資料鎖定開關，以及男女生人數限制開關（男/女各自計算上限）</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                <div class="p-4 rounded-2xl bg-white border border-pink-100 flex items-center justify-between gap-3">
+                    <div>
+                        <p class="text-xs font-bold text-[#8f4452]">1. 前台活動報名開關</p>
+                        <p id="regSwitchDesc" class="text-[11px] text-emerald-600 font-semibold mt-0.5">目前狀態：🟢 開始報名（玩家可點擊報名）</p>
+                    </div>
+                    <button id="toggleRegSwitchBtn" onclick="toggleRegistrationSwitch()" class="px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-emerald-600 text-white hover:bg-emerald-700">
+                        切換為「人數已滿 不可報名」
+                    </button>
+                </div>
+
+                <div class="p-4 rounded-2xl bg-white border border-pink-100 flex items-center justify-between gap-3">
+                    <div>
+                        <p class="text-xs font-bold text-[#8f4452]">2. 前台個人資料填寫開關</p>
+                        <p id="profileLockSwitchDesc" class="text-[11px] text-emerald-600 font-semibold mt-0.5">目前狀態：🟢 開放填寫（玩家可編輯與保存資料）</p>
+                    </div>
+                    <button id="toggleProfileLockBtn" onclick="toggleProfileLockSwitch()" class="px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-amber-600 text-white hover:bg-amber-700">
+                        切換為「不讓玩家填寫資料」
+                    </button>
+                </div>
+
+                <!-- 3. 男女生人數限制開關 -->
+                <div class="md:col-span-2 p-4 rounded-2xl bg-white border border-pink-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div class="space-y-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <p class="text-xs font-bold text-[#8f4452]">3. 前台男女生人數限制開關</p>
+                            <span id="genderQuotaLiveCount" class="text-[11px] px-2.5 py-0.5 rounded-full bg-pink-50 border border-pink-200 text-[#8f4452] font-semibold">
+                                目前玩家人數：男生 0 人 ／ 女生 0 人
+                            </span>
+                        </div>
+                        <p id="genderLimitSwitchDesc" class="text-[11px] text-gray-500 font-semibold">目前狀態：⚪ 未開啟（不限制男女生人數）</p>
+                        <p class="text-[11px] text-gray-400">開啟後：若男、女生皆達設定上限，未填寫資料的新玩家將顯示「男/女人數已滿」；若僅單一性別額滿，則禁止選取該性別並提示人數已滿。</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 shrink-0">
+                        <label class="text-xs font-semibold text-[#5e464a]">男 / 女各自上限：</label>
+                        <input type="number" id="genderLimitMaxInput" min="1" value="30" onchange="updateGenderLimitMax()" class="w-20 p-2 rounded-xl border border-pink-200 bg-pink-50/40 text-xs font-mono font-bold text-center text-[#8f4452]">
+                        <span class="text-xs text-gray-500 mr-1">人</span>
+                        <button id="toggleGenderLimitBtn" onclick="toggleGenderLimitSwitch()" class="px-4 py-2.5 rounded-xl text-xs font-bold shadow transition bg-[#c96a7b] text-white hover:opacity-95">
+                            開啟「男女生人數限制」
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== 管理員專屬：秘密強制配對設定 ==================== -->
+        <div class="card-jp rounded-2xl p-6 border-2 border-rose-200 bg-gradient-to-r from-rose-50/60 to-pink-50/40 space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                <div>
+                    <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">🤫 管理員專屬：秘密強制配對通道（前台完全無痕）</h2>
+                    <p class="text-xs text-gray-600 mt-0.5">
+                        設定後，該屆其他人皆無法跟指定對象配對；當天 20:00 自動配對時會直接讓您與指定對象配對，直到<strong>刷新至下一屆</strong>才放回配對池。
+                    </p>
+                </div>
+                <button onclick="seedAdminAndXiaomeiExample()" class="px-3.5 py-2 rounded-xl bg-white border border-rose-300 text-[#8f4452] text-xs font-semibold hover:bg-rose-50 shrink-0">
+                    ✨ 一鍵建立範例（我的帳號 ID:1 + 小美 ID:2）
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div>
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1">我的帳號 ID（管理員 ID）</label>
+                    <input type="text" id="forceAdminId" placeholder="例如：1 或 10001" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-sm font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1">強制配對對象 ID（例如小美）</label>
+                    <input type="text" id="forceTargetId" placeholder="例如：2 或 20001" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-sm font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1">鎖定與生效屆數</label>
+                    <select id="forceBatchSelect" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-sm font-bold text-[#8f4452]"></select>
+                </div>
+                <button onclick="addSecretForceMatch()" class="w-full py-2.5 px-4 rounded-xl bg-[#8f4452] text-white text-sm font-bold hover:bg-[#753541] transition shadow">
+                    🔒 鎖定並加入秘密強制配對
+                </button>
+            </div>
+
+            <div id="forceMatchRulesList" class="space-y-2 pt-2"></div>
+        </div>
+
+        <!-- 配對執行日誌 -->
+        <div class="card-jp rounded-2xl p-5">
+            <h2 class="text-base font-bold font-serif-jp text-[#8f4452] mb-3">📜 20:00 自動配對演算法執行日誌</h2>
+            <div id="matchLogs" class="bg-[#2c2224] text-[#fbd5dc] p-4 rounded-xl h-52 overflow-y-auto font-mono text-xs leading-relaxed space-y-1.5">
+                <div class="text-pink-300/70">[系統就緒] 排程監聽中，每逢週三 / 週六 20:00 將自動進行配對...</div>
+            </div>
+        </div>
+
+        <!-- 玩家問題回報清單 -->
+        <div class="card-jp rounded-2xl overflow-hidden">
+            <div class="p-5 border-b border-pink-100 flex items-center justify-between bg-amber-50/40">
+                <div>
+                    <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">📮 玩家問題回報表單（僅後台管理員可見）</h2>
+                </div>
+                <button onclick="renderAdminAll()" class="text-xs px-3 py-1.5 rounded-lg bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50">
+                    ↻ 重新整理
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs md:text-sm">
+                    <thead>
+                        <tr class="bg-pink-50/60 text-[#8f4452] border-b border-pink-100 text-xs">
+                            <th class="p-3.5">單號 / 時間</th>
+                            <th class="p-3.5">問題類型</th>
+                            <th class="p-3.5">回報玩家</th>
+                            <th class="p-3.5">問題內容描述</th>
+                            <th class="p-3.5">處理狀態</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reportsTableBody" class="divide-y divide-pink-50"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ==================== 🧪 互動流程測試工具 ==================== -->
+        <div class="card-jp rounded-2xl p-5 bg-pink-50/50 border-pink-200 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🧪 互動流程測試工具（即時連動前台畫面）</h2>
+                    <p class="text-xs text-gray-500">可指定特定玩家 ID 一鍵填滿全部資料，或連續點擊新增多位好友（不限人數，可測試 6 位好友與每隔 2 天心動通知）</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <select id="adminSessionSelect" class="p-2 rounded-xl border border-pink-300 bg-white text-xs font-bold text-[#8f4452]"></select>
+                    <button onclick="runSessionMatch(false)" class="px-4 py-2 rounded-xl bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition">
+                        🌙 立即模擬 20:00 到點自動配對
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/90 p-3.5 rounded-2xl border border-pink-200/80">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold text-[#8f4452]">📝 指定玩家 ID 填滿資料：</span>
+                    <input type="text" id="fillTargetPlayerId" placeholder="輸入玩家 ID（如 10001）" class="w-40 p-2 rounded-xl border border-pink-200 text-xs font-mono">
+                    <button onclick="adminFillPlayerFullData()" class="px-3.5 py-2 rounded-xl bg-[#8f4452] text-white text-xs font-bold hover:bg-[#753541] transition">
+                        ✨ 一鍵填滿該 ID 全部資料
+                    </button>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold text-[#8f4452]">💞 測試 C 連動好友（可連續點加到6位）：</span>
+                    <input type="text" id="linkFriendCTargetId" placeholder="輸入需聯動的玩家 ID" class="w-40 p-2 rounded-xl border border-pink-200 text-xs font-mono">
+                    <button onclick="adminLinkFriendCToPlayer()" class="px-3.5 py-2 rounded-xl bg-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition">
+                        💞 連動新增一位好友
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap gap-2 pt-1">
+                <button onclick="seedSampleABCDE()" class="sim-btn">
+                    👥 1. 匯入 A~E 測試名單（A/B/C男 + D/E女）
+                </button>
+                <button onclick="seedAsymmetricPool()" class="sim-btn">
+                    📊 2. 模擬 100男 (10001~10100) vs 10女 (20001~20010)
+                </button>
+                <button onclick="triggerFrontendTestEvent('ADVANCE_CONFESSION_2000')" class="sim-btn">
+                    💘 3. 連動前台：推進至每隔 2 天 20:00 心動抉擇
+                </button>
+                <button onclick="triggerFrontendTestEvent('MINUS_ONE_DAY')" class="sim-btn">
+                    ⏩ 4. 連動前台：過 20:00 剩餘天數 -1 天
+                </button>
+                <button onclick="triggerFrontendTestEvent('EXPIRE_TO_ZERO_DAYS')" class="sim-btn">
+                    ⏳ 5. 連動前台：剩餘 0 天（禁止發話＆觸發是否繼續）
+                </button>
+                <button onclick="triggerFrontendTestEvent('PARTNER_ACCEPT_CONTINUE')" class="sim-btn">
+                    💖 6. 連動前台：模擬對方按下「繼續配對」
+                </button>
+                <button onclick="triggerFrontendTestEvent('PARTNER_DECLINE_OR_TIMEOUT')" class="sim-btn">
+                    💔 7. 連動前台：模擬對方沒按繼續（雙方清空好友）
+                </button>
+            </div>
+        </div>
+
+        <!-- ==================== ✉️ 管理員發送信件／文字給前台玩家 ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-4">
+            <div>
+                <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">✉️ 發送信件 / 文字給前台玩家（玩家可於前台「✉️ 信件」點開閱讀）</h2>
+                <p class="text-xs text-gray-500">可指定特定玩家 ID 單獨發送，或選擇「全體玩家」群發系統公告與提醒信件</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                <div class="md:col-span-3">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1">收件對象（玩家 ID 或全體）</label>
+                    <div class="flex gap-1.5">
+                        <input type="text" id="mailTargetPlayerId" value="ALL" placeholder="輸入玩家 ID 或 ALL" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-xs font-mono">
+                        <button type="button" onclick="document.getElementById('mailTargetPlayerId').value='ALL'" class="px-2.5 py-2 rounded-xl bg-pink-100 text-[#8f4452] text-[11px] font-bold shrink-0 hover:bg-pink-200">
+                            全體
+                        </button>
+                    </div>
+                </div>
+                <div class="md:col-span-3">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1">信件標題 <span class="text-rose-500">*</span></label>
+                    <input type="text" id="mailTitleInput" placeholder="例如：月老小提醒 / 系統通知" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-xs">
+                </div>
+                <div class="md:col-span-4">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1">信件文字內容 <span class="text-rose-500">*</span></label>
+                    <input type="text" id="mailContentInput" placeholder="輸入要發送給玩家的文字內容..." class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-xs">
+                </div>
+                <div class="md:col-span-2">
+                    <button type="button" onclick="sendAdminMailboxMessage()" class="w-full py-2.5 px-4 rounded-xl bg-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition shadow">
+                        📤 發送信件
+                    </button>
+                </div>
+            </div>
+
+            <div id="adminSentMailsList" class="space-y-1.5 pt-1"></div>
+        </div>
+
+        <!-- ==================== 🚫 禁止字眼與警告帳號規則管理 ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-rose-200 space-y-3">
+            <div>
+                <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🚫 禁止字眼與警告帳號規則設定</h2>
+                <p class="text-xs text-gray-500">玩家前台填寫資料包含以下禁止字眼並按保存後，系統將顯示「目前警告帳號 不提供配對」並封鎖其配對資格</p>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <select id="banFieldSelect" class="p-2.5 rounded-xl border border-pink-200 bg-white text-xs font-semibold text-[#8f4452]">
+                    <option value="ig">IG 帳號欄位</option>
+                    <option value="nickname">暱稱欄位</option>
+                    <option value="bio">自我介紹欄位</option>
+                    <option value="all">全部文字欄位</option>
+                </select>
+                <input type="text" id="banKeywordInput" placeholder="輸入禁止字眼（例如：gak）" class="w-56 p-2.5 rounded-xl border border-pink-200 bg-white text-xs">
+                <button onclick="addBannedRule()" class="px-4 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 transition">
+                    ➕ 新增禁止字眼
+                </button>
+            </div>
+
+            <div id="bannedRulesList" class="flex flex-wrap gap-2 pt-1"></div>
+        </div>
+    </div>
+
+    <!-- 玩家完整資料檢視 Modal -->
+    <div id="playerDetailModal" class="hidden fixed inset-0 bg-black/45 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-6 md:p-8 shadow-2xl border border-pink-100">
+            <div class="flex justify-between items-center border-b border-pink-100 pb-3 mb-4">
+                <h3 class="text-lg font-bold font-serif-jp text-[#8f4452]" id="detailModalTitle">玩家完整檔案記錄</h3>
+                <button onclick="document.getElementById('playerDetailModal').classList.add('hidden')" class="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+            </div>
+            <div id="detailModalBody" class="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs text-gray-700"></div>
+        </div>
+    </div>
+
+    <script>
+        const USERS_KEY = 'yuelao_users';
+        const REPORTS_KEY = 'yuelao_reports';
+        const FORCE_KEY = 'yuelao_force_matches';
+        const SYSTEM_STATE_KEY = 'yuelao_system_batch';
+        const AUTO_RUN_LOG_KEY = 'yuelao_auto_matched_sessions';
+        const BANNED_RULES_KEY = 'yuelao_banned_rules';
+        const FRONTEND_STORAGE_KEY = 'yuelao_romance_app_v2';
+        const MAILBOX_KEY = 'yuelao_mailbox';
+        const CHATS_KEY = 'yuelao_chats';
+        const ID_COUNTER_KEY = 'yuelao_id_counters';
+        const FIREBASE_DB_URL = 'https://moon-8b627-default-rtdb.asia-southeast1.firebasedatabase.app';
+
+        const CloudSync = {
+            dbUrl: FIREBASE_DB_URL.replace(/\/+$/, ''),
+            tree: {},
+            initialized: false,
+            eventSource: null,
+            pollTimer: null,
+            onUpdateCallback: null,
+            lastPushedUsersJson: {},
+
+            mapToArray(raw) {
+                if (!raw) return [];
+                if (Array.isArray(raw)) return raw.filter(item => item && typeof item === 'object');
+                if (typeof raw === 'object') return Object.values(raw).filter(item => item && typeof item === 'object');
+                return [];
+            },
+
+            chatsMapToLocal(raw) {
+                const result = {};
+                if (!raw || typeof raw !== 'object') return result;
+                Object.keys(raw).forEach(pairKey => {
+                    const msgs = this.mapToArray(raw[pairKey]);
+                    msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+                    result[pairKey] = msgs;
+                });
+                return result;
+            },
+
+            applyTreeToLocalStorage() {
+                const t = this.tree || {};
+
+                const usersArr = this.mapToArray(t[USERS_KEY]);
+                localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
+                usersArr.forEach(u => {
+                    if (u && u.id) {
+                        this.lastPushedUsersJson[String(u.id)] = JSON.stringify(u);
+                    }
+                });
+
+                localStorage.setItem(CHATS_KEY, JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY])));
+
+                if (t[SYSTEM_STATE_KEY] && typeof t[SYSTEM_STATE_KEY] === 'object') {
+                    localStorage.setItem(SYSTEM_STATE_KEY, JSON.stringify(t[SYSTEM_STATE_KEY]));
+                }
+
+                const mailsArr = this.mapToArray(t[MAILBOX_KEY]);
+                mailsArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+                localStorage.setItem(MAILBOX_KEY, JSON.stringify(mailsArr));
+
+                const reportsArr = this.mapToArray(t[REPORTS_KEY]);
+                reportsArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+                localStorage.setItem(REPORTS_KEY, JSON.stringify(reportsArr));
+
+                if (t[BANNED_RULES_KEY] !== undefined) {
+                    localStorage.setItem(BANNED_RULES_KEY, JSON.stringify(this.mapToArray(t[BANNED_RULES_KEY])));
+                }
+
+                if (t[FORCE_KEY] !== undefined) {
+                    localStorage.setItem(FORCE_KEY, JSON.stringify(this.mapToArray(t[FORCE_KEY])));
+                }
+
+                if (t[AUTO_RUN_LOG_KEY] && typeof t[AUTO_RUN_LOG_KEY] === 'object') {
+                    localStorage.setItem(AUTO_RUN_LOG_KEY, JSON.stringify(t[AUTO_RUN_LOG_KEY]));
+                }
+
+                if (t[ID_COUNTER_KEY] && typeof t[ID_COUNTER_KEY] === 'object') {
+                    localStorage.setItem(ID_COUNTER_KEY, JSON.stringify(t[ID_COUNTER_KEY]));
+                }
+            },
+
+            applyStreamPatch(path, data) {
+                const cleanPath = String(path || '/').replace(/^\/+|\/+$/g, '');
+                if (!cleanPath) {
+                    this.tree = (data && typeof data === 'object') ? data : {};
+                    return;
+                }
+                const parts = cleanPath.split('/');
+                let curr = this.tree;
+                for (let i = 0; i < parts.length - 1; i++) {
+                    const seg = parts[i];
+                    if (!curr[seg] || typeof curr[seg] !== 'object') curr[seg] = {};
+                    curr = curr[seg];
+                }
+                const lastKey = parts[parts.length - 1];
+                if (data === null) delete curr[lastKey];
+                else curr[lastKey] = data;
+            },
+
+            async fetchFullTree() {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 4500);
+                try {
+                    const res = await fetch(`${this.dbUrl}/.json`, {
+                        method: 'GET',
+                        cache: 'no-store',
+                        signal: controller.signal
+                    });
+                    clearTimeout(timer);
+                    if (!res.ok) return false;
+                    const data = await res.json();
+                    this.tree = (data && typeof data === 'object') ? data : {};
+                    this.applyTreeToLocalStorage();
+                    const badge = document.getElementById('cloudStatusBadge');
+                    if (badge) {
+                        badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-700 font-semibold';
+                        badge.textContent = '☁️ Firebase 雲端已即時同步';
+                    }
+                    return true;
+                } catch (e) {
+                    clearTimeout(timer);
+                    const badge = document.getElementById('cloudStatusBadge');
+                    if (badge) {
+                        badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-700 font-semibold';
+                        badge.textContent = '⚠️ 雲端重連中（暫用本地快取）';
+                    }
+                    return false;
+                }
+            },
+
+            startRealtimeStream() {
+                if (typeof EventSource === 'undefined') return;
+                if (this.eventSource) {
+                    try { this.eventSource.close(); } catch (e) {}
+                }
+                try {
+                    const es = new EventSource(`${this.dbUrl}/.json`);
+                    const handleEvent = (e) => {
+                        try {
+                            const payload = JSON.parse(e.data);
+                            if (!payload) return;
+                            if (e.type === 'patch' && payload.data && typeof payload.data === 'object') {
+                                const base = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
+                                Object.keys(payload.data).forEach(k => {
+                                    const subPath = base ? `${base}/${k}` : k;
+                                    this.applyStreamPatch(subPath, payload.data[k]);
+                                });
+                            } else {
+                                this.applyStreamPatch(payload.path, payload.data);
+                            }
+                            this.applyTreeToLocalStorage();
+                            if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+                        } catch (err) {}
+                    };
+                    es.addEventListener('put', handleEvent);
+                    es.addEventListener('patch', handleEvent);
+                    this.eventSource = es;
+                } catch (e) {}
+            },
+
+            async init(onUpdate) {
+                this.onUpdateCallback = onUpdate || null;
+                await this.fetchFullTree();
+                this.initialized = true;
+                this.startRealtimeStream();
+
+                if (!this.pollTimer) {
+                    this.pollTimer = setInterval(async () => {
+                        const ok = await this.fetchFullTree();
+                        if (ok && typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+                    }, 3500);
+                }
+            },
+
+            encodePath(path) {
+                return String(path || '').split('/').filter(Boolean).map(seg => encodeURIComponent(seg)).join('/');
+            },
+
+            async putNode(path, value) {
+                try {
+                    const encoded = this.encodePath(path);
+                    await fetch(`${this.dbUrl}/${encoded}.json`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(value)
+                    });
+                } catch (e) {}
+            },
+
+            async deleteNode(path) {
+                try {
+                    const encoded = this.encodePath(path);
+                    await fetch(`${this.dbUrl}/${encoded}.json`, {
+                        method: 'DELETE'
+                    });
+                } catch (e) {}
+            },
+
+            syncUsersArray(usersArr) {
+                const list = Array.isArray(usersArr) ? usersArr : [];
+                const currentIds = new Set(list.filter(u => u && u.id).map(u => String(u.id)));
+                Object.keys(this.lastPushedUsersJson).forEach(oldId => {
+                    if (!currentIds.has(oldId)) {
+                        delete this.lastPushedUsersJson[oldId];
+                        this.deleteNode(`${USERS_KEY}/${oldId}`);
+                    }
+                });
+                list.forEach(u => {
+                    if (!u || !u.id) return;
+                    const pid = String(u.id);
+                    const serialized = JSON.stringify(u);
+                    if (this.lastPushedUsersJson[pid] === serialized) return;
+                    this.lastPushedUsersJson[pid] = serialized;
+                    this.putNode(`${USERS_KEY}/${pid}`, u);
+                });
+            },
+
+            async clearAll() {
+                this.tree = {};
+                this.lastPushedUsersJson = {};
+                try {
+                    await fetch(`${this.dbUrl}/.json`, { method: 'DELETE' });
+                } catch (e) {}
+            }
+        };
+
+        const REGION_CITIES = {
+            '北部': ['台北市', '新北市', '基隆市', '桃園市', '新竹市', '新竹縣', '宜蘭縣'],
+            '中部': ['苗栗縣', '台中市', '彰化縣', '南投縣', '雲林縣'],
+            '南部': ['嘉義市', '嘉義縣', '台南市', '高雄市', '屏東縣'],
+            '東部': ['花蓮縣', '台東縣'],
+            '離島地區': ['澎湖縣', '金門縣', '連江縣'],
+            '海外地區': ['海外地區']
+        };
+
+        function inferRegionByCity(city) {
+            if (!city) return '';
+            for (const [reg, cities] of Object.entries(REGION_CITIES)) {
+                if (cities.includes(city)) return reg;
+            }
+            return '';
+        }
+
+        const FIELD_LABELS = {
+            gender: '性別', mbti: 'MBTI', ageRange: '年齡範圍', region: '居住地區', city: '居住縣市',
+            height: '身高', hasPet: '養寵物', smoking: '抽煙', drinking: '喝酒', lookingFor: '想找關係'
+        };
+
+        const BAN_FIELD_NAMES = {
+            ig: 'IG 帳號', nickname: '暱稱', bio: '自我介紹', all: '全部文字欄位'
+        };
+
+        let lastUsersSnapshot = '';
+        let lastReportsSnapshot = '';
+        let lastSystemSnapshot = '';
+
+        function getMondayOfWeek(dateObj = new Date()) {
+            const d = new Date(dateObj);
+            d.setHours(0, 0, 0, 0);
+            const day = d.getDay();
+            const diffToMonday = day === 0 ? -6 : 1 - day;
+            d.setDate(d.getDate() + diffToMonday);
+            return d;
+        }
+
+        function formatMonthDay(dateObj) {
+            return `${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
+        }
+
+        function getBatchScheduleInfo(batchNum) {
+            const b = Math.max(1, Number(batchNum || 1));
+            const baseMonday = new Date(2026, 10, 9, 0, 0, 0, 0); // 2026/11/09 (一) -> 第1屆11/11(三)、第1屆11/14(六)
+            const monday = new Date(baseMonday);
+            monday.setDate(baseMonday.getDate() + (b - 1) * 7);
+
+            const wed = new Date(monday);
+            wed.setDate(monday.getDate() + 2);
+
+            const sat = new Date(monday);
+            sat.setDate(monday.getDate() + 5);
+
+            const wedDateStr = formatMonthDay(wed);
+            const satDateStr = formatMonthDay(sat);
+            const wedLabel = `第${b}屆${wedDateStr}(三)`;
+            const satLabel = `第${b}屆${satDateStr}(六)`;
+
+            return {
+                batch: b,
+                batchPrefix: `第${b}屆`,
+                monday,
+                wed,
+                sat,
+                wedDateStr,
+                satDateStr,
+                wedLabel,
+                satLabel,
+                sessions: [wedLabel, satLabel]
+            };
+        }
+
+        function calcAutoBatchNumber(now = new Date()) {
+            const baseMonday = new Date(2026, 10, 9, 0, 0, 0, 0); // 2026/11/09 (一)
+            const currentMonday = getMondayOfWeek(now);
+            const weekMs = 7 * 24 * 60 * 60 * 1000;
+            const diffWeeks = Math.round((currentMonday.getTime() - baseMonday.getTime()) / weekMs);
+            return Math.max(1, 1 + diffWeeks);
+        }
+
+        function normalizeSessionLabel(sessionStr) {
+            const raw = String(sessionStr || '').trim();
+            if (!raw) return '';
+            const batchMatch = raw.match(/^第\s*(\d+)\s*屆/);
+            if (!batchMatch) return raw;
+            const b = Math.max(1, parseInt(batchMatch[1], 10));
+            const info = getBatchScheduleInfo(b);
+            if (/(三|星期三|週三)/.test(raw)) return info.wedLabel;
+            if (/(六|星期六|週六)/.test(raw)) return info.satLabel;
+            return info.batchPrefix;
+        }
+
+        function isSameSession(s1, s2) {
+            const n1 = normalizeSessionLabel(s1);
+            const n2 = normalizeSessionLabel(s2);
+            return n1 !== '' && n1 === n2;
+        }
+
+        function extractBatchLabel(sessionStr) {
+            const m = String(sessionStr || '').match(/^第\s*\d+\s*屆/);
+            return m ? m[0].replace(/\s+/g, '') : String(sessionStr || '');
+        }
+
+        let lastRenderedBatchNumber = calcAutoBatchNumber(new Date());
+
+        function getSystemConfig() {
+            const autoBatch = calcAutoBatchNumber(new Date());
+            const sys = JSON.parse(localStorage.getItem(SYSTEM_STATE_KEY) || '{}');
+            const batchOffset = Number(sys.batchOffset || 0);
+            const effectiveBatch = Math.max(1, autoBatch + batchOffset);
+            return {
+                currentBatch: effectiveBatch,
+                autoBatch: autoBatch,
+                batchOffset: batchOffset,
+                registrationOpen: sys.registrationOpen !== undefined ? Boolean(sys.registrationOpen) : true,
+                profileLocked: sys.profileLocked !== undefined ? Boolean(sys.profileLocked) : false,
+                genderLimitEnabled: sys.genderLimitEnabled !== undefined ? Boolean(sys.genderLimitEnabled) : false,
+                genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30
+            };
+        }
+
+        function setSystemConfig(patch) {
+            const current = getSystemConfig();
+            const updated = { ...current, ...patch };
+            localStorage.setItem(SYSTEM_STATE_KEY, JSON.stringify(updated));
+            CloudSync.putNode(SYSTEM_STATE_KEY, updated);
+            return updated;
+        }
+
+        function getCurrentBatch() {
+            return getSystemConfig().currentBatch;
+        }
+
+        function setCurrentBatch(num) {
+            const autoBatch = calcAutoBatchNumber(new Date());
+            setSystemConfig({ batchOffset: Number(num) - autoBatch });
+        }
+
+        function toggleRegistrationSwitch() {
+            const cfg = getSystemConfig();
+            const nextState = !cfg.registrationOpen;
+            setSystemConfig({ registrationOpen: nextState });
+            const label = nextState ? '🟢 開始報名' : '🚫 人數已滿 不可報名';
+            appendLog(`<span class="text-pink-300">[前台開關連動]</span> 活動報名狀態已切換為：<strong>${label}</strong>`);
+            renderAdminAll();
+        }
+
+        function toggleProfileLockSwitch() {
+            const cfg = getSystemConfig();
+            const nextLock = !cfg.profileLocked;
+            setSystemConfig({ profileLocked: nextLock });
+            const label = nextLock ? '🔒 不讓玩家填寫資料（所有欄位反灰鎖定，隱私設定仍可修改）' : '🟢 開放填寫個人資料';
+            appendLog(`<span class="text-amber-300">[前台開關連動]</span> 個人資料表單狀態已切換為：<strong>${label}</strong>`);
+            renderAdminAll();
+        }
+
+        function toggleGenderLimitSwitch() {
+            const cfg = getSystemConfig();
+            const inputVal = Math.max(1, parseInt(document.getElementById('genderLimitMaxInput').value, 10) || cfg.genderLimitMax || 30);
+            const nextEnabled = !cfg.genderLimitEnabled;
+            setSystemConfig({ genderLimitEnabled: nextEnabled, genderLimitMax: inputVal });
+            const label = nextEnabled
+                ? `🟢 已開啟男女生人數限制（男上限 ${inputVal} 人 / 女上限 ${inputVal} 人）`
+                : '⚪ 已關閉男女生人數限制';
+            appendLog(`<span class="text-pink-300">[男女生人數限制]</span> ${label}`);
+            renderAdminAll();
+        }
+
+        function updateGenderLimitMax() {
+            const rawVal = parseInt(document.getElementById('genderLimitMaxInput').value, 10);
+            const validMax = (!isNaN(rawVal) && rawVal >= 1) ? rawVal : 30;
+            document.getElementById('genderLimitMaxInput').value = validMax;
+            setSystemConfig({ genderLimitMax: validMax });
+            appendLog(`<span class="text-pink-300">[男女生人數上限更新]</span> 男 / 女各自上限人數已調整為 <strong>${validMax} 人</strong>。`);
+            renderAdminAll();
+        }
+
+        function getUsers() {
+            const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            let migrated = false;
+            users.forEach(u => {
+                if (Array.isArray(u.registeredSessions)) {
+                    const norm = Array.from(new Set(u.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+                    if (JSON.stringify(norm) !== JSON.stringify(u.registeredSessions)) {
+                        u.registeredSessions = norm;
+                        migrated = true;
+                    }
+                } else if (u.registeredSession) {
+                    u.registeredSessions = [normalizeSessionLabel(u.registeredSession)];
+                    migrated = true;
+                }
+                if (u.matchedSession) {
+                    const normMatched = normalizeSessionLabel(u.matchedSession);
+                    if (normMatched !== u.matchedSession) {
+                        u.matchedSession = normMatched;
+                        migrated = true;
+                    }
+                }
+                if (Array.isArray(u.matchedHistory)) {
+                    u.matchedHistory.forEach(h => {
+                        if (h.session) {
+                            const normHist = normalizeSessionLabel(h.session);
+                            if (normHist !== h.session) {
+                                h.session = normHist;
+                                migrated = true;
+                            }
+                        }
+                    });
+                }
+            });
+            if (migrated) {
+                localStorage.setItem(USERS_KEY, JSON.stringify(users));
+            }
+            return users;
+        }
+
+        function saveUsers(users) {
+            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+            CloudSync.syncUsersArray(users);
+            renderAdminAll();
+        }
+
+        function getMailbox() {
+            return JSON.parse(localStorage.getItem(MAILBOX_KEY) || '[]');
+        }
+
+        function saveMailbox(mails) {
+            localStorage.setItem(MAILBOX_KEY, JSON.stringify(mails));
+            renderAdminAll();
+        }
+
+        // ==================== 管理員發送信件／文字給前台玩家 ====================
+        function sendAdminMailboxMessage() {
+            const rawTarget = document.getElementById('mailTargetPlayerId').value.trim();
+            const title = document.getElementById('mailTitleInput').value.trim();
+            const content = document.getElementById('mailContentInput').value.trim();
+
+            if (!title || !content) {
+                alert('請輸入信件標題與文字內容！');
+                return;
+            }
+
+            const targetId = (!rawTarget || rawTarget.toUpperCase() === 'ALL') ? 'ALL' : rawTarget;
+            const users = getUsers();
+            const targetUser = targetId === 'ALL' ? null : users.find(u => String(u.id) === String(targetId));
+            const targetLabel = targetId === 'ALL'
+                ? '全體玩家'
+                : (targetUser ? `${targetUser.nickname} (ID:${targetId})` : `玩家 ID:${targetId}`);
+
+            const mails = getMailbox();
+            const newMail = {
+                id: 'MAIL_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
+                targetId: targetId,
+                targetLabel: targetLabel,
+                title: title,
+                content: content,
+                ts: Date.now(),
+                createdAt: new Date().toLocaleString('zh-TW')
+            };
+            mails.unshift(newMail);
+            saveMailbox(mails);
+            CloudSync.putNode(`${MAILBOX_KEY}/${newMail.id}`, newMail);
+
+            document.getElementById('mailTitleInput').value = '';
+            document.getElementById('mailContentInput').value = '';
+            appendLog(`<span class="text-pink-300">[信件已發送]</span> 已發送信件「<strong>${title}</strong>」給 <strong>${targetLabel}</strong>，前台玩家可於信件欄位點開查看。`);
+        }
+
+        function deleteMailboxMessage(mailId) {
+            saveMailbox(getMailbox().filter(m => m.id !== mailId));
+            CloudSync.deleteNode(`${MAILBOX_KEY}/${mailId}`);
+        }
+
+        function getBannedRules() {
+            const raw = localStorage.getItem(BANNED_RULES_KEY);
+            if (!raw) {
+                const initial = [{ id: 'BR_DEFAULT_1', field: 'ig', keyword: 'gak' }];
+                localStorage.setItem(BANNED_RULES_KEY, JSON.stringify(initial));
+                return initial;
+            }
+            return JSON.parse(raw);
+        }
+
+        function saveBannedRules(rules) {
+            localStorage.setItem(BANNED_RULES_KEY, JSON.stringify(rules));
+            CloudSync.putNode(BANNED_RULES_KEY, rules);
+            renderAdminAll();
+        }
+
+        function getForceRules() {
+            return JSON.parse(localStorage.getItem(FORCE_KEY) || '[]');
+        }
+
+        function saveForceRules(rules) {
+            localStorage.setItem(FORCE_KEY, JSON.stringify(rules));
+            CloudSync.putNode(FORCE_KEY, rules);
+            renderAdminAll();
+        }
+
+        function getReports() {
+            return JSON.parse(localStorage.getItem(REPORTS_KEY) || '[]');
+        }
+
+        function appendLog(html) {
+            const box = document.getElementById('matchLogs');
+            const div = document.createElement('div');
+            div.innerHTML = html;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function shuffle(arr) {
+            const copy = [...arr];
+            for (let i = copy.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [copy[i], copy[j]] = [copy[j], copy[i]];
+            }
+            return copy;
+        }
+
+        // ==================== 個別玩家「禁止配對 / 解除限制」控制 ====================
+        function togglePlayerMatchBan(playerId) {
+            const users = getUsers();
+            const target = users.find(u => String(u.id) === String(playerId));
+            if (!target) return;
+
+            target.isMatchBanned = !target.isMatchBanned;
+            saveUsers(users);
+
+            if (target.isMatchBanned) {
+                appendLog(`<span class="text-rose-400">[禁止配對]</span> 已將玩家 <strong>${target.nickname} (ID:${target.id})</strong> 設為「禁止配對」，該玩家即使在前台報名也不會被配對到。`);
+            } else {
+                appendLog(`<span class="text-emerald-400">[解除限制]</span> 已解除玩家 <strong>${target.nickname} (ID:${target.id})</strong> 的禁止配對限制，恢復正常參與配對。`);
+            }
+        }
+
+        // ==================== 個別玩家「禁止發話 / 解除禁言」控制 ====================
+        function togglePlayerChatBan(playerId) {
+            const users = getUsers();
+            const target = users.find(u => String(u.id) === String(playerId));
+            if (!target) return;
+
+            target.isChatBanned = !target.isChatBanned;
+            saveUsers(users);
+
+            if (target.isChatBanned) {
+                appendLog(`<span class="text-rose-400">[禁止發話]</span> 已將玩家 <strong>${target.nickname} (ID:${target.id})</strong> 設為「禁止發話」，前台聊天室已鎖定並顯示「請聯繫管理員」。`);
+            } else {
+                appendLog(`<span class="text-emerald-400">[解除禁言]</span> 已解除玩家 <strong>${target.nickname} (ID:${target.id})</strong> 的禁止發話限制，前台聊天室已恢復正常。`);
+            }
+        }
+
+        // ==================== 禁止字眼與警告帳號管理 ====================
+        function addBannedRule() {
+            const field = document.getElementById('banFieldSelect').value;
+            const keyword = document.getElementById('banKeywordInput').value.trim();
+            if (!keyword) {
+                alert('請輸入要禁止的字眼！');
+                return;
+            }
+            const rules = getBannedRules();
+            rules.push({ id: 'BR_' + Date.now(), field, keyword });
+            saveBannedRules(rules);
+            document.getElementById('banKeywordInput').value = '';
+            appendLog(`<span class="text-rose-300">[禁止規則新增]</span> 欄位「${BAN_FIELD_NAMES[field]}」禁止包含「<strong>${keyword}</strong>」，觸犯者將標記為警告帳號且不提供配對。`);
+        }
+
+        function removeBannedRule(ruleId) {
+            saveBannedRules(getBannedRules().filter(r => r.id !== ruleId));
+        }
+
+        // ==================== 刪除玩家整個資料 ====================
+        function deletePlayerEntirely(playerId) {
+            const users = getUsers();
+            const target = users.find(u => String(u.id) === String(playerId));
+            if (!target) return;
+
+            if (!confirm(`確定要將玩家「${target.nickname} (ID:${target.id})」的整個資料徹底刪除嗎？\n此動作無法復原，且會同步清除其配對關係。`)) {
+                return;
+            }
+
+            users.forEach(u => {
+                if (Array.isArray(u.matchedHistory)) {
+                    u.matchedHistory = u.matchedHistory.filter(h => String(h.partnerId) !== String(playerId));
+                }
+                if (String(u.matchedWithId) === String(playerId)) {
+                    u.matchedSession = null;
+                    u.matchedWithId = null;
+                    u.matchedWithName = null;
+                    u.matchedAt = null;
+                }
+            });
+
+            // 同步清空該玩家所有配對的聊天歷史紀錄
+            const allChats = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+            Object.keys(allChats).forEach(k => {
+                if (k.split('__').includes(String(playerId))) {
+                    delete allChats[k];
+                }
+            });
+            localStorage.setItem(CHATS_KEY, JSON.stringify(allChats));
+
+            const remaining = users.filter(u => String(u.id) !== String(playerId));
+            saveUsers(remaining);
+            appendLog(`<span class="text-rose-400">[刪除玩家資料]</span> 已將玩家 <strong>${target.nickname} (ID:${target.id})</strong> 的整個資料徹底刪除。`);
+        }
+
+        // ==================== 指定玩家 ID 一鍵填滿全部資料 ====================
+        function adminFillPlayerFullData() {
+            let targetId = document.getElementById('fillTargetPlayerId').value.trim();
+            const frontendState = JSON.parse(localStorage.getItem(FRONTEND_STORAGE_KEY) || '{}');
+            if (!targetId && frontendState.playerId) {
+                targetId = String(frontendState.playerId);
+                document.getElementById('fillTargetPlayerId').value = targetId;
+            }
+            if (!targetId) {
+                targetId = '10001';
+                document.getElementById('fillTargetPlayerId').value = targetId;
+            }
+
+            const isFemale = String(targetId).startsWith('2');
+            const fullDemoData = {
+                id: String(targetId),
+                nickname: isFemale ? `晴子_${targetId}` : `阿哲_${targetId}`,
+                ig: `@user_${targetId}`,
+                gender: isFemale ? '女' : '男',
+                targetGender: isFemale ? '男' : '女',
+                age: '26',
+                minAge: '22',
+                maxAge: '32',
+                region: '中部',
+                city: '台中市',
+                distance: '同縣市',
+                status: '上班族',
+                school: '逢甲大學',
+                job: '產品設計 / 行銷企劃',
+                height: isFemale ? '163' : '178',
+                minHeight: isFemale ? '170' : '155',
+                bmi: '18.5~24(正常區間)',
+                targetBmi: '都可以',
+                hasPet: '貓',
+                likesPets: '是',
+                smoking: '不會',
+                acceptSmoking: '不行',
+                drinking: '社交場合',
+                acceptDrinking: '都可以',
+                lookingFor: '認真交往',
+                relationshipStatus: '已經準備好認識新的人了（可以進入戀愛的狀態）',
+                appearancePriority: '有點在意，但個性優先(重要性：個性 7 外表 3)',
+                contactFrequency: '剛剛好：每天聊一下就好，有空就多聊一點',
+                connectWay: '先文字訊息聊天再說',
+                datingPace: '順其自然，看相處狀況',
+                loveExp: '1～2 任',
+                targetLoveExp: '不介意',
+                conflictStyle: '稍微緩一下再說',
+                personalSpace: '3（適中）',
+                dateCost: '輪流請',
+                attachmentSelf: '安全型：信任對方，能親密也能各自獨立',
+                attachmentTarget: '安全型',
+                mbti: isFemale ? 'INFJ' : 'ENFP',
+                mbtiEI: '都可以',
+                relationshipGoal: '中長期：認真交往，希望走得長久，未來再看是否結婚',
+                hobbies: ['美食咖啡廳', '電影', '旅行', '寵物'],
+                hobbiesOther: '',
+                oneSentence: '嗨！希望在七天的時間裡，能跟你分享彼此的生活點滴。',
+                bio: '平常喜歡週末探店喝咖啡、看電影與散步，個性溫和好相處，期待遇見頻率契合的你。',
+                idealPartner: '善良、情緒穩定、願意溝通分享日常的人。',
+                icebreakerQuestion: '你週末最喜歡去哪裡放鬆或探店？',
+                isWarned: false,
+                warningReason: ''
+            };
+
+            const users = getUsers();
+            const idx = users.findIndex(u => String(u.id) === String(targetId));
+            if (idx >= 0) {
+                users[idx] = { ...users[idx], ...fullDemoData };
+            } else {
+                users.push({ ...fullDemoData, isMatchBanned: false, isChatBanned: false, registeredSessions: [], exactMatchCriteria: {}, matchedHistory: [], matchedSession: null, matchedWithId: null, matchedWithName: null });
+            }
+            saveUsers(users);
+
+            localStorage.setItem('yuelao_test_event', JSON.stringify({
+                id: 'CMD_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
+                type: 'FILL_PLAYER_DATA',
+                targetPlayerId: String(targetId),
+                ts: Date.now()
+            }));
+
+            appendLog(`<span class="text-emerald-300">[一鍵填滿資料]</span> 已將玩家 ID:<strong>${targetId}</strong> 的全部個人資料填寫完成並同步至前台！`);
+        }
+
+        function adminLinkFriendCToPlayer() {
+            let targetId = document.getElementById('linkFriendCTargetId').value.trim();
+            const frontendState = JSON.parse(localStorage.getItem(FRONTEND_STORAGE_KEY) || '{}');
+            if (!targetId && frontendState.playerId) {
+                targetId = String(frontendState.playerId);
+                document.getElementById('linkFriendCTargetId').value = targetId;
+            }
+            if (!targetId) {
+                alert('請輸入需要聯動的玩家 ID！');
+                return;
+            }
+
+            triggerFrontendTestEvent('ADD_FRIEND_C', targetId);
+        }
+
+        function triggerFrontendTestEvent(type, targetPlayerId = '') {
+            // 若為調整天數測試指令，同步更新 yuelao_users 內所有已配對紀錄的 matchedAt，確保雙方分頁天數完全一致
+            if (type === 'MINUS_ONE_DAY' || type === 'EXPIRE_TO_ZERO_DAYS') {
+                const users = getUsers();
+                const dayMs = 24 * 60 * 60 * 1000;
+                const expiredTs = Date.now() - 8 * dayMs;
+                let updatedAny = false;
+
+                users.forEach(u => {
+                    if (Array.isArray(u.matchedHistory)) {
+                        u.matchedHistory.forEach(h => {
+                            h.matchedAt = (type === 'MINUS_ONE_DAY')
+                                ? ((h.matchedAt || Date.now()) - dayMs)
+                                : expiredTs;
+                            updatedAny = true;
+                        });
+                    }
+                    if (u.matchedWithId) {
+                        u.matchedAt = (type === 'MINUS_ONE_DAY')
+                            ? ((u.matchedAt || Date.now()) - dayMs)
+                            : expiredTs;
+                        updatedAny = true;
+                    }
+                });
+
+                if (updatedAny) {
+                    saveUsers(users);
+                }
+            }
+
+            localStorage.setItem('yuelao_test_event', JSON.stringify({
+                id: 'CMD_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
+                type: type,
+                targetPlayerId: targetPlayerId,
+                ts: Date.now()
+            }));
+            const targetDesc = targetPlayerId ? `（指定玩家 ID：${targetPlayerId}）` : '';
+            appendLog(`<span class="text-sky-300">[連動前台指令]</span> 已發送 <strong>${type}</strong>${targetDesc}，前台視窗將即時同步更新！`);
+        }
+
+        // ==================== 20:00 倒數計時與自動到點觸發配對 ====================
+        function checkAutoSchedule2000() {
+            const now = new Date();
+            let target = new Date(now);
+            target.setHours(20, 0, 0, 0);
+
+            if ((target.getDay() === 3 || target.getDay() === 6) && now >= target) {
+                target.setDate(target.getDate() + 1);
+            }
+            while (target.getDay() !== 3 && target.getDay() !== 6) {
+                target.setDate(target.getDate() + 1);
+            }
+
+            const diff = target - now;
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+            const mins = Math.floor((diff / (1000 * 60)) % 60);
+            const secs = Math.floor((diff / 1000) % 60);
+            const dayLabel = target.getDay() === 3 ? '週三' : '週六';
+            document.getElementById('adminCountdownText').textContent =
+                `距離下次 ${dayLabel} 20:00 自動配對：${days}天 ${String(hours).padStart(2, '0')}時 ${String(mins).padStart(2, '0')}分 ${String(secs).padStart(2, '0')}秒`;
+
+            const day = now.getDay();
+            if ((day === 3 || day === 6) && now.getHours() >= 20) {
+                const dateKey = `${now.toDateString()}_2000`;
+                const executedMap = JSON.parse(localStorage.getItem(AUTO_RUN_LOG_KEY) || '{}');
+                if (!executedMap[dateKey]) {
+                    executedMap[dateKey] = true;
+                    localStorage.setItem(AUTO_RUN_LOG_KEY, JSON.stringify(executedMap));
+                    CloudSync.putNode(AUTO_RUN_LOG_KEY, executedMap);
+                    const sched = getBatchScheduleInfo(getCurrentBatch());
+                    const autoSession = day === 3 ? sched.wedLabel : sched.satLabel;
+                    document.getElementById('adminSessionSelect').value = autoSession;
+                    runSessionMatch(true);
+                }
+            }
+        }
+
+        // ==================== 彈性解除已配對中的好友 ====================
+        function unmatchPlayerPair(userId, specificPartnerId = null) {
+            const users = getUsers();
+            const userA = users.find(u => String(u.id) === String(userId));
+            if (!userA) return;
+
+            const targetPartnerId = specificPartnerId || userA.matchedWithId;
+            if (!targetPartnerId) return;
+
+            const userB = users.find(u => String(u.id) === String(targetPartnerId));
+            const partnerName = userB ? `${userB.nickname} (ID:${userB.id})` : `ID:${targetPartnerId}`;
+
+            if (!confirm(`確定要彈性解除「${userA.nickname} (ID:${userA.id})」與「${partnerName}」的配對嗎？\n解除後兩邊對應的好友名單將同步移除。`)) {
+                return;
+            }
+
+            if (Array.isArray(userA.matchedHistory)) {
+                userA.matchedHistory = userA.matchedHistory.filter(h => String(h.partnerId) !== String(targetPartnerId));
+            }
+            if (String(userA.matchedWithId) === String(targetPartnerId)) {
+                const lastA = (userA.matchedHistory || [])[userA.matchedHistory.length - 1];
+                userA.matchedSession = lastA ? lastA.session : null;
+                userA.matchedWithId = lastA ? lastA.partnerId : null;
+                userA.matchedWithName = lastA ? lastA.partnerName : null;
+                userA.matchedAt = lastA ? lastA.matchedAt : null;
+            }
+
+            if (userB) {
+                if (Array.isArray(userB.matchedHistory)) {
+                    userB.matchedHistory = userB.matchedHistory.filter(h => String(h.partnerId) !== String(userId));
+                }
+                if (String(userB.matchedWithId) === String(userId)) {
+                    const lastB = (userB.matchedHistory || [])[userB.matchedHistory.length - 1];
+                    userB.matchedSession = lastB ? lastB.session : null;
+                    userB.matchedWithId = lastB ? lastB.partnerId : null;
+                    userB.matchedWithName = lastB ? lastB.partnerName : null;
+                    userB.matchedAt = lastB ? lastB.matchedAt : null;
+                }
+            }
+
+            // 直接解除配對時，清空雙方聊天歷史紀錄
+            const pairKey = [String(userId), String(targetPartnerId)].sort().join('__');
+            const allChats = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+            if (Object.prototype.hasOwnProperty.call(allChats, pairKey)) {
+                delete allChats[pairKey];
+                localStorage.setItem(CHATS_KEY, JSON.stringify(allChats));
+            }
+            CloudSync.deleteNode(`${CHATS_KEY}/${pairKey}`);
+
+            saveUsers(users);
+            appendLog(`<span class="text-amber-300">[彈性解除配對]</span> 管理員已解除 <strong>${userA.nickname}</strong> ⇄ <strong>${partnerName}</strong> 的好友關係並清空聊天紀錄，前台名單已同步更新。`);
+        }
+
+        // ==================== 單項條件比對（支援：先選地區配對全區所有縣市、或指定單一縣市） ====================
+        function checkSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
+            if (!candidate) return false;
+            if (key === 'region') {
+                if (seekerCriteria.city) {
+                    return candidate.city === seekerCriteria.city;
+                }
+                const candidateRegion = candidate.region || inferRegionByCity(candidate.city);
+                const regionCities = REGION_CITIES[desiredVal] || [];
+                return candidateRegion === desiredVal || regionCities.includes(candidate.city);
+            }
+            if (key === 'gender') {
+                const cid = String(candidate.id);
+                if (desiredVal === '女') return candidate.gender === '女' && cid.startsWith('2');
+                if (desiredVal === '男') return candidate.gender === '男' && cid.startsWith('1');
+                return candidate.gender === desiredVal;
+            }
+            if (key === 'ageRange') {
+                const age = Number(candidate.age);
+                if (!age) return false;
+                if (desiredVal === '18~22歲') return age >= 18 && age <= 22;
+                if (desiredVal === '23~26歲') return age >= 23 && age <= 26;
+                if (desiredVal === '27~30歲') return age >= 27 && age <= 30;
+                if (desiredVal === '31~35歲') return age >= 31 && age <= 35;
+                if (desiredVal === '36歲以上') return age >= 36;
+                return false;
+            }
+            if (key === 'height') {
+                const h = Number(candidate.height);
+                const minH = parseInt(desiredVal, 10);
+                return !isNaN(h) && !isNaN(minH) && h >= minH;
+            }
+            return candidate[key] === desiredVal;
+        }
+
+        function acceptsCandidate(seeker, candidate) {
+            const criteria = seeker.exactMatchCriteria || {};
+            const keys = Object.keys(criteria).filter(k => !(k === 'city' && criteria.region));
+            if (keys.length === 0) return true;
+            return keys.some(k => checkSingleCriterion(k, criteria[k], candidate, criteria));
+        }
+
+        function canPair(A, B) {
+            const alreadyFriends = (A.matchedHistory || []).some(h => String(h.partnerId) === String(B.id)) ||
+                                   String(A.matchedWithId) === String(B.id);
+            if (alreadyFriends) return false;
+            return acceptsCandidate(A, B) && acceptsCandidate(B, A);
+        }
+
+        function recordPairMatch(userA, userB, targetSession, nowTs) {
+            if (!Array.isArray(userA.matchedHistory)) userA.matchedHistory = [];
+            if (!Array.isArray(userB.matchedHistory)) userB.matchedHistory = [];
+
+            userA.matchedHistory.push({ session: targetSession, partnerId: String(userB.id), partnerName: userB.nickname, matchedAt: nowTs });
+            userA.matchedSession = targetSession;
+            userA.matchedWithId = String(userB.id);
+            userA.matchedWithName = userB.nickname;
+            userA.matchedAt = nowTs;
+
+            userB.matchedHistory.push({ session: targetSession, partnerId: String(userA.id), partnerName: userA.nickname, matchedAt: nowTs });
+            userB.matchedSession = targetSession;
+            userB.matchedWithId = String(userA.id);
+            userB.matchedWithName = userA.nickname;
+            userB.matchedAt = nowTs;
+        }
+
+        // ==================== 執行選定場次 20:00 配對 ====================
+        function runSessionMatch(isAuto = false) {
+            const targetSession = document.getElementById('adminSessionSelect').value;
+            const batchName = extractBatchLabel(targetSession);
+            const users = getUsers();
+            const rules = getForceRules();
+
+            const activeBatchRules = rules.filter(r => extractBatchLabel(r.batch) === batchName);
+            const reservedIds = new Set();
+            activeBatchRules.forEach(r => {
+                reservedIds.add(String(r.adminId));
+                reservedIds.add(String(r.targetId));
+            });
+
+            const pairedThisSessionIds = new Set();
+            let pairCount = 0;
+            const nowTs = Date.now();
+            const triggerLabel = isAuto ? '20:00 到點自動配對' : '20:00 配對執行';
+
+            appendLog(`<span class="text-yellow-300">[${triggerLabel}]</span> 場次：<strong>${targetSession}</strong>...`);
+
+            activeBatchRules.forEach(rule => {
+                if (rule.executed) return;
+                const adminUser = users.find(u => String(u.id) === String(rule.adminId));
+                const targetUser = users.find(u => String(u.id) === String(rule.targetId));
+
+                if (adminUser && targetUser && !adminUser.isMatchBanned && !targetUser.isMatchBanned) {
+                    recordPairMatch(adminUser, targetUser, targetSession, nowTs);
+                    pairedThisSessionIds.add(String(adminUser.id));
+                    pairedThisSessionIds.add(String(targetUser.id));
+                    rule.executed = true;
+                    pairCount++;
+
+                    appendLog(`<span class="text-rose-400">[秘密強制配對完成]</span> ID:<strong>${adminUser.id}</strong>（${adminUser.nickname}）⇄ ID:<strong>${targetUser.id}</strong>（${targetUser.nickname}）`);
+                }
+            });
+            saveForceRules(rules);
+
+            const eligiblePool = shuffle(users.filter(u => {
+                if (u.isWarned || u.isMatchBanned) return false;
+                const sessions = Array.isArray(u.registeredSessions)
+                    ? u.registeredSessions
+                    : (u.registeredSession ? [u.registeredSession] : []);
+                const alreadyMatchedThisSession = (u.matchedHistory || []).some(h => isSameSession(h.session, targetSession)) ||
+                                                  isSameSession(u.matchedSession, targetSession);
+                return sessions.some(s => isSameSession(s, targetSession)) &&
+                       !alreadyMatchedThisSession &&
+                       !pairedThisSessionIds.has(String(u.id)) &&
+                       !reservedIds.has(String(u.id));
+            }));
+
+            for (let i = 0; i < eligiblePool.length; i++) {
+                const A = eligiblePool[i];
+                if (pairedThisSessionIds.has(String(A.id))) continue;
+
+                const candidates = [];
+                for (let j = i + 1; j < eligiblePool.length; j++) {
+                    const B = eligiblePool[j];
+                    if (pairedThisSessionIds.has(String(B.id))) continue;
+                    if (canPair(A, B)) {
+                        candidates.push(B);
+                    }
+                }
+
+                if (candidates.length > 0) {
+                    const B = candidates[Math.floor(Math.random() * candidates.length)];
+                    pairedThisSessionIds.add(String(A.id));
+                    pairedThisSessionIds.add(String(B.id));
+                    recordPairMatch(A, B, targetSession, nowTs);
+                    pairCount++;
+
+                    if (pairCount <= 15) {
+                        appendLog(`<span class="text-emerald-400">[配對成功 #${pairCount}]</span> ID:${A.id}（${A.nickname}）⇄ ID:${B.id}（${B.nickname}）`);
+                    }
+                }
+            }
+
+            if (pairCount > 15) {
+                appendLog(`<span class="text-emerald-400">...（其餘成功配對明細已省略，共完成 ${pairCount} 對）</span>`);
+            }
+
+            const bannedSkippedCount = users.filter(u => {
+                const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);
+                return sessions.some(s => isSameSession(s, targetSession)) && u.isMatchBanned;
+            }).length;
+
+            appendLog(`<span class="text-pink-300">[結算完成]</span> 本場次共配對成功 <strong>${pairCount} 對</strong>${bannedSkippedCount > 0 ? `（另有 ${bannedSkippedCount} 名已報名玩家因設定「禁止配對」而未配對）` : ''}。`);
+            saveUsers(users);
+        }
+
+        // ==================== 秘密強制配對管理 ====================
+        function addSecretForceMatch() {
+            const adminId = document.getElementById('forceAdminId').value.trim();
+            const targetId = document.getElementById('forceTargetId').value.trim();
+            const targetBatch = document.getElementById('forceBatchSelect').value;
+
+            if (!adminId || !targetId) {
+                alert('請輸入「我的帳號 ID」與「強制配對對象 ID」！');
+                return;
+            }
+            if (adminId === targetId) {
+                alert('兩個 ID 不能相同！');
+                return;
+            }
+
+            const rules = getForceRules();
+            const filtered = rules.filter(r => !(r.batch === targetBatch && (r.targetId === targetId || r.adminId === adminId)));
+            filtered.push({
+                id: 'FM_' + Date.now(),
+                adminId: String(adminId),
+                targetId: String(targetId),
+                batch: targetBatch,
+                executed: false,
+                createdAt: new Date().toLocaleString('zh-TW')
+            });
+
+            saveForceRules(filtered);
+            appendLog(`<span class="text-rose-300">[秘密通道已鎖定]</span> 已設定【${targetBatch}】管理員 ID:<strong>${adminId}</strong> ⇄ 對象 ID:<strong>${targetId}</strong> 強制配對。`);
+        }
+
+        function removeForceRule(ruleId) {
+            saveForceRules(getForceRules().filter(r => r.id !== ruleId));
+        }
+
+        function advanceToNextBatch() {
+            const nextBatch = getCurrentBatch() + 1;
+            setCurrentBatch(nextBatch);
+            const nextInfo = getBatchScheduleInfo(nextBatch);
+            appendLog(`<span class="text-amber-300">[屆數刷新]</span> 系統已推進至 <strong>${nextInfo.batchPrefix}（${nextInfo.wedLabel} / ${nextInfo.satLabel}）</strong>！`);
+            renderAdminAll();
+        }
+
+        // ==================== 測試資料匯入 ====================
+        function getSelectedAdminSession() {
+            const sel = document.getElementById('adminSessionSelect');
+            if (sel && sel.value) return normalizeSessionLabel(sel.value);
+            return getBatchScheduleInfo(getCurrentBatch()).wedLabel;
+        }
+
+        function seedSampleABCDE() {
+            const session = getSelectedAdminSession();
+            const users = getUsers();
+
+            const sampleList = [
+                { id: '10001', nickname: 'A男生 (選中部全區)', gender: '男', targetGender: '女', age: 26, region: '中部', city: '台中市', mbti: 'ENFP', registeredSessions: [session], exactMatchCriteria: { region: '中部' } },
+                { id: '10002', nickname: 'B男生 (選性別:女)', gender: '男', targetGender: '女', age: 27, region: '中部', city: '彰化縣', mbti: 'ISTJ', registeredSessions: [session], exactMatchCriteria: { gender: '女' } },
+                { id: '10003', nickname: 'C男生 (隨機不選)', gender: '男', targetGender: '女', age: 25, region: '北部', city: '台北市', mbti: 'INTP', registeredSessions: [session], exactMatchCriteria: {} },
+                { id: '20001', nickname: 'D女生 (南投/中部)', gender: '女', targetGender: '男', age: 24, region: '中部', city: '南投縣', mbti: 'INFJ', registeredSessions: [session], exactMatchCriteria: {} },
+                { id: '20002', nickname: 'E女生 (高雄/南部)', gender: '女', targetGender: '男', age: 25, region: '南部', city: '高雄市', mbti: 'ENFP', registeredSessions: [session], exactMatchCriteria: {} }
+            ];
+
+            sampleList.forEach(s => {
+                const idx = users.findIndex(u => String(u.id) === s.id);
+                const fullObj = { ...s, ig: `@user_${s.id}`, isWarned: false, isMatchBanned: false, isChatBanned: false, matchedHistory: [], matchedSession: null, matchedWithId: null, matchedWithName: null, matchedAt: null };
+                if (idx >= 0) users[idx] = fullObj;
+                else users.push(fullObj);
+            });
+
+            saveUsers(users);
+            appendLog(`<span class="text-pink-300">[匯入 A~E 完成]</span> 已加入 A/B/C 三位男生與 D/E 兩位女生報名「${session}」。`);
+        }
+
+        function seedAdminAndXiaomeiExample() {
+            const session = getSelectedAdminSession();
+            const users = getUsers();
+            const upsert = (obj) => {
+                const idx = users.findIndex(u => String(u.id) === String(obj.id));
+                if (idx >= 0) users[idx] = { ...users[idx], ...obj };
+                else users.push(obj);
+            };
+            upsert({ id: '1', nickname: '管理員 (我)', ig: '@admin_01', gender: '男', targetGender: '女', age: 27, region: '中部', city: '台中市', isWarned: false, isMatchBanned: false, isChatBanned: false, matchedHistory: [], registeredSessions: [session], exactMatchCriteria: {}, matchedSession: null, matchedWithId: null, matchedWithName: null });
+            upsert({ id: '2', nickname: '小美', ig: '@xiaomei_02', gender: '女', targetGender: '男', age: 24, region: '中部', city: '台中市', isWarned: false, isMatchBanned: false, isChatBanned: false, matchedHistory: [], registeredSessions: [session], exactMatchCriteria: {}, matchedSession: null, matchedWithId: null, matchedWithName: null });
+            saveUsers(users);
+            document.getElementById('forceAdminId').value = '1';
+            document.getElementById('forceTargetId').value = '2';
+        }
+
+        function seedAsymmetricPool() {
+            const session = getSelectedAdminSession();
+            const users = getUsers();
+
+            for (let i = 1; i <= 100; i++) {
+                const id = String(10000 + i);
+                if (!users.some(u => String(u.id) === id)) {
+                    users.push({ id, nickname: `男玩家_${id}`, ig: `@boy_${id}`, gender: '男', targetGender: '女', age: 25, region: '中部', city: '台中市', isWarned: false, isMatchBanned: false, isChatBanned: false, matchedHistory: [], registeredSessions: [session], exactMatchCriteria: { gender: '女' }, matchedSession: null, matchedWithId: null, matchedWithName: null });
+                }
+            }
+            for (let j = 1; j <= 10; j++) {
+                const id = String(20000 + j);
+                if (!users.some(u => String(u.id) === id)) {
+                    users.push({ id, nickname: `女玩家_${id}`, ig: `@girl_${id}`, gender: '女', targetGender: '男', age: 24, region: '中部', city: '台中市', isWarned: false, isMatchBanned: false, isChatBanned: false, matchedHistory: [], registeredSessions: [session], exactMatchCriteria: { gender: '男' }, matchedSession: null, matchedWithId: null, matchedWithName: null });
+                }
+            }
+
+            saveUsers(users);
+            appendLog(`<span class="text-pink-300">[測試池建立]</span> 已加入 100 名男生與 10 名女生報名「${session}」，執行配對後將只會成功 10 對！`);
+        }
+
+        function viewPlayerDetail(playerId) {
+            const u = getUsers().find(item => String(item.id) === String(playerId));
+            if (!u) return;
+            document.getElementById('detailModalTitle').textContent = `🆔 玩家 ID：${u.id}（${u.nickname}）完整資料記錄`;
+            const entries = Object.entries(u).filter(([k]) => k !== 'privacy');
+            document.getElementById('detailModalBody').innerHTML = entries.map(([k, v]) => `
+                <div class="p-2.5 rounded-xl bg-pink-50/50 border border-pink-100">
+                    <span class="text-[11px] text-[#c96a7b] font-mono block">${k}</span>
+                    <span class="font-semibold break-all">${typeof v === 'object' && v !== null ? JSON.stringify(v) : (v ?? '未填')}</span>
+                </div>
+            `).join('');
+            document.getElementById('playerDetailModal').classList.remove('hidden');
+        }
+
+        function toggleReportStatus(reportId) {
+            const reports = getReports();
+            const target = reports.find(r => r.id === reportId);
+            if (target) {
+                target.status = target.status === '待處理' ? '已解決' : '待處理';
+                localStorage.setItem(REPORTS_KEY, JSON.stringify(reports));
+                CloudSync.putNode(`${REPORTS_KEY}/${target.id}`, target);
+                renderAdminAll();
+            }
+        }
+
+        function formatCriteriaHtml(criteria) {
+            const cKeys = Object.keys(criteria || {}).filter(k => !(k === 'city' && criteria.region));
+            if (cKeys.length === 0) {
+                return '<span class="text-gray-400">未選（不限制隨機配對）</span>';
+            }
+            return cKeys.map(k => {
+                if (k === 'region') {
+                    const desc = criteria.city ? `${criteria.region}（${criteria.city}）` : `${criteria.region}（全區皆可）`;
+                    return `居住地區：<strong>${desc}</strong>`;
+                }
+                return `${FIELD_LABELS[k] || k}：<strong>${criteria[k]}</strong>`;
+            }).join(' <span class="text-pink-400">OR</span> ');
+        }
+
+        function renderAdminAll() {
+            lastUsersSnapshot = localStorage.getItem(USERS_KEY) || '';
+            lastReportsSnapshot = localStorage.getItem(REPORTS_KEY) || '';
+            lastSystemSnapshot = localStorage.getItem(SYSTEM_STATE_KEY) || '';
+
+            const sysCfg = getSystemConfig();
+            const batch = sysCfg.currentBatch;
+            lastRenderedBatchNumber = batch;
+            const currentSched = getBatchScheduleInfo(batch);
+            const users = getUsers();
+            const reports = getReports();
+
+            const maleCount = users.filter(u => u && u.id && u.gender === '男').length;
+            const femaleCount = users.filter(u => u && u.id && u.gender === '女').length;
+
+            document.getElementById('adminCurrentBatchBadge').textContent =
+                `目前系統：${currentSched.batchPrefix}（${currentSched.wedDateStr}(三) / ${currentSched.satDateStr}(六)）`;
+
+            const regDesc = document.getElementById('regSwitchDesc');
+            const regBtn = document.getElementById('toggleRegSwitchBtn');
+            if (sysCfg.registrationOpen) {
+                regDesc.className = 'text-[11px] text-emerald-600 font-semibold mt-0.5';
+                regDesc.textContent = '目前狀態：🟢 開始報名（玩家可點擊報名）';
+                regBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-rose-600 text-white hover:bg-rose-700';
+                regBtn.textContent = '切換為「人數已滿 不可報名」';
+            } else {
+                regDesc.className = 'text-[11px] text-rose-600 font-semibold mt-0.5';
+                regDesc.textContent = '目前狀態：🚫 人數已滿 不可報名（前台已鎖定報名）';
+                regBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-emerald-600 text-white hover:bg-emerald-700';
+                regBtn.textContent = '切換為「開始報名」';
+            }
+
+            const lockDesc = document.getElementById('profileLockSwitchDesc');
+            const lockBtn = document.getElementById('toggleProfileLockBtn');
+            if (!sysCfg.profileLocked) {
+                lockDesc.className = 'text-[11px] text-emerald-600 font-semibold mt-0.5';
+                lockDesc.textContent = '目前狀態：🟢 開放填寫（玩家可編輯與保存資料）';
+                lockBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-amber-600 text-white hover:bg-amber-700';
+                lockBtn.textContent = '切換為「不讓玩家填寫資料」';
+            } else {
+                lockDesc.className = 'text-[11px] text-amber-700 font-semibold mt-0.5';
+                lockDesc.textContent = '目前狀態：🔒 不讓玩家填寫資料（所有欄位反灰鎖定，隱私設定仍可修改）';
+                lockBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-emerald-600 text-white hover:bg-emerald-700';
+                lockBtn.textContent = '解除鎖定（開放填寫資料）';
+            }
+
+            // 男女生人數限制開關狀態渲染
+            const limitInput = document.getElementById('genderLimitMaxInput');
+            if (limitInput && document.activeElement !== limitInput) {
+                limitInput.value = sysCfg.genderLimitMax;
+            }
+            const liveCountBadge = document.getElementById('genderQuotaLiveCount');
+            if (liveCountBadge) {
+                liveCountBadge.textContent = `目前玩家人數：男生 ${maleCount} 人 ／ 女生 ${femaleCount} 人`;
+            }
+            const genderLimitDesc = document.getElementById('genderLimitSwitchDesc');
+            const genderLimitBtn = document.getElementById('toggleGenderLimitBtn');
+            if (sysCfg.genderLimitEnabled) {
+                const max = sysCfg.genderLimitMax;
+                const maleStatus = maleCount >= max ? '（已滿）' : '';
+                const femaleStatus = femaleCount >= max ? '（已滿）' : '';
+                genderLimitDesc.className = 'text-[11px] text-emerald-600 font-semibold';
+                genderLimitDesc.textContent = `目前狀態：🟢 已開啟限制（男上限 ${max} 人${maleStatus} ／ 女上限 ${max} 人${femaleStatus}）`;
+                genderLimitBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition bg-gray-700 text-white hover:bg-gray-800';
+                genderLimitBtn.textContent = '關閉「男女生人數限制」';
+            } else {
+                genderLimitDesc.className = 'text-[11px] text-gray-500 font-semibold';
+                genderLimitDesc.textContent = '目前狀態：⚪ 未開啟（不限制男女生人數）';
+                genderLimitBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition bg-[#c96a7b] text-white hover:opacity-95';
+                genderLimitBtn.textContent = '開啟「男女生人數限制」';
+            }
+
+            // 渲染後台已發送信件列表
+            const sentMails = getMailbox();
+            const mailListBox = document.getElementById('adminSentMailsList');
+            if (sentMails.length === 0) {
+                mailListBox.innerHTML = `<p class="text-xs text-gray-400">尚未發送任何信件給前台玩家。</p>`;
+            } else {
+                mailListBox.innerHTML = sentMails.slice(0, 10).map(m => `
+                    <div class="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-white border border-pink-200 text-xs">
+                        <div class="min-w-0 flex-1">
+                            <span class="px-2 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold mr-1.5">收件：${m.targetLabel || m.targetId}</span>
+                            <strong class="text-[#5e464a]">${m.title}</strong>
+                            <span class="text-gray-500 ml-1.5">— ${m.content}</span>
+                            <span class="text-[10px] text-gray-400 ml-2">(${m.createdAt})</span>
+                        </div>
+                        <button onclick="deleteMailboxMessage('${m.id}')" class="text-rose-500 hover:underline shrink-0">收回刪除</button>
+                    </div>
+                `).join('');
+            }
+
+            let maxUserBatch = 1;
+            users.forEach(u => {
+                (u.registeredSessions || []).forEach(s => {
+                    const m = String(s || '').match(/^第\s*(\d+)\s*屆/);
+                    if (m) maxUserBatch = Math.max(maxUserBatch, parseInt(m[1], 10));
+                });
+            });
+            const maxDisplayBatch = Math.max(4, batch + 2, maxUserBatch);
+            const sessionSel = document.getElementById('adminSessionSelect');
+            const prevSessionVal = sessionSel.value;
+            const sessionOpts = [];
+            for (let b = 1; b <= maxDisplayBatch; b++) {
+                const info = getBatchScheduleInfo(b);
+                sessionOpts.push(info.wedLabel, info.satLabel);
+            }
+            sessionSel.innerHTML = sessionOpts.map(s => `<option value="${s}">${s}</option>`).join('');
+            if (sessionOpts.includes(prevSessionVal)) {
+                sessionSel.value = prevSessionVal;
+            } else {
+                const nowObj = new Date();
+                const isAfterWed20 = (nowObj.getDay() > 3) || (nowObj.getDay() === 3 && nowObj.getHours() >= 20);
+                sessionSel.value = isAfterWed20 ? currentSched.satLabel : currentSched.wedLabel;
+            }
+
+            const forceBatchSel = document.getElementById('forceBatchSelect');
+            const prevForceBatch = forceBatchSel.value;
+            const batchOpts = [];
+            for (let b = 1; b <= maxDisplayBatch; b++) {
+                const info = getBatchScheduleInfo(b);
+                batchOpts.push({
+                    value: info.batchPrefix,
+                    label: `${info.batchPrefix}（${info.wedDateStr}(三)、${info.satDateStr}(六)）`
+                });
+            }
+            forceBatchSel.innerHTML = batchOpts.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('');
+            if (batchOpts.some(o => o.value === prevForceBatch)) forceBatchSel.value = prevForceBatch;
+            else forceBatchSel.value = currentSched.batchPrefix;
+
+            const bannedRules = getBannedRules();
+            document.getElementById('bannedRulesList').innerHTML = bannedRules.map(r => `
+                <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-xs text-rose-800 font-semibold">
+                    <span>[${BAN_FIELD_NAMES[r.field] || r.field}] 禁止「${r.keyword}」</span>
+                    <button onclick="removeBannedRule('${r.id}')" class="text-rose-500 hover:text-rose-800 font-bold">✕</button>
+                </span>
+            `).join('');
+
+            const rules = getForceRules();
+            const rulesBox = document.getElementById('forceMatchRulesList');
+            if (rules.length === 0) {
+                rulesBox.innerHTML = `<p class="text-xs text-gray-400">目前尚未設定秘密強制配對規則。</p>`;
+            } else {
+                rulesBox.innerHTML = rules.map(r => `
+                    <div class="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-white border border-rose-200 text-xs">
+                        <div>
+                            <span class="px-2 py-0.5 rounded bg-rose-100 text-[#8f4452] font-bold mr-2">${r.batch}</span>
+                            <span>管理員 ID: <strong>${r.adminId}</strong> ⇄ 強制配對對象 ID: <strong>${r.targetId}</strong></span>
+                            <span class="ml-2 text-[11px] ${r.executed ? 'text-emerald-600 font-bold' : 'text-amber-600'}">
+                                ${r.executed ? '（✓ 已無痕配對完成）' : '（🔒 已鎖定）'}
+                            </span>
+                        </div>
+                        <button onclick="removeForceRule('${r.id}')" class="text-rose-500 hover:underline">移除規則</button>
+                    </div>
+                `).join('');
+            }
+
+            document.getElementById('statTotal').textContent = `${users.length} 人`;
+            document.getElementById('statRegistered').textContent = `${users.filter(u => (u.registeredSessions && u.registeredSessions.length > 0) || u.registeredSession).length} 人`;
+            const totalHistoryLinks = users.reduce((acc, u) => acc + (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0 ? u.matchedHistory.length : (u.matchedWithId ? 1 : 0)), 0);
+            document.getElementById('statMatched').textContent = `${Math.floor(totalHistoryLinks / 2)} 對`;
+            document.getElementById('statReports').textContent = `${reports.length} 則`;
+
+            const filterSelect = document.getElementById('filterBatchRoster');
+            const prevFilterVal = filterSelect.value || 'all';
+            const dynamicFilterOpts = [
+                { value: 'all', label: '顯示全部玩家' }
+            ];
+            for (let b = 1; b <= maxDisplayBatch; b++) {
+                const info = getBatchScheduleInfo(b);
+                dynamicFilterOpts.push({
+                    value: `batch:${b}`,
+                    label: `只看【${info.wedLabel} / ${info.satLabel}】報名名單`
+                });
+            }
+            dynamicFilterOpts.push(
+                { value: 'matched', label: '只看已配對中（可彈性解除）' },
+                { value: 'banned', label: '只看已禁止配對玩家' },
+                { value: 'chatBanned', label: '只看禁止發話玩家' },
+                { value: 'warned', label: '只看警告帳號' },
+                { value: 'unmatched', label: '只看未配對' }
+            );
+            filterSelect.innerHTML = dynamicFilterOpts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+            if (dynamicFilterOpts.some(o => o.value === prevFilterVal)) {
+                filterSelect.value = prevFilterVal;
+            }
+
+            const rosterFilter = filterSelect.value;
+            const filteredUsers = users.filter(u => {
+                const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);
+                const hasAnyMatch = (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0) || !!u.matchedWithId;
+                if (rosterFilter === 'all') return true;
+                if (rosterFilter === 'matched') return hasAnyMatch;
+                if (rosterFilter === 'banned') return !!u.isMatchBanned;
+                if (rosterFilter === 'chatBanned') return !!u.isChatBanned;
+                if (rosterFilter === 'warned') return !!u.isWarned;
+                if (rosterFilter === 'unmatched') return !hasAnyMatch && !u.isWarned;
+                if (rosterFilter.startsWith('batch:')) {
+                    const targetPrefix = `第${rosterFilter.split(':')[1]}屆`;
+                    return sessions.some(s => extractBatchLabel(s) === targetPrefix);
+                }
+                return sessions.some(s => s.startsWith(rosterFilter));
+            });
+
+            const pBody = document.getElementById('playersTableBody');
+            if (filteredUsers.length === 0) {
+                pBody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-gray-400">尚無符合篩選條件的玩家資料。</td></tr>`;
+            } else {
+                pBody.innerHTML = filteredUsers.slice(0, 150).map(u => {
+                    const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);
+                    const criteriaHtml = formatCriteriaHtml(u.exactMatchCriteria || {});
+                    const displayRegion = u.region || inferRegionByCity(u.city);
+                    const locationLabel = displayRegion ? `${displayRegion}・${u.city || '-'}` : (u.city || '-');
+
+                    const historyList = Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0
+                        ? u.matchedHistory
+                        : (u.matchedWithId ? [{ partnerId: u.matchedWithId, partnerName: u.matchedWithName }] : []);
+
+                    let statusParts = [];
+                    if (u.isMatchBanned) {
+                        statusParts.push(`<span class="inline-block px-2.5 py-0.5 rounded-full bg-rose-600 text-white font-bold">🚫 禁止配對中</span>`);
+                    }
+                    if (u.isChatBanned) {
+                        statusParts.push(`<span class="inline-block px-2.5 py-0.5 rounded-full bg-amber-600 text-white font-bold">🔇 禁止發話中</span>`);
+                    }
+                    if (u.isWarned) {
+                        statusParts.push(`<span class="inline-block px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-bold">⚠️ 警告帳號</span>`);
+                    }
+                    if (historyList.length > 0) {
+                        historyList.forEach(h => {
+                            statusParts.push(`
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">
+                                    💘 ${h.partnerName} (ID:${h.partnerId})
+                                    <button onclick="unmatchPlayerPair('${u.id}', '${h.partnerId}')" title="解除此配對" class="text-rose-600 hover:text-rose-900 font-bold ml-0.5">✕</button>
+                                </span>
+                            `);
+                        });
+                    }
+                    if (statusParts.length === 0) {
+                        statusParts.push(`<span class="text-gray-400">未配對</span>`);
+                    }
+
+                    return `
+                        <tr class="hover:bg-pink-50/30">
+                            <td class="p-3.5 font-mono font-bold text-[#8f4452]">${u.id}</td>
+                            <td class="p-3.5">
+                                <div class="font-bold">${u.nickname}</div>
+                                <div class="text-[11px] text-gray-400">${u.ig || ''} ・ ${u.age || '-'}歲</div>
+                            </td>
+                            <td class="p-3.5 text-xs">${u.gender} ・ ${u.mbti || '-'} ・ ${locationLabel}</td>
+                            <td class="p-3.5 text-xs">
+                                ${sessions.length > 0
+                                    ? sessions.map(s => `<span class="inline-block px-2 py-0.5 mr-1 mb-1 rounded-full bg-pink-100 text-[#8f4452] font-semibold">${s}</span>`).join('')
+                                    : `<span class="px-2.5 py-1 rounded-full bg-gray-100 text-gray-400">未報名</span>`
+                                }
+                            </td>
+                            <td class="p-3.5 text-xs">${criteriaHtml}</td>
+                            <td class="p-3.5 text-xs space-y-1">${statusParts.join('<br>')}</td>
+                            <td class="p-3.5 text-xs space-x-1 whitespace-nowrap">
+                                <button onclick="viewPlayerDetail('${u.id}')" class="px-2 py-1 rounded-lg border border-pink-200 text-[#8f4452] hover:bg-pink-50">詳情</button>
+                                <button onclick="togglePlayerMatchBan('${u.id}')" class="px-2 py-1 rounded-lg font-semibold text-white ${u.isMatchBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-700 hover:bg-gray-800'}">
+                                    ${u.isMatchBanned ? '✅ 解除配對限制' : '🚫 禁止配對'}
+                                </button>
+                                <button onclick="togglePlayerChatBan('${u.id}')" class="px-2 py-1 rounded-lg font-semibold text-white ${u.isChatBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}">
+                                    ${u.isChatBanned ? '🔊 解除禁言' : '🔇 禁止發話'}
+                                </button>
+                                <button onclick="deletePlayerEntirely('${u.id}')" class="px-2 py-1 rounded-lg bg-rose-600 text-white font-semibold hover:bg-rose-700">🗑️ 刪除資料</button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            const rBody = document.getElementById('reportsTableBody');
+            if (reports.length === 0) {
+                rBody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-gray-400">目前尚無玩家提交問題回報。</td></tr>`;
+            } else {
+                rBody.innerHTML = reports.map(r => `
+                    <tr class="hover:bg-pink-50/30">
+                        <td class="p-3.5 text-xs">
+                            <div class="font-bold text-[#8f4452]">${r.id}</div>
+                            <div class="text-gray-400">${r.createdAt}</div>
+                        </td>
+                        <td class="p-3.5 text-xs font-medium">${r.category}</td>
+                        <td class="p-3.5 text-xs">${r.contact}</td>
+                        <td class="p-3.5 text-xs text-gray-700 max-w-md">${r.content}</td>
+                        <td class="p-3.5 text-xs">
+                            <button onclick="toggleReportStatus('${r.id}')" class="px-2.5 py-1 rounded-full font-semibold ${r.status === '已解決' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}">
+                                ${r.status}
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        function clearAllAdminData() {
+            if (confirm('確定要清空所有玩家、秘密規則、信件與問題回報資料嗎？')) {
+                localStorage.removeItem(USERS_KEY);
+                localStorage.removeItem(REPORTS_KEY);
+                localStorage.removeItem(FORCE_KEY);
+                localStorage.removeItem('yuelao_id_counters');
+                localStorage.removeItem(SYSTEM_STATE_KEY);
+                localStorage.removeItem(AUTO_RUN_LOG_KEY);
+                localStorage.removeItem(BANNED_RULES_KEY);
+                localStorage.removeItem(MAILBOX_KEY);
+                localStorage.removeItem(CHATS_KEY);
+                CloudSync.clearAll();
+                document.getElementById('matchLogs').innerHTML = '<div class="text-pink-300/70">[系統就緒] 資料已清空...</div>';
+                renderAdminAll();
+            }
+        }
+
+        const ADMIN_AUTH_KEY = 'yuelao_admin_auth';
+        const VALID_ADMIN_USER = 'roy';
+        const VALID_ADMIN_PASS = 'tff456';
+
+        function isAdminAuthenticated() {
+            return sessionStorage.getItem(ADMIN_AUTH_KEY) === 'roy_authenticated';
+        }
+
+        async function unlockAdminUI() {
+            document.getElementById('adminLoginOverlay').classList.add('hidden');
+            document.getElementById('adminMainContent').classList.remove('hidden');
+            await CloudSync.init(() => {
+                renderAdminAll();
+            });
+            checkAutoSchedule2000();
+            renderAdminAll();
+        }
+
+        function handleAdminLogin(e) {
+            e.preventDefault();
+            const acc = document.getElementById('adminLoginAccount').value.trim();
+            const pwd = document.getElementById('adminLoginPassword').value;
+            const errBox = document.getElementById('adminLoginError');
+
+            if (acc === VALID_ADMIN_USER && pwd === VALID_ADMIN_PASS) {
+                errBox.classList.add('hidden');
+                sessionStorage.setItem(ADMIN_AUTH_KEY, 'roy_authenticated');
+                unlockAdminUI();
+            } else {
+                errBox.classList.remove('hidden');
+                document.getElementById('adminLoginPassword').value = '';
+                document.getElementById('adminLoginPassword').focus();
+            }
+        }
+
+        function logoutAdmin() {
+            sessionStorage.removeItem(ADMIN_AUTH_KEY);
+            document.getElementById('adminMainContent').classList.add('hidden');
+            document.getElementById('playersTableBody').innerHTML = '';
+            document.getElementById('reportsTableBody').innerHTML = '';
+            document.getElementById('adminLoginAccount').value = '';
+            document.getElementById('adminLoginPassword').value = '';
+            document.getElementById('adminLoginError').classList.add('hidden');
+            document.getElementById('adminLoginOverlay').classList.remove('hidden');
+        }
+
+        function pollSharedStorageChanges() {
+            if (!isAdminAuthenticated()) return;
+            const curUsers = localStorage.getItem(USERS_KEY) || '';
+            const curReports = localStorage.getItem(REPORTS_KEY) || '';
+            const curSys = localStorage.getItem(SYSTEM_STATE_KEY) || '';
+            const curBatch = getCurrentBatch();
+            if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curBatch !== lastRenderedBatchNumber) {
+                renderAdminAll();
+            }
+        }
+
+        window.addEventListener('storage', (e) => {
+            if (!isAdminAuthenticated()) return;
+            if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY].includes(e.key)) {
+                renderAdminAll();
+            }
+        });
+
+        window.addEventListener('focus', pollSharedStorageChanges);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) pollSharedStorageChanges();
+        });
+
+        setInterval(() => {
+            if (!isAdminAuthenticated()) return;
+            checkAutoSchedule2000();
+            pollSharedStorageChanges();
+        }, 1000);
+
+        if (isAdminAuthenticated()) {
+            unlockAdminUI();
+        }
+    </script>
+</body>
+</html>
