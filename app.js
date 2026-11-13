@@ -986,7 +986,15 @@ window.onMultiSelectOtherInput = function(key) {
 
 // 個人隱私開放或隱藏不受資料鎖定限制
 window.setFieldPrivacy = function(key, mode) {
-    if (key === 'gender' || key === 'icebreakerQuestion' || key === 'ig') return;
+    let isLockedPrivacy = (key === 'gender' || key === 'icebreakerQuestion' || key === 'ig');
+    FIELD_SECTIONS.forEach(sec => {
+        sec.fields.forEach(f => {
+            if (f.key === key && (f.alwaysOpen || f.autoOpenAfter7Days)) {
+                isLockedPrivacy = true;
+            }
+        });
+    });
+    if (isLockedPrivacy) return;
     appState.privacy[key] = mode;
     Store.save(appState);
 
@@ -1969,8 +1977,12 @@ function exportBackupCode() {
                     appState.profile.region = inferRegionByCity(appState.profile.city);
                 }
                 appState.privacy = { ...appState.privacy, ...(restored.privacy || {}) };
-                appState.privacy.gender = 'open';
-                appState.privacy.icebreakerQuestion = 'open';
+                FIELD_SECTIONS.forEach(sec => {
+                    sec.fields.forEach(f => {
+                        if (f.alwaysOpen) appState.privacy[f.key] = 'open';
+                    });
+                });
+                appState.privacy.ig = 'closed';
                 Store.save(appState);
                 renderProfileForm();
                 refreshAllUI();

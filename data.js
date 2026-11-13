@@ -1,6 +1,6 @@
 /* data.js - SCHEMA_VERSION 14：男女生人數限制開關、性別限選男女、地區與縣市聯動 */
 
-const SCHEMA_VERSION = 21;
+const SCHEMA_VERSION = 22;
 // 🧪 測試階段開關：true = 全部欄位暫時免必填；正式上線時改為 false 即可恢復全部必填驗證
 const TEST_MODE_OPTIONAL_FIELDS = false;
 
@@ -436,7 +436,7 @@ const FIELD_SECTIONS = [
                 alwaysOpen: true,
                 options: ['男', '女']
             },
-            { key: 'targetGender', label: '你想配對的性別', type: 'select', required: true, options: ['男', '女', '非二元', '都可以'] },
+            { key: 'targetGender', label: '你想配對的性別', type: 'select', required: true, options: ['男生', '女生', '都可以'] },
             { key: 'age', label: '你的年齡（實歲）', type: 'number', required: true, placeholder: '例如：25' },
             { key: 'minAge', label: '最小可接受年齡', type: 'number', required: true, placeholder: '例如：22' },
             { key: 'maxAge', label: '最大可接受年齡', type: 'number', required: true, placeholder: '例如：32' },
@@ -619,6 +619,7 @@ const FIELD_SECTIONS = [
                 type: 'multiselect',
                 allowOther: true,
                 required: true,
+                alwaysOpen: true,
                 options: [
                     '聽講故事', '追劇', '投資理財', '電影', '音樂', '動漫', '遊戲', '唱歌',
                     '運動健身', '爬山戶外', '旅行', '美食咖啡廳', '閱讀', '攝影', '手作',
@@ -632,14 +633,14 @@ const FIELD_SECTIONS = [
         title: 'D. 讓對方更認識你',
         defaultPrivacy: 'open',
         fields: [
-            { key: 'oneSentence', label: '想對未來配對對象說的一句話或一個問題', type: 'text', required: true, placeholder: '一句話就好，不用想太久' },
-            { key: 'bio', label: '自我介紹（選填，推薦認真寫）', type: 'textarea', required: false, placeholder: '個性、平常在忙什麼、喜歡怎麼過週末' },
-            { key: 'idealPartner', label: '稍微描述一下想像中伴侶的模樣吧！（選填）', type: 'textarea', required: false, placeholder: '例如：希望對方也喜歡貓、不考慮遠距...' },
+            { key: 'oneSentence', label: '想對未來配對對象說的一句話或一個問題', type: 'text', required: true, alwaysOpen: true, placeholder: '一句話就好，不用想太久' },
+            { key: 'bio', label: '自我介紹（推薦認真寫）', type: 'textarea', required: true, alwaysOpen: true, placeholder: '個性、平常在忙什麼、喜歡怎麼過週末' },
+            { key: 'idealPartner', label: '稍微描述一下想像中伴侶的模樣吧！', type: 'textarea', required: true, alwaysOpen: true, placeholder: '例如：希望對方也喜歡貓、不考慮遠距...' },
             {
                 key: 'icebreakerQuestion',
-                label: '破冰提問（選填，第一句話你希望對方問你什麼？）',
+                label: '破冰提問（第一句話你希望對方問你什麼？）',
                 type: 'textarea',
-                required: false,
+                required: true,
                 alwaysOpen: true,
                 placeholder: '',
                 hints: [
@@ -859,8 +860,11 @@ const Store = {
         Object.keys(mergedPrivacy).forEach(k => {
             if (mergedPrivacy[k] === 'never') mergedPrivacy[k] = 'closed';
         });
-        mergedPrivacy.gender = 'open';
-        mergedPrivacy.icebreakerQuestion = 'open';
+        FIELD_SECTIONS.forEach(sec => {
+            sec.fields.forEach(f => {
+                if (f.alwaysOpen) mergedPrivacy[f.key] = 'open';
+            });
+        });
         mergedPrivacy.ig = 'closed';
 
         let sessions = Array.isArray(parsed.registeredSessions) ? parsed.registeredSessions : [];
@@ -876,6 +880,9 @@ const Store = {
         if (mergedProfile.gender && mergedProfile.gender !== '男' && mergedProfile.gender !== '女') {
             if (!parsed.playerId) mergedProfile.gender = '';
         }
+        if (mergedProfile.targetGender === '男') mergedProfile.targetGender = '男生';
+        else if (mergedProfile.targetGender === '女') mergedProfile.targetGender = '女生';
+        else if (mergedProfile.targetGender === '非二元') mergedProfile.targetGender = '都可以';
 
         return {
             ...base,
@@ -961,8 +968,11 @@ const Store = {
 
     save(state) {
         state.version = SCHEMA_VERSION;
-        state.privacy.gender = 'open';
-        state.privacy.icebreakerQuestion = 'open';
+        FIELD_SECTIONS.forEach(sec => {
+            sec.fields.forEach(f => {
+                if (f.alwaysOpen) state.privacy[f.key] = 'open';
+            });
+        });
         state.privacy.ig = 'closed';
 
         if (state.profile && state.profile.city && !state.profile.region) {
