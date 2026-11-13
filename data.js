@@ -1,6 +1,6 @@
 /* data.js - SCHEMA_VERSION 14：男女生人數限制開關、性別限選男女、地區與縣市聯動 */
 
-const SCHEMA_VERSION = 24;
+const SCHEMA_VERSION = 25;
 // 🧪 測試階段開關：true = 全部欄位暫時免必填；正式上線時改為 false 即可恢復全部必填驗證
 const TEST_MODE_OPTIONAL_FIELDS = false;
 
@@ -462,7 +462,7 @@ const ROMANCE_MOMENTS = [
 const EXACT_MATCH_OPTIONS = [
     { key: 'mbti', label: 'MBTI', choices: ['INTJ', 'INTP', 'ENTJ', 'ENTP', 'INFJ', 'INFP', 'ENFJ', 'ENFP', 'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ', 'ISTP', 'ISFP', 'ESTP', 'ESFP'] },
     { key: 'gender', label: '性別', choices: ['男', '女'] },
-    { key: 'ageRange', label: '年齡範圍', choices: ['18~22歲', '23~26歲', '27~30歲', '31~35歲', '36歲以上'] },
+    { key: 'ageRange', label: '年齡範圍', choices: ['22~25歲', '26~30歲', '31~35歲', '36~40歲'] },
     {
         key: 'region',
         label: '當前居住地區（選地區可配對全區，亦可指定縣市）',
@@ -494,9 +494,9 @@ const FIELD_SECTIONS = [
                 options: ['男', '女']
             },
             { key: 'targetGender', label: '你想配對的性別', type: 'select', required: true, options: ['男生', '女生', '都可以'] },
-            { key: 'age', label: '你的年齡（實歲）', type: 'number', required: true, placeholder: '例如：25' },
-            { key: 'minAge', label: '最小可接受年齡', type: 'number', required: true, placeholder: '例如：22' },
-            { key: 'maxAge', label: '最大可接受年齡', type: 'number', required: true, placeholder: '例如：32' },
+            { key: 'age', label: '你的年齡（實歲，22～40 歲）', type: 'number', min: 22, max: 40, required: true, placeholder: '請輸入 22～40 歲（例如：25）' },
+            { key: 'minAge', label: '最小可接受年齡（至少 22 歲）', type: 'number', min: 22, max: 40, required: true, placeholder: '至少 22 歲（例如：22）' },
+            { key: 'maxAge', label: '最大可接受年齡（最高 40 歲）', type: 'number', min: 22, max: 40, required: true, placeholder: '最高 40 歲（例如：35）' },
             {
                 key: 'zodiac',
                 label: '你的星座',

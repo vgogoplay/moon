@@ -751,6 +751,11 @@ function getMissingRequiredFields() {
                 const val = appState.profile[f.key];
                 if (val === undefined || val === null || String(val).trim() === '') {
                     missing.push({ key: f.key, label: cleanLabel });
+                } else if (f.type === 'number' && (f.min !== undefined || f.max !== undefined)) {
+                    const numVal = Number(val);
+                    if (isNaN(numVal) || (f.min !== undefined && numVal < f.min) || (f.max !== undefined && numVal > f.max)) {
+                        missing.push({ key: f.key, label: `${cleanLabel}（需介於 ${f.min ?? ''}～${f.max ?? ''} 歲）` });
+                    }
                 } else if (f.allowOther && String(val).trim() === '其他' && !String(appState.profile[`${f.key}Other`] || '').trim()) {
                     missing.push({ key: `${f.key}Other`, label: `${cleanLabel}（其他說明）` });
                 }
@@ -963,7 +968,9 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
             </div>
         `;
     } else {
-        inputHtml = `<input type="${field.type}" name="${field.key}" value="${val || ''}" class="input-jp ${lockedInputStyle}" placeholder="${field.placeholder || ''}" ${isFieldRequired(field) ? 'required' : ''} ${isProfileLocked ? 'disabled' : ''}>`;
+        const minAttr = field.min !== undefined ? `min="${field.min}"` : '';
+        const maxAttr = field.max !== undefined ? `max="${field.max}"` : '';
+        inputHtml = `<input type="${field.type}" name="${field.key}" value="${val || ''}" ${minAttr} ${maxAttr} class="input-jp ${lockedInputStyle}" placeholder="${field.placeholder || ''}" ${isFieldRequired(field) ? 'required' : ''} ${isProfileLocked ? 'disabled' : ''}>`;
     }
 
     let hintsHtml = '';
@@ -1234,6 +1241,43 @@ document.getElementById('profileForm').addEventListener('submit', function(e) {
     if (nextProfile.gender && nextProfile.gender !== '男' && nextProfile.gender !== '女') {
         showMiniNotice('⚠️ 性別限制', '你的性別只能選擇「男」或「女」！');
         return;
+    }
+
+    // 年齡限制驗證：實歲 22～40 歲，最小可接受年齡至少 22 歲，最大可接受年齡最高 40 歲
+    if (nextProfile.age !== '') {
+        const ageNum = Number(nextProfile.age);
+        if (!Number.isInteger(ageNum) || ageNum < 22 || ageNum > 40) {
+            const card = document.getElementById('field-card-age');
+            if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showMiniNotice('⚠️ 年齡限制', '「你的年齡（實歲）」限制至少要 22 歲、最高 40 歲！');
+            return;
+        }
+    }
+    if (nextProfile.minAge !== '') {
+        const minAgeNum = Number(nextProfile.minAge);
+        if (!Number.isInteger(minAgeNum) || minAgeNum < 22 || minAgeNum > 40) {
+            const card = document.getElementById('field-card-minAge');
+            if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showMiniNotice('⚠️ 最小可接受年齡限制', '「最小可接受年齡」至少要 22 歲（且不得超過 40 歲）！');
+            return;
+        }
+    }
+    if (nextProfile.maxAge !== '') {
+        const maxAgeNum = Number(nextProfile.maxAge);
+        if (!Number.isInteger(maxAgeNum) || maxAgeNum < 22 || maxAgeNum > 40) {
+            const card = document.getElementById('field-card-maxAge');
+            if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showMiniNotice('⚠️ 最大可接受年齡限制', '「最大可接受年齡」最高為 40 歲（且不得低於 22 歲）！');
+            return;
+        }
+    }
+    if (nextProfile.minAge !== '' && nextProfile.maxAge !== '') {
+        if (Number(nextProfile.minAge) > Number(nextProfile.maxAge)) {
+            const card = document.getElementById('field-card-minAge');
+            if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showMiniNotice('⚠️ 年齡範圍設定錯誤', '「最小可接受年齡」不能大於「最大可接受年齡」！');
+            return;
+        }
     }
     if (!appState.playerId) {
         if (nextProfile.gender === '男' && quota.maleFull) {
