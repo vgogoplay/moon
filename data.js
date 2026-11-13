@@ -1,6 +1,6 @@
 /* data.js - SCHEMA_VERSION 14：男女生人數限制開關、性別限選男女、地區與縣市聯動 */
 
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
 // 🧪 測試階段開關：true = 全部欄位暫時免必填；正式上線時改為 false 即可恢復全部必填驗證
 const TEST_MODE_OPTIONAL_FIELDS = false;
 
@@ -592,7 +592,6 @@ const FIELD_SECTIONS = [
                 options: ['安全型', '焦慮型', '逃避型', '混亂型', '不在意']
             },
             { key: 'mbti', label: '你的 MBTI', type: 'select', required: true, options: ['INTJ', 'INTP', 'ENTJ', 'ENTP', 'INFJ', 'INFP', 'ENFJ', 'ENFP', 'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ', 'ISTP', 'ISFP', 'ESTP', 'ESFP', '不知道 / 沒測過'] },
-            { key: 'mbtiEI', label: '希望對方的 MBTI：E／I', type: 'select', required: true, options: ['E 外向', 'I 內向', '都可以'] },
             {
                 key: 'relationshipGoal',
                 label: '你／妳期待一段感情走向哪裡？',
