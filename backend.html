@@ -143,7 +143,7 @@
                         <tr class="bg-pink-50/70 text-[#8f4452] border-b border-pink-100 text-xs">
                             <th class="p-3.5">唯一玩家 ID</th>
                             <th class="p-3.5">暱稱 / IG / 年齡</th>
-                            <th class="p-3.5">性別 / MBTI / 居住地區縣市</th>
+                            <th class="p-3.5">性別 / 星座 / MBTI / 身分 / 居住地</th>
                             <th class="p-3.5">報名場次</th>
                             <th class="p-3.5">希望吻合條件</th>
                             <th class="p-3.5">配對與限制狀態</th>
@@ -425,6 +425,8 @@
             pollTimer: null,
             onUpdateCallback: null,
             lastPushedUsersJson: {},
+            inFlightWrites: 0,
+            writeEpoch: 0,
 
             mapToArray(raw) {
                 if (!raw) return [];
@@ -505,6 +507,8 @@
             },
 
             async fetchFullTree() {
+                if (this.inFlightWrites > 0) return false;
+                const epochBefore = this.writeEpoch;
                 const controller = new AbortController();
                 const timer = setTimeout(() => controller.abort(), 4500);
                 try {
@@ -516,6 +520,7 @@
                     clearTimeout(timer);
                     if (!res.ok) return false;
                     const data = await res.json();
+                    if (this.inFlightWrites > 0 || this.writeEpoch !== epochBefore) return false;
                     this.tree = (data && typeof data === 'object') ? data : {};
                     this.applyTreeToLocalStorage();
                     const badge = document.getElementById('cloudStatusBadge');
@@ -584,6 +589,9 @@
             },
 
             async putNode(path, value) {
+                this.applyStreamPatch(path, value);
+                this.inFlightWrites++;
+                this.writeEpoch++;
                 try {
                     const encoded = this.encodePath(path);
                     await fetch(`${this.dbUrl}/${encoded}.json`, {
@@ -591,16 +599,27 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(value)
                     });
-                } catch (e) {}
+                } catch (e) {
+                } finally {
+                    this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
+                    this.writeEpoch++;
+                }
             },
 
             async deleteNode(path) {
+                this.applyStreamPatch(path, null);
+                this.inFlightWrites++;
+                this.writeEpoch++;
                 try {
                     const encoded = this.encodePath(path);
                     await fetch(`${this.dbUrl}/${encoded}.json`, {
                         method: 'DELETE'
                     });
-                } catch (e) {}
+                } catch (e) {
+                } finally {
+                    this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
+                    this.writeEpoch++;
+                }
             },
 
             syncUsersArray(usersArr) {
@@ -1065,8 +1084,10 @@
                 maxAge: '32',
                 region: '中部',
                 city: '台中市',
+                zodiac: isFemale ? '天秤座' : '射手座',
                 distance: '同縣市',
                 status: '上班族',
+                statusOther: '',
                 school: '逢甲大學',
                 job: '產品設計 / 行銷企劃',
                 height: isFemale ? '163' : '178',
@@ -1479,11 +1500,11 @@
             const users = getUsers();
 
             const sampleList = [
-                { id: '10001', nickname: 'A男生 (選中部全區)', gender: '男', targetGender: '女生', age: 26, region: '中部', city: '台中市', mbti: 'ENFP', registeredSessions: [session], exactMatchCriteria: { region: '中部' } },
-                { id: '10002', nickname: 'B男生 (選性別:女)', gender: '男', targetGender: '女生', age: 27, region: '中部', city: '彰化縣', mbti: 'ISTJ', registeredSessions: [session], exactMatchCriteria: { gender: '女' } },
-                { id: '10003', nickname: 'C男生 (隨機不選)', gender: '男', targetGender: '女生', age: 25, region: '北部', city: '台北市', mbti: 'INTP', registeredSessions: [session], exactMatchCriteria: {} },
-                { id: '20001', nickname: 'D女生 (南投/中部)', gender: '女', targetGender: '男生', age: 24, region: '中部', city: '南投縣', mbti: 'INFJ', registeredSessions: [session], exactMatchCriteria: {} },
-                { id: '20002', nickname: 'E女生 (高雄/南部)', gender: '女', targetGender: '男生', age: 25, region: '南部', city: '高雄市', mbti: 'ENFP', registeredSessions: [session], exactMatchCriteria: {} }
+                { id: '10001', nickname: 'A男生 (選中部全區)', gender: '男', targetGender: '女生', age: 26, zodiac: '射手座', status: '上班族', region: '中部', city: '台中市', mbti: 'ENFP', registeredSessions: [session], exactMatchCriteria: { region: '中部' } },
+                { id: '10002', nickname: 'B男生 (選性別:女)', gender: '男', targetGender: '女生', age: 27, zodiac: '摩羯座', status: '上班族', region: '中部', city: '彰化縣', mbti: 'ISTJ', registeredSessions: [session], exactMatchCriteria: { gender: '女' } },
+                { id: '10003', nickname: 'C男生 (隨機不選)', gender: '男', targetGender: '女生', age: 25, zodiac: '水瓶座', status: '學生', region: '北部', city: '台北市', mbti: 'INTP', registeredSessions: [session], exactMatchCriteria: {} },
+                { id: '20001', nickname: 'D女生 (南投/中部)', gender: '女', targetGender: '男生', age: 24, zodiac: '巨蟹座', status: '學生', region: '中部', city: '南投縣', mbti: 'INFJ', registeredSessions: [session], exactMatchCriteria: {} },
+                { id: '20002', nickname: 'E女生 (高雄/南部)', gender: '女', targetGender: '男生', age: 25, zodiac: '雙魚座', status: '自由業', region: '南部', city: '高雄市', mbti: 'ENFP', registeredSessions: [session], exactMatchCriteria: {} }
             ];
 
             sampleList.forEach(s => {
@@ -1820,7 +1841,7 @@
                                 <div class="font-bold">${u.nickname}</div>
                                 <div class="text-[11px] text-gray-400">${u.ig || ''} ・ ${u.age || '-'}歲</div>
                             </td>
-                            <td class="p-3.5 text-xs">${u.gender} ・ ${u.mbti || '-'} ・ ${locationLabel}</td>
+                            <td class="p-3.5 text-xs">${u.gender} ・ ${u.zodiac || '-'} ・ ${u.mbti || '-'} ・ ${u.status === '其他' && u.statusOther ? `其他（${u.statusOther}）` : (u.status || '-')} ・ ${locationLabel}</td>
                             <td class="p-3.5 text-xs">
                                 ${sessions.length > 0
                                     ? sessions.map(s => `<span class="inline-block px-2 py-0.5 mr-1 mb-1 rounded-full bg-pink-100 text-[#8f4452] font-semibold">${s}</span>`).join('')

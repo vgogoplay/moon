@@ -751,6 +751,8 @@ function getMissingRequiredFields() {
                 const val = appState.profile[f.key];
                 if (val === undefined || val === null || String(val).trim() === '') {
                     missing.push({ key: f.key, label: cleanLabel });
+                } else if (f.allowOther && String(val).trim() === '其他' && !String(appState.profile[`${f.key}Other`] || '').trim()) {
+                    missing.push({ key: `${f.key}Other`, label: `${cleanLabel}（其他說明）` });
                 }
             }
         }
@@ -918,11 +920,16 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
                 extraGenderNoticeHtml = `<p class="text-[11px] text-[#8f4452] font-medium">📊 目前男女名額統計：男生 ${quota.maleCount}/${quota.limit} 人、女生 ${quota.femaleCount}/${quota.limit} 人</p>`;
             }
         } else {
+            const otherText = appState.profile[`${field.key}Other`] || '';
+            const hasOther = field.allowOther && val === '其他';
             inputHtml = `
-                <select name="${field.key}" class="input-jp ${lockedInputStyle}" ${isFieldRequired(field) ? 'required' : ''} ${isInputDisabled ? 'disabled' : ''}>
+                <select name="${field.key}" ${field.allowOther ? `onchange="onSelectWithOtherChange('${field.key}', this.value)"` : ''} class="input-jp ${lockedInputStyle}" ${isFieldRequired(field) ? 'required' : ''} ${isInputDisabled ? 'disabled' : ''}>
                     <option value="">請選擇...</option>
                     ${field.options.map(opt => `<option value="${opt}" ${val === opt ? 'selected' : ''}>${opt}</option>`).join('')}
                 </select>
+                ${field.allowOther ? `
+                    <input type="text" id="select-other-${field.key}" name="${field.key}Other" value="${otherText}" ${isInputDisabled ? 'disabled' : ''} oninput="onSelectOtherInput('${field.key}', this.value)" class="input-jp mt-2 ${lockedInputStyle} ${hasOther ? '' : 'hidden'}" placeholder="${field.otherPlaceholder || '請自行填寫其他說明...'}">
+                ` : ''}
             `;
         }
     } else if (field.type === 'textarea') {
@@ -1070,6 +1077,27 @@ window.onProfileCityChange = function(cityVal) {
     appState.profile.city = cityVal || '';
 };
 
+window.onSelectWithOtherChange = function(key, val) {
+    if (Store.getSystemConfig().profileLocked) return;
+    appState.profile[key] = val || '';
+    const otherInput = document.getElementById(`select-other-${key}`);
+    if (otherInput) {
+        if (val === '其他') {
+            otherInput.classList.remove('hidden');
+            otherInput.focus();
+        } else {
+            otherInput.classList.add('hidden');
+            otherInput.value = '';
+            appState.profile[`${key}Other`] = '';
+        }
+    }
+};
+
+window.onSelectOtherInput = function(key, val) {
+    if (Store.getSystemConfig().profileLocked) return;
+    appState.profile[`${key}Other`] = val || '';
+};
+
 function renderMultiSelectChipsHtml(key, selectedArr, otherText, isLocked = false) {
     if (!selectedArr || selectedArr.length === 0) {
         return `<span class="text-xs text-gray-400 py-0.5">${isLocked ? '未選擇（已鎖定）' : '點擊下拉選單選擇（可複選）...'}</span>`;
@@ -1193,6 +1221,11 @@ document.getElementById('profileForm').addEventListener('submit', function(e) {
                 }
             } else {
                 nextProfile[f.key] = fd.get(f.key) ? fd.get(f.key).trim() : '';
+                if (f.allowOther) {
+                    nextProfile[`${f.key}Other`] = (nextProfile[f.key] === '其他' && fd.get(`${f.key}Other`))
+                        ? fd.get(`${f.key}Other`).trim()
+                        : '';
+                }
             }
         });
     });
@@ -1646,6 +1679,8 @@ function renderActiveFriendWorkspace() {
                 } else if (Array.isArray(val)) {
                     const otherTxt = friend.profile[`${f.key}Other`];
                     displayVal = val.map(v => (v === '其他' && otherTxt) ? `其他（${otherTxt}）` : v).join('、');
+                } else if (f.allowOther && val === '其他' && friend.profile[`${f.key}Other`]) {
+                    displayVal = `其他（${friend.profile[`${f.key}Other`]}）`;
                 }
                 unlockedHtml += `
                     <div class="p-2.5 rounded-xl bg-white border border-pink-100">

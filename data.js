@@ -1,6 +1,6 @@
 /* data.js - SCHEMA_VERSION 14：男女生人數限制開關、性別限選男女、地區與縣市聯動 */
 
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 24;
 // 🧪 測試階段開關：true = 全部欄位暫時免必填；正式上線時改為 false 即可恢復全部必填驗證
 const TEST_MODE_OPTIONAL_FIELDS = false;
 
@@ -103,6 +103,17 @@ const CloudSync = {
     pollTimer: null,
     onUpdateCallback: null,
     lastPushedUsersJson: {},
+    inFlightWrites: 0,
+    writeEpoch: 0,
+    pendingUsers: {},
+
+    isUserPending(pid) {
+        const key = String(pid || '').trim();
+        if (!key || !this.pendingUsers[key]) return false;
+        if (Date.now() <= this.pendingUsers[key].graceUntil) return true;
+        delete this.pendingUsers[key];
+        return false;
+    },
 
     mapToArray(raw) {
         if (!raw) return [];
@@ -125,6 +136,20 @@ const CloudSync = {
 
     applyTreeToLocalStorage() {
         const t = this.tree || {};
+        if (!t[USERS_KEY] || typeof t[USERS_KEY] !== 'object') {
+            t[USERS_KEY] = {};
+        }
+
+        // 保留剛寫入或尚未完成雲端同步的玩家資料，避免舊快照覆蓋清空畫面
+        const now = Date.now();
+        Object.keys(this.pendingUsers).forEach(pid => {
+            const entry = this.pendingUsers[pid];
+            if (entry && now <= entry.graceUntil) {
+                t[USERS_KEY][pid] = entry.record;
+            } else {
+                delete this.pendingUsers[pid];
+            }
+        });
 
         // 1. 玩家名單
         const usersArr = this.mapToArray(t[USERS_KEY]);
@@ -191,6 +216,8 @@ const CloudSync = {
     },
 
     async fetchFullTree() {
+        if (this.inFlightWrites > 0) return false;
+        const epochBefore = this.writeEpoch;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 4500);
         try {
@@ -202,6 +229,10 @@ const CloudSync = {
             clearTimeout(timer);
             if (!res.ok) return false;
             const data = await res.json();
+            // 若在 GET 期間有新的本地寫入發生，捨棄此次舊快照避免覆蓋剛保存的資料
+            if (this.inFlightWrites > 0 || this.writeEpoch !== epochBefore) {
+                return false;
+            }
             this.tree = (data && typeof data === 'object') ? data : {};
             this.applyTreeToLocalStorage();
             return true;
@@ -276,6 +307,9 @@ const CloudSync = {
     },
 
     async putNode(path, value) {
+        this.applyStreamPatch(path, value);
+        this.inFlightWrites++;
+        this.writeEpoch++;
         try {
             const encoded = this.encodePath(path);
             await fetch(`${this.dbUrl}/${encoded}.json`, {
@@ -285,10 +319,15 @@ const CloudSync = {
             });
         } catch (e) {
             console.warn('CloudSync putNode 同步失敗', path, e);
+        } finally {
+            this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
+            this.writeEpoch++;
         }
     },
 
     async patchNode(path, patchObj) {
+        this.inFlightWrites++;
+        this.writeEpoch++;
         try {
             const encoded = this.encodePath(path);
             await fetch(`${this.dbUrl}/${encoded}.json`, {
@@ -298,10 +337,20 @@ const CloudSync = {
             });
         } catch (e) {
             console.warn('CloudSync patchNode 同步失敗', path, e);
+        } finally {
+            this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
+            this.writeEpoch++;
         }
     },
 
     async deleteNode(path) {
+        this.applyStreamPatch(path, null);
+        if (String(path || '').startsWith(`${USERS_KEY}/`)) {
+            const pid = String(path).split('/')[1];
+            if (pid) delete this.pendingUsers[pid];
+        }
+        this.inFlightWrites++;
+        this.writeEpoch++;
         try {
             const encoded = this.encodePath(path);
             await fetch(`${this.dbUrl}/${encoded}.json`, {
@@ -309,6 +358,9 @@ const CloudSync = {
             });
         } catch (e) {
             console.warn('CloudSync deleteNode 同步失敗', path, e);
+        } finally {
+            this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
+            this.writeEpoch++;
         }
     },
 
@@ -318,7 +370,12 @@ const CloudSync = {
         const serialized = JSON.stringify(record);
         if (this.lastPushedUsersJson[pid] === serialized) return;
         this.lastPushedUsersJson[pid] = serialized;
-        this.putNode(`${USERS_KEY}/${pid}`, record);
+        this.pendingUsers[pid] = { record, graceUntil: Date.now() + 8000 };
+        this.putNode(`${USERS_KEY}/${pid}`, record).then(() => {
+            if (this.pendingUsers[pid]) {
+                this.pendingUsers[pid].graceUntil = Date.now() + 3000;
+            }
+        });
     },
 
     syncUsersArray(usersArr) {
@@ -441,13 +498,28 @@ const FIELD_SECTIONS = [
             { key: 'minAge', label: '最小可接受年齡', type: 'number', required: true, placeholder: '例如：22' },
             { key: 'maxAge', label: '最大可接受年齡', type: 'number', required: true, placeholder: '例如：32' },
             {
+                key: 'zodiac',
+                label: '你的星座',
+                type: 'select',
+                required: true,
+                options: ['牡羊座', '金牛座', '雙子座', '巨蟹座', '獅子座', '處女座', '天秤座', '天蠍座', '射手座', '摩羯座', '水瓶座', '雙魚座']
+            },
+            {
                 key: 'city',
                 label: '當前居住縣市（請先選地區，再選縣市）',
                 type: 'regionCity',
                 required: true
             },
             { key: 'distance', label: '可接受的距離', type: 'select', required: true, options: ['同縣市', '北中南同區', '全台都可以', '可遠距'] },
-            { key: 'status', label: '目前身分', type: 'select', required: true, options: ['學生', '上班族', '自由業', '其他'] },
+            {
+                key: 'status',
+                label: '目前身分（選「其他」可自行填寫）',
+                type: 'select',
+                allowOther: true,
+                otherPlaceholder: '請自行填寫目前身分（例如：軍公教、家管、待業中）...',
+                required: true,
+                options: ['學生', '上班族', '自由業', '其他']
+            },
             { key: 'school', label: '學校（選填）', type: 'text', required: false, placeholder: '選填' },
             { key: 'job', label: '科系 / 工作／產業（選填）', type: 'text', required: false, placeholder: '選填' },
             { key: 'height', label: '你的身高（公分，選填）', type: 'number', required: false, placeholder: '只填數字，例如 168' },
@@ -835,6 +907,8 @@ const Store = {
             isChatBanned: false,
             readMailIds: [],
             profile: {
+                zodiac: '',
+                statusOther: '',
                 region: '',
                 city: '',
                 hobbies: [],
