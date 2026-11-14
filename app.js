@@ -1627,10 +1627,6 @@ function confirmRegistration() {
     }
 
     const selectedSessions = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:checked')).map(cb => cb.value);
-    if (selectedSessions.length === 0) {
-        showMiniNotice('🌸 提醒', '請至少勾選一個要參加的配對場次（星期三 或 星期六）！');
-        return;
-    }
 
     const criteria = {};
     document.querySelectorAll('input[name="exactFieldCheck"]:checked').forEach(cb => {
@@ -1662,6 +1658,14 @@ function confirmRegistration() {
     const desc = displayItems.length > 0
         ? '已指定條件（其中一項符合即可配對）：\n' + displayItems.map(item => `・${item}`).join('\n')
         : '未勾選額外條件（不限制，將進行隨機配對）';
+
+    if (selectedSessions.length === 0) {
+        showMiniNotice(
+            '🌸 已更新報名設定（未選擇場次）',
+            `目前尚未勾選任何配對場次（暫不進入配對池，之後隨時可再點選場次報名）。\n\n${desc}`
+        );
+        return;
+    }
 
     showMiniNotice('🌸 報名成功', `已登錄場次：【${selectedSessions.join('、')}】\n\n${desc}`);
 }
@@ -2491,6 +2495,8 @@ async function restoreFromBackupCode() {
 
     if (Array.isArray(matchedUser.registeredSessions)) {
         loadedState.registeredSessions = Array.from(new Set(matchedUser.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+    } else {
+        loadedState.registeredSessions = [];
     }
     if (matchedUser.exactMatchCriteria && typeof matchedUser.exactMatchCriteria === 'object') {
         loadedState.exactMatchCriteria = { ...matchedUser.exactMatchCriteria };
