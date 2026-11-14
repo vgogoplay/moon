@@ -808,7 +808,10 @@ function refreshAllUI() {
         sched.sessions.some(target => isSameSession(s, target))
     );
 
-    document.getElementById('currentPeriodBadge').textContent = `目前開放：${sched.batchPrefix}（${sched.wedDateStr}(三) / ${sched.satDateStr}(六)）`;
+    const periodBadgeEl = document.getElementById('currentPeriodBadge');
+    if (periodBadgeEl) {
+        periodBadgeEl.textContent = `目前開放：${sched.batchPrefix}（${sched.wedDateStr}(三) / ${sched.satDateStr}(六)）`;
+    }
 
     const warnBanner = document.getElementById('warningAccountBanner');
     if (appState.isWarnedAccount) {

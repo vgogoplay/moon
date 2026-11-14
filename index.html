@@ -92,10 +92,7 @@
             <!-- 報名與活動排程主控制台 -->
             <div class="glass-card rounded-3xl p-6 md:p-8 text-center space-y-5">
                 <div class="inline-flex flex-col items-center justify-center gap-1.5 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-200 text-[#8f4452] shadow-sm">
-                    <span id="currentPeriodBadge" class="text-sm font-bold">目前開放：讀取中...</span>
-                    <span class="text-xs text-pink-300 font-bold leading-none">｜</span>
                     <span class="text-sm font-extrabold text-[#c96a7b] tracking-wide">每週一更新下一屆（星期三 / 星期六 20:00 自動配對）</span>
-                    <span class="text-xs text-pink-300 font-bold leading-none">｜</span>
                     <span class="text-sm font-bold text-rose-600">⚠️ 每週需「手動」報名下一屆，月老才會知道「弟子＆信女」的心意喔！</span>
                 </div>
 
@@ -114,8 +111,8 @@
                     </button>
                 </div>
 
-                <!-- 獨立專屬活動區（拆分顯示於常規場次報名按鈕下方） -->
-                <div id="customActivitySection" class="hidden pt-5 border-t border-dashed border-amber-200/90 space-y-4">
+                <!-- 獨立專屬活動區（拆分顯示於常規場次報名按鈕下方，加深分隔線） -->
+                <div id="customActivitySection" class="hidden pt-6 mt-2 border-t-2 border-[#c96a7b] space-y-4">
                     <div id="customActivityAlertBox" class="hidden max-w-lg mx-auto p-4 rounded-2xl bg-amber-50/75 border border-amber-200 text-sm text-[#7a3b46] leading-relaxed"></div>
 
                     <div id="customActivitiesBtnContainer" class="hidden flex flex-wrap justify-center items-center gap-3"></div>
@@ -683,9 +680,9 @@
     <script src="shared/schema.js"></script>
     <script src="shared/cloud-store.js"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/state.js"></script>
+    <script src="frontend/state.js?v=20261115c"></script>
     <script src="frontend/profile.js"></script>
-    <script src="frontend/activities.js?v=20261115b"></script>
+    <script src="frontend/activities.js?v=20261115c"></script>
     <script src="frontend/friends-chat.js"></script>
 </body>
 </html>

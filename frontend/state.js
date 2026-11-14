@@ -376,7 +376,10 @@ function syncFromSharedStorage() {
             renderFriendsSection();
         }
         const curSched = getBatchScheduleInfo(getCurrentBatchNumber());
-        document.getElementById('currentPeriodBadge').textContent = `目前開放：${curSched.batchPrefix}（${curSched.wedDateStr}(三) / ${curSched.satDateStr}(六)）`;
+        const periodBadgeEl = document.getElementById('currentPeriodBadge');
+        if (periodBadgeEl) {
+            periodBadgeEl.textContent = `目前開放：${curSched.batchPrefix}（${curSched.wedDateStr}(三) / ${curSched.satDateStr}(六)）`;
+        }
     }
 }
 
