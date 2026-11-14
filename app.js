@@ -148,6 +148,32 @@ function syncFromSharedStorage() {
             return;
         }
 
+        // 若管理員於後台編輯了此玩家的個人資料，自動同步更新至前台
+        if (me && me.updatedAt && me.updatedAt !== appState.lastSyncedCloudUpdatedAt) {
+            appState.lastSyncedCloudUpdatedAt = me.updatedAt;
+            const skipSyncKeys = new Set([
+                'id', 'privacy', 'backupCode', 'isWarned', 'warningReason',
+                'isMatchBanned', 'isChatBanned', 'registeredSessions', 'registeredSession',
+                'exactMatchCriteria', 'matchedHistory', 'matchedSession',
+                'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt'
+            ]);
+            Object.entries(me).forEach(([k, v]) => {
+                if (!skipSyncKeys.has(k)) {
+                    appState.profile[k] = v;
+                }
+            });
+            if (!appState.profile.region && appState.profile.city) {
+                appState.profile.region = inferRegionByCity(appState.profile.city);
+            }
+            if (appState.profile.mbti && !appState.profile.mbtiGroup) {
+                appState.profile.mbtiGroup = inferMbtiGroup(appState.profile.mbti);
+            }
+            if (me.privacy && typeof me.privacy === 'object') {
+                appState.privacy = { ...appState.privacy, ...me.privacy };
+            }
+            stateChanged = true;
+        }
+
         // 同步後台禁止發話狀態
         const nextChatBanned = Boolean(me.isChatBanned);
         if (Boolean(appState.isChatBanned) !== nextChatBanned) {
@@ -419,12 +445,12 @@ function renderRandomMoment() {
     document.getElementById('momentText').textContent = item.text;
 }
 
-// ==================== 前台首頁：即時男女比例與 MBTI 統計圖表 ====================
+// ==================== 前台首頁：即時男女比例與 I人 / E人 / 不知道・沒測過 統計圖表 ====================
 function renderHomeStatsCharts() {
     const totalBadge = document.getElementById('homeStatsTotalBadge');
     const donutBox = document.getElementById('genderDonutChartBox');
-    const mbtiGrid = document.getElementById('mbtiBarChartGrid');
-    if (!totalBadge || !donutBox || !mbtiGrid) return;
+    const ieDonutBox = document.getElementById('ieDonutChartBox');
+    if (!totalBadge || !donutBox || !ieDonutBox) return;
 
     const rawUsersStr = localStorage.getItem(USERS_KEY) || '[]';
     lastUsersStatsSnapshot = rawUsersStr;
@@ -441,15 +467,8 @@ function renderHomeStatsCharts() {
     const totalCount = validUsers.length;
     let maleCount = 0;
     let femaleCount = 0;
-
-    const standardMbtis = [
-        'INTJ', 'INTP', 'ENTJ', 'ENTP',
-        'INFJ', 'INFP', 'ENFJ', 'ENFP',
-        'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ',
-        'ISTP', 'ISFP', 'ESTP', 'ESFP'
-    ];
-    const mbtiCounts = {};
-    standardMbtis.forEach(code => { mbtiCounts[code] = 0; });
+    let iPersonCount = 0;
+    let ePersonCount = 0;
     let untestedMbtiCount = 0;
 
     validUsers.forEach(u => {
@@ -457,12 +476,16 @@ function renderHomeStatsCharts() {
         else if (u.gender === '女') femaleCount++;
 
         const rawMbti = String(u.mbti || '').trim().toUpperCase();
-        if (!rawMbti || rawMbti.includes('不知道') || rawMbti.includes('沒測過')) {
-            untestedMbtiCount++;
-        } else if (Object.prototype.hasOwnProperty.call(mbtiCounts, rawMbti)) {
-            mbtiCounts[rawMbti]++;
+        const grp = u.mbtiGroup || inferMbtiGroup(rawMbti);
+
+        if (!rawMbti || rawMbti.includes('不知道') || rawMbti.includes('沒測過') || grp === '不知道 / 沒測過') {
+            if (grp === 'I人') iPersonCount++;
+            else if (grp === 'E人') ePersonCount++;
+            else untestedMbtiCount++;
         } else {
-            mbtiCounts[rawMbti] = (mbtiCounts[rawMbti] || 0) + 1;
+            if (grp === 'I人' || rawMbti.startsWith('I')) iPersonCount++;
+            else if (grp === 'E人' || rawMbti.startsWith('E')) ePersonCount++;
+            else untestedMbtiCount++;
         }
     });
 
@@ -476,6 +499,26 @@ function renderHomeStatsCharts() {
     document.getElementById('statFemaleText').textContent = `${femaleCount} 人 (${femalePct}%)`;
     document.getElementById('statMaleBar').style.width = `${malePct}%`;
     document.getElementById('statFemaleBar').style.width = `${femalePct}%`;
+
+    // 更新 I人 / E人 / 不知道・沒測過 數量紀錄與比例條
+    const mbtiAllTotal = iPersonCount + ePersonCount + untestedMbtiCount;
+    const iPct = mbtiAllTotal > 0 ? Math.round((iPersonCount / mbtiAllTotal) * 100) : 0;
+    const ePct = mbtiAllTotal > 0 ? Math.round((ePersonCount / mbtiAllTotal) * 100) : 0;
+    const untestedPct = mbtiAllTotal > 0 ? Math.round((untestedMbtiCount / mbtiAllTotal) * 100) : 0;
+
+    const iTextEl = document.getElementById('statMbtiIText');
+    const eTextEl = document.getElementById('statMbtiEText');
+    const untestedTextEl = document.getElementById('statMbtiUntestedText');
+    const iBarEl = document.getElementById('statMbtiIBar');
+    const eBarEl = document.getElementById('statMbtiEBar');
+    const untestedBarEl = document.getElementById('statMbtiUntestedBar');
+
+    if (iTextEl) iTextEl.textContent = `${iPersonCount} 人 (${iPct}%)`;
+    if (eTextEl) eTextEl.textContent = `${ePersonCount} 人 (${ePct}%)`;
+    if (untestedTextEl) untestedTextEl.textContent = `${untestedMbtiCount} 人 (${untestedPct}%)`;
+    if (iBarEl) iBarEl.style.width = `${iPct}%`;
+    if (eBarEl) eBarEl.style.width = `${ePct}%`;
+    if (untestedBarEl) untestedBarEl.style.width = `${untestedPct}%`;
 
     // SVG 雙色圓環圖（男：天藍色 #38bdf8 / 女：櫻花粉 #fb7185）
     const radius = 52;
@@ -499,56 +542,28 @@ function renderHomeStatsCharts() {
         </div>
     `;
 
-    // 整理 MBTI 長條圖資料（人數由高到低排序，讓有統計到的 MBTI 優先顯示在最前面）
-    const mbtiEntries = Object.entries(mbtiCounts).sort((a, b) => {
-        if (b[1] !== a[1]) return b[1] - a[1];
-        return standardMbtis.indexOf(a[0]) - standardMbtis.indexOf(b[0]);
-    });
+    // SVG 三色圓環圖（I人：靛紫色 #818cf8 / E人：暖琥珀 #fbbf24 / 不知道・沒測過：霧灰藍 #94a3b8）
+    const iArc = mbtiAllTotal > 0 ? (iPersonCount / mbtiAllTotal) * circumference : 0;
+    const eArc = mbtiAllTotal > 0 ? (ePersonCount / mbtiAllTotal) * circumference : 0;
+    const untestedArc = mbtiAllTotal > 0 ? (untestedMbtiCount / mbtiAllTotal) * circumference : 0;
 
-    const maxMbtiVal = Math.max(1, ...mbtiEntries.map(item => item[1]));
-    const activeEntries = mbtiEntries.filter(item => item[1] > 0);
-
-    const activePillsEl = document.getElementById('mbtiActivePills');
-    if (activeEntries.length > 0) {
-        activePillsEl.innerHTML = activeEntries.slice(0, 6).map(([code, cnt]) => `
-            <span class="px-2 py-0.5 rounded-full bg-rose-50 border border-pink-200 text-[#8f4452] font-bold">
-                ${code} ${cnt}
-            </span>
-        `).join('');
-    } else {
-        activePillsEl.innerHTML = `<span class="text-gray-400">尚無 MBTI 紀錄</span>`;
-    }
-
-    const barPalette = {
-        'IN': 'from-purple-400 to-indigo-400',
-        'EN': 'from-rose-400 to-pink-500',
-        'IS': 'from-teal-400 to-emerald-400',
-        'ES': 'from-amber-400 to-orange-400'
-    };
-
-    mbtiGrid.innerHTML = mbtiEntries.map(([code, cnt]) => {
-        const widthPct = cnt > 0 ? Math.max(8, Math.round((cnt / maxMbtiVal) * 100)) : 0;
-        const prefix = code.slice(0, 2);
-        const grad = barPalette[prefix] || 'from-[#e79aa8] to-[#c96a7b]';
-        const isActive = cnt > 0;
-        return `
-            <div class="flex items-center gap-2 text-xs ${isActive ? '' : 'opacity-50'}">
-                <span class="w-11 font-mono font-bold shrink-0 ${isActive ? 'text-[#8f4452]' : 'text-gray-400'}">${code}</span>
-                <div class="flex-1 h-2.5 rounded-full bg-pink-50 border border-pink-100/80 overflow-hidden">
-                    <div class="h-full rounded-full bg-gradient-to-r ${grad} transition-all duration-500" style="width: ${widthPct}%"></div>
-                </div>
-                <span class="w-9 text-right font-mono font-bold shrink-0 ${isActive ? 'text-[#c96a7b]' : 'text-gray-400'}">${cnt} 人</span>
-            </div>
-        `;
-    }).join('');
-
-    const untestedNote = document.getElementById('mbtiUntestedNote');
-    if (untestedMbtiCount > 0) {
-        untestedNote.textContent = `* 另有 ${untestedMbtiCount} 位玩家選擇「不知道 / 沒測過」MBTI`;
-        untestedNote.classList.remove('hidden');
-    } else {
-        untestedNote.classList.add('hidden');
-    }
+    ieDonutBox.innerHTML = `
+        <svg viewBox="0 0 132 132" class="w-36 h-36 -rotate-90">
+            <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#fce7f3" stroke-width="16"></circle>
+            ${mbtiAllTotal > 0 ? `
+                <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#818cf8" stroke-width="16"
+                    stroke-dasharray="${iArc} ${circumference}" stroke-dashoffset="0"></circle>
+                <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#fbbf24" stroke-width="16"
+                    stroke-dasharray="${eArc} ${circumference}" stroke-dashoffset="${-iArc}"></circle>
+                <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#94a3b8" stroke-width="16"
+                    stroke-dasharray="${untestedArc} ${circumference}" stroke-dashoffset="${-(iArc + eArc)}"></circle>
+            ` : ''}
+        </svg>
+        <div class="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+            <span class="text-[10px] text-gray-400 font-medium">已登記人數</span>
+            <span class="text-lg font-bold font-serif-jp text-[#8f4452] leading-tight">${mbtiAllTotal} 人</span>
+        </div>
+    `;
 }
 
 
@@ -740,6 +755,14 @@ function getMissingRequiredFields() {
                 } else if (!String(appState.profile.city || '').trim()) {
                     missing.push({ key: 'city', label: `${cleanLabel}（縣市）` });
                 }
+            } else if (f.type === 'mbtiTwoStep') {
+                const grp = String(appState.profile.mbtiGroup || inferMbtiGroup(appState.profile.mbti) || '').trim();
+                const code = String(appState.profile.mbti || '').trim();
+                if (!grp) {
+                    missing.push({ key: 'mbti', label: `${cleanLabel}（請先選 I人 或 E人）` });
+                } else if (grp !== '不知道 / 沒測過' && !code) {
+                    missing.push({ key: 'mbti', label: `${cleanLabel}（請選擇 ${grp} 具體人格）` });
+                }
             } else if (f.type === 'multiselect') {
                 const val = appState.profile[f.key];
                 if (!Array.isArray(val) || val.length === 0) {
@@ -859,7 +882,7 @@ function renderProfileForm() {
 function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota) {
     let val = appState.profile[field.key];
     const priv = field.alwaysOpen ? 'open' : (appState.privacy[field.key] || sectionDefaultPriv || 'closed');
-    const fullWidthClass = (field.type === 'textarea' || field.type === 'multiselect' || field.type === 'regionCity') ? 'md:col-span-2' : '';
+    const fullWidthClass = (field.type === 'textarea' || field.type === 'multiselect' || field.type === 'regionCity' || field.type === 'mbtiTwoStep') ? 'md:col-span-2' : '';
     const isGenderLocked = (field.key === 'gender' && !!appState.playerId);
     const isInputDisabled = isProfileLocked || isGenderLocked;
     const lockedInputStyle = isProfileLocked ? '!bg-gray-100 !text-gray-400 !border-gray-300 cursor-not-allowed' : '';
@@ -887,6 +910,38 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
                         <option value="">${selectedRegion ? '請選擇縣市...' : '請先選擇左側地區...'}</option>
                         ${cityList.map(c => `<option value="${c}" ${selectedCity === c ? 'selected' : ''}>${c}</option>`).join('')}
                     </select>
+                </div>
+            </div>
+        `;
+    } else if (field.type === 'mbtiTwoStep') {
+        const selectedGroup = appState.profile.mbtiGroup || inferMbtiGroup(val) || '';
+        const selectedMbti = val || '';
+        const subMbtiList = (selectedGroup === 'I人' || selectedGroup === 'E人') ? (MBTI_GROUPS[selectedGroup] || []) : [];
+        const isUntested = selectedGroup === '不知道 / 沒測過';
+
+        inputHtml = `
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                    <label class="block text-[11px] text-gray-500 mb-1">步驟 1：先選 I人 或 E人</label>
+                    <select name="mbtiGroup" id="profileMbtiGroupSelect" onchange="onProfileMbtiGroupChange(this.value)" class="input-jp ${lockedInputStyle}" ${isProfileLocked ? 'disabled' : ''}>
+                        <option value="">請先選擇 I人 或 E人...</option>
+                        <option value="I人" ${selectedGroup === 'I人' ? 'selected' : ''}>I人（內向型）</option>
+                        <option value="E人" ${selectedGroup === 'E人' ? 'selected' : ''}>E人（外向型）</option>
+                        <option value="不知道 / 沒測過" ${isUntested ? 'selected' : ''}>不知道 / 沒測過</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] text-gray-500 mb-1">步驟 2：再選具體 MBTI 人格</label>
+                    <select name="mbti" id="profileMbtiSelect" onchange="onProfileMbtiChange(this.value)" class="input-jp ${lockedInputStyle}" ${(isProfileLocked || !selectedGroup || isUntested) ? 'disabled' : ''}>
+                        ${isUntested
+                            ? '<option value="不知道 / 沒測過" selected>不知道 / 沒測過</option>'
+                            : `
+                                <option value="">${selectedGroup ? `請選擇 ${selectedGroup} 開頭的人格...` : '請先選擇左側 I人 或 E人...'}</option>
+                                ${subMbtiList.map(code => `<option value="${code}" ${selectedMbti === code ? 'selected' : ''}>${code}</option>`).join('')}
+                            `
+                        }
+                    </select>
+                    <input type="hidden" id="profileMbtiHidden" name="mbti" value="${isUntested ? '不知道 / 沒測過' : selectedMbti}">
                 </div>
             </div>
         `;
@@ -1084,6 +1139,54 @@ window.onProfileCityChange = function(cityVal) {
     appState.profile.city = cityVal || '';
 };
 
+window.onProfileMbtiGroupChange = function(groupVal) {
+    if (Store.getSystemConfig().profileLocked) return;
+    appState.profile.mbtiGroup = groupVal || '';
+    const mbtiSel = document.getElementById('profileMbtiSelect');
+    const mbtiHidden = document.getElementById('profileMbtiHidden');
+
+    if (groupVal === '不知道 / 沒測過') {
+        appState.profile.mbti = '不知道 / 沒測過';
+        if (mbtiSel) {
+            mbtiSel.disabled = true;
+            mbtiSel.innerHTML = '<option value="不知道 / 沒測過" selected>不知道 / 沒測過</option>';
+        }
+        if (mbtiHidden) mbtiHidden.value = '不知道 / 沒測過';
+        return;
+    }
+
+    if (!groupVal || !MBTI_GROUPS[groupVal]) {
+        appState.profile.mbti = '';
+        if (mbtiSel) {
+            mbtiSel.disabled = true;
+            mbtiSel.innerHTML = '<option value="">請先選擇左側 I人 或 E人...</option>';
+        }
+        if (mbtiHidden) mbtiHidden.value = '';
+        return;
+    }
+
+    const validList = MBTI_GROUPS[groupVal];
+    if (!validList.includes(appState.profile.mbti)) {
+        appState.profile.mbti = '';
+    }
+    if (mbtiSel) {
+        mbtiSel.disabled = false;
+        mbtiSel.innerHTML = `<option value="">請選擇 ${groupVal} 開頭的人格...</option>` +
+            validList.map(code => `<option value="${code}" ${appState.profile.mbti === code ? 'selected' : ''}>${code}</option>`).join('');
+    }
+    if (mbtiHidden) mbtiHidden.value = appState.profile.mbti || '';
+};
+
+window.onProfileMbtiChange = function(mbtiVal) {
+    if (Store.getSystemConfig().profileLocked) return;
+    appState.profile.mbti = mbtiVal || '';
+    if (mbtiVal && !appState.profile.mbtiGroup) {
+        appState.profile.mbtiGroup = inferMbtiGroup(mbtiVal);
+    }
+    const mbtiHidden = document.getElementById('profileMbtiHidden');
+    if (mbtiHidden) mbtiHidden.value = mbtiVal || '';
+};
+
 window.onSelectWithOtherChange = function(key, val) {
     if (Store.getSystemConfig().profileLocked) return;
     appState.profile[key] = val || '';
@@ -1222,6 +1325,11 @@ document.getElementById('profileForm').addEventListener('submit', function(e) {
                 const cityVal = fd.get('city') ? fd.get('city').trim() : (document.getElementById('profileCitySelect')?.value || '');
                 nextProfile.region = regVal;
                 nextProfile.city = cityVal;
+            } else if (f.type === 'mbtiTwoStep') {
+                const grpVal = document.getElementById('profileMbtiGroupSelect')?.value || (fd.get('mbtiGroup') ? fd.get('mbtiGroup').trim() : '');
+                const selMbtiVal = document.getElementById('profileMbtiSelect')?.value || document.getElementById('profileMbtiHidden')?.value || '';
+                nextProfile.mbtiGroup = grpVal;
+                nextProfile.mbti = (grpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : selMbtiVal.trim();
             } else if (f.type === 'multiselect') {
                 if (f.allowOther) {
                     nextProfile[`${f.key}Other`] = fd.get(`${f.key}Other`) ? fd.get(`${f.key}Other`).trim() : '';

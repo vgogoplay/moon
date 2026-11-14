@@ -1,6 +1,6 @@
-/* data.js - SCHEMA_VERSION 25：男女生人數限制開關、性別限選男女、地區與縣市聯動、玩家專屬備份還原碼雲端紀錄 */
+/* data.js - SCHEMA_VERSION 27：男女生人數限制開關、性別限選男女、地區與縣市聯動、MBTI 二段式選單（先選I人/E人再選人格）、玩家備份還原碼 */
 
-const SCHEMA_VERSION = 25;
+const SCHEMA_VERSION = 27;
 // 🧪 測試階段開關：true = 全部欄位暫時免必填；正式上線時改為 false 即可恢復全部必填驗證
 const TEST_MODE_OPTIONAL_FIELDS = false;
 
@@ -410,6 +410,21 @@ function inferRegionByCity(city) {
     return '';
 }
 
+// MBTI 二段式分類對照表（先選 I人 或 E人，再選具體 I開頭 或 E開頭 人格）
+const MBTI_GROUPS = {
+    'I人': ['INTJ', 'INTP', 'INFJ', 'INFP', 'ISTJ', 'ISFJ', 'ISTP', 'ISFP'],
+    'E人': ['ENTJ', 'ENTP', 'ENFJ', 'ENFP', 'ESTJ', 'ESFJ', 'ESTP', 'ESFP']
+};
+
+function inferMbtiGroup(mbtiVal) {
+    const code = String(mbtiVal || '').trim().toUpperCase();
+    if (!code) return '';
+    if (code === '不知道 / 沒測過' || code.includes('不知道') || code.includes('沒測過')) return '不知道 / 沒測過';
+    if (MBTI_GROUPS['I人'].includes(code) || code.startsWith('I')) return 'I人';
+    if (MBTI_GROUPS['E人'].includes(code) || code.startsWith('E')) return 'E人';
+    return '';
+}
+
 // 1. 戀愛點滴時刻隨機庫
 const ROMANCE_MOMENTS = [
     {
@@ -661,7 +676,13 @@ const FIELD_SECTIONS = [
                 required: true,
                 options: ['安全型', '焦慮型', '逃避型', '混亂型', '不在意']
             },
-            { key: 'mbti', label: '你的 MBTI', type: 'select', required: true, options: ['INTJ', 'INTP', 'ENTJ', 'ENTP', 'INFJ', 'INFP', 'ENFJ', 'ENFP', 'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ', 'ISTP', 'ISFP', 'ESTP', 'ESFP', '不知道 / 沒測過'] },
+            {
+                key: 'mbti',
+                label: '你的 MBTI（請先選 I人 或 E人，再選具體人格）',
+                type: 'mbtiTwoStep',
+                required: true,
+                options: ['INTJ', 'INTP', 'ENTJ', 'ENTP', 'INFJ', 'INFP', 'ENFJ', 'ENFP', 'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ', 'ISTP', 'ISFP', 'ESTP', 'ESFP', '不知道 / 沒測過']
+            },
             {
                 key: 'relationshipGoal',
                 label: '你／妳期待一段感情走向哪裡？',
@@ -740,7 +761,7 @@ function encodeBackupPayloadShared(payloadObj) {
 }
 
 function buildBackupCodeFromParts(playerId, profileObj, privacyObj) {
-    const allowedProfileKeys = new Set(['region', 'statusOther', 'hobbiesOther']);
+    const allowedProfileKeys = new Set(['region', 'statusOther', 'hobbiesOther', 'mbtiGroup']);
     FIELD_SECTIONS.forEach(sec => {
         sec.fields.forEach(f => {
             allowedProfileKeys.add(f.key);
@@ -956,6 +977,7 @@ const Store = {
         return {
             version: SCHEMA_VERSION,
             playerId: null,
+            lastSyncedCloudUpdatedAt: '',
             isWarnedAccount: false,
             warningReason: '',
             isChatBanned: false,
@@ -965,6 +987,8 @@ const Store = {
                 statusOther: '',
                 region: '',
                 city: '',
+                mbtiGroup: '',
+                mbti: '',
                 hobbies: [],
                 hobbiesOther: ''
             },
@@ -1004,6 +1028,9 @@ const Store = {
         const mergedProfile = { ...base.profile, ...(parsed.profile || {}) };
         if (!mergedProfile.region && mergedProfile.city) {
             mergedProfile.region = inferRegionByCity(mergedProfile.city);
+        }
+        if (!mergedProfile.mbtiGroup && mergedProfile.mbti) {
+            mergedProfile.mbtiGroup = inferMbtiGroup(mergedProfile.mbti);
         }
         if (mergedProfile.gender && mergedProfile.gender !== '男' && mergedProfile.gender !== '女') {
             if (!parsed.playerId) mergedProfile.gender = '';
@@ -1048,6 +1075,7 @@ const Store = {
             if (userRec) {
                 const state = this.normalizeParsedState({
                     playerId: pid,
+                    lastSyncedCloudUpdatedAt: userRec.updatedAt || '',
                     isWarnedAccount: Boolean(userRec.isWarned),
                     warningReason: userRec.warningReason || '',
                     isChatBanned: Boolean(userRec.isChatBanned),
@@ -1067,20 +1095,17 @@ const Store = {
     load() {
         const base = this.getDefaultState();
         try {
-            // 1. 優先支援網址參數 ?playerId=10001
             const urlParams = new URLSearchParams(window.location.search);
             const queryPid = urlParams.get('playerId');
             if (queryPid) {
                 return this.loadByPlayerId(queryPid);
             }
 
-            // 2. 檢查目前分頁是否已綁定特定玩家 ID（支援同瀏覽器多分頁同時登入不同玩家互不覆蓋）
             const tabPid = sessionStorage.getItem(TAB_PLAYER_ID_KEY);
             if (tabPid) {
                 return this.loadByPlayerId(tabPid);
             }
 
-            // 3. 首次開啟分頁時讀取預設本地儲存
             const raw = localStorage.getItem(STORAGE_KEY);
             if (!raw) return base;
             const state = this.normalizeParsedState(JSON.parse(raw));
@@ -1106,6 +1131,9 @@ const Store = {
         if (state.profile && state.profile.city && !state.profile.region) {
             state.profile.region = inferRegionByCity(state.profile.city);
         }
+        if (state.profile && state.profile.mbti && !state.profile.mbtiGroup) {
+            state.profile.mbtiGroup = inferMbtiGroup(state.profile.mbti);
+        }
 
         if (Array.isArray(state.registeredSessions)) {
             state.registeredSessions = Array.from(new Set(state.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
@@ -1113,12 +1141,6 @@ const Store = {
         if (state.matchedSession) {
             state.matchedSession = normalizeSessionLabel(state.matchedSession);
         }
-
-        if (state.playerId) {
-            sessionStorage.setItem(TAB_PLAYER_ID_KEY, String(state.playerId));
-            localStorage.setItem(PLAYER_STATE_PREFIX + String(state.playerId), JSON.stringify(state));
-        }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 
         if (state.playerId && state.profile) {
             const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
@@ -1128,9 +1150,12 @@ const Store = {
             const mergedProfileForRecord = {
                 ...state.profile,
                 nickname: (state.profile.nickname && String(state.profile.nickname).trim()) || `玩家_${state.playerId}`,
-                region: state.profile.region || inferRegionByCity(state.profile.city)
+                region: state.profile.region || inferRegionByCity(state.profile.city),
+                mbtiGroup: state.profile.mbtiGroup || inferMbtiGroup(state.profile.mbti)
             };
             const generatedBackupCode = buildBackupCodeFromParts(state.playerId, mergedProfileForRecord, state.privacy);
+            const nowUpdatedStr = new Date().toLocaleString('zh-TW');
+            state.lastSyncedCloudUpdatedAt = nowUpdatedStr;
 
             const record = {
                 ...existingRecord,
@@ -1148,13 +1173,19 @@ const Store = {
                 matchedSession: state.matchedSession || existingRecord.matchedSession || null,
                 matchedWithId: existingRecord.matchedWithId || null,
                 matchedWithName: state.friends.map(f => f.nickname).join(', ') || existingRecord.matchedWithName || null,
-                updatedAt: new Date().toLocaleString('zh-TW')
+                updatedAt: nowUpdatedStr
             };
             if (idx >= 0) users[idx] = record;
             else users.push(record);
             localStorage.setItem(USERS_KEY, JSON.stringify(users));
             if (typeof CloudSync !== 'undefined') CloudSync.upsertUser(record);
         }
+
+        if (state.playerId) {
+            sessionStorage.setItem(TAB_PLAYER_ID_KEY, String(state.playerId));
+            localStorage.setItem(PLAYER_STATE_PREFIX + String(state.playerId), JSON.stringify(state));
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     },
 
     saveSharedUsers(users) {

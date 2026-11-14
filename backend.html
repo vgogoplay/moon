@@ -404,6 +404,34 @@
         </div>
     </div>
 
+
+    <!-- ✏️ 管理員編輯玩家個人資料 Modal -->
+    <div id="editPlayerModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6 md:p-8 shadow-2xl border-2 border-pink-200 space-y-5">
+            <div class="flex items-center justify-between border-b border-pink-100 pb-3 sticky top-0 bg-white/95 z-10">
+                <div>
+                    <h3 class="text-lg md:text-xl font-bold font-serif-jp text-[#8f4452]" id="editPlayerModalTitle">✏️ 編輯玩家個人資料</h3>
+                    <p class="text-xs text-gray-500">管理員修改後按下「保存修改並同步」，將立即更新資料庫、備份還原碼並同步至前台</p>
+                </div>
+                <button type="button" onclick="closeEditPlayerModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+
+            <form id="adminEditPlayerForm" onsubmit="saveAdminEditedPlayer(event)" class="space-y-6">
+                <input type="hidden" id="editPlayerTargetId">
+                <div id="adminEditPlayerFieldsBody" class="space-y-6"></div>
+
+                <div class="sticky bottom-0 bg-white/95 pt-3 pb-1 border-t border-pink-100 flex flex-wrap justify-end gap-2.5">
+                    <button type="button" onclick="closeEditPlayerModal()" class="px-5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs md:text-sm font-bold shadow-md hover:opacity-95 transition">
+                        💾 保存修改並同步至前台
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         const USERS_KEY = 'yuelao_users';
         const REPORTS_KEY = 'yuelao_reports';
@@ -1655,6 +1683,345 @@
             appendLog(`<span class="text-pink-300">[測試池建立]</span> 已加入 100 名男生與 10 名女生報名「${session}」，執行配對後將只會成功 10 對！`);
         }
 
+
+        const MBTI_GROUPS = {
+            'I人': ['INTJ', 'INTP', 'INFJ', 'INFP', 'ISTJ', 'ISFJ', 'ISTP', 'ISFP'],
+            'E人': ['ENTJ', 'ENTP', 'ENFJ', 'ENFP', 'ESTJ', 'ESFJ', 'ESTP', 'ESFP']
+        };
+
+        function inferMbtiGroup(mbtiVal) {
+            const code = String(mbtiVal || '').trim().toUpperCase();
+            if (!code) return '';
+            if (code === '不知道 / 沒測過' || code.includes('不知道') || code.includes('沒測過')) return '不知道 / 沒測過';
+            if (MBTI_GROUPS['I人'].includes(code) || code.startsWith('I')) return 'I人';
+            if (MBTI_GROUPS['E人'].includes(code) || code.startsWith('E')) return 'E人';
+            return '';
+        }
+
+        const ADMIN_EDIT_SECTIONS = [
+            {
+                title: 'A. 基本資料',
+                defaultPrivacy: 'closed',
+                fields: [
+                    { key: 'nickname', label: '暱稱（好友名單顯示名稱）', type: 'text' },
+                    { key: 'ig', label: 'IG 帳號（滿7天雙方按繼續自動開放）', type: 'text', lockPrivacy: true },
+                    { key: 'gender', label: '性別', type: 'select', options: ['男', '女'], lockPrivacy: true },
+                    { key: 'targetGender', label: '想配對的性別', type: 'select', options: ['男生', '女生', '都可以'] },
+                    { key: 'age', label: '年齡（實歲 22～40 歲）', type: 'number', min: 22, max: 40 },
+                    { key: 'minAge', label: '最小可接受年齡（至少 22 歲）', type: 'number', min: 22, max: 40 },
+                    { key: 'maxAge', label: '最大可接受年齡（最高 40 歲）', type: 'number', min: 22, max: 40 },
+                    { key: 'zodiac', label: '星座', type: 'select', options: ['牡羊座', '金牛座', '雙子座', '巨蟹座', '獅子座', '處女座', '天秤座', '天蠍座', '射手座', '摩羯座', '水瓶座', '雙魚座'] },
+                    { key: 'city', label: '當前居住縣市（先選地區再選縣市）', type: 'regionCity' },
+                    { key: 'distance', label: '可接受的距離', type: 'select', options: ['同縣市', '北中南同區', '全台都可以', '可遠距'] },
+                    { key: 'status', label: '目前身分', type: 'select', allowOther: true, options: ['學生', '上班族', '自由業', '其他'] },
+                    { key: 'school', label: '學校（選填）', type: 'text' },
+                    { key: 'job', label: '科系 / 工作／產業（選填）', type: 'text' },
+                    { key: 'height', label: '身高（公分，選填）', type: 'number' },
+                    { key: 'minHeight', label: '期望對方身高：最低（選填）', type: 'text' },
+                    { key: 'bmi', label: 'BMI（選填）', type: 'select', options: ['小於18.5', '18.5~24(正常區間)', '24以上'] },
+                    { key: 'targetBmi', label: '期望對方 BMI（選填）', type: 'select', options: ['小於18.5', '18.5~24(正常區間)', '24以上', '都可以'] }
+                ]
+            },
+            {
+                title: 'B. 生活習慣、寵物與戀愛觀',
+                defaultPrivacy: 'open',
+                fields: [
+                    { key: 'hasPet', label: '是否有養動物 / 寵物', type: 'select', options: ['沒有養寵物', '狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物'] },
+                    { key: 'likesPets', label: '是否喜歡動物 / 寵物', type: 'select', options: ['是', '否'] },
+                    { key: 'smoking', label: '你抽菸嗎？', type: 'select', options: ['會', '偶爾', '不會'] },
+                    { key: 'acceptSmoking', label: '可接受對方抽菸嗎？', type: 'select', options: ['可以', '偶爾可以', '不行'] },
+                    { key: 'drinking', label: '你喝酒嗎？', type: 'select', options: ['常喝', '社交場合', '不喝'] },
+                    { key: 'acceptDrinking', label: '可接受對方喝酒的程度', type: 'select', options: ['都可以', '社交場合就好', '不行'] },
+                    { key: 'lookingFor', label: '想找關係', type: 'select', options: ['認真交往', '先當朋友', '看感覺', '純找朋友'] },
+                    { key: 'relationshipStatus', label: '目前的感情狀況', type: 'select', options: ['已經準備好認識新的人了（可以進入戀愛的狀態）', '剛結束一段感情，還在調適中', '還沒確定自己是否準備好了', '想先認識適合的人從朋友開始，不急著進入戀愛', '還沒準備好'] },
+                    { key: 'appearancePriority', label: '外表挑對象重要度', type: 'select', options: ['幾乎不看，聊得來最重要(重要性：個性 9 外表 1)', '有點在意，但個性優先(重要性：個性 7 外表 3)', '外表跟個性一樣重要(重要性：個性 5 外表 5)', '很在意，要有一定程度的眼緣(重要性：個性3 外表7)', '非常卡顏，沒感覺就很難開始(重要性：個性1 外表9)'] },
+                    { key: 'contactFrequency', label: '理想的聯絡頻率', type: 'select', options: ['很黏人：最好整天都能聊，訊息秒回最安心', '稍微黏人：每天都想聊上幾輪，分享生活大小事', '剛剛好：每天聊一下就好，有空就多聊一點', '偏向獨立：不用天天聊，想到再傳就好', '很獨立：有事再找對方，各自忙也很自在'] },
+                    { key: 'connectWay', label: '偏好或可接受的認識方式', type: 'select', options: ['先文字訊息聊天再說', '只接受文字訊息聊天', '語音訊息', '語音通話', '視訊通話', '直接約出來見面', '都可以，看對方習慣'] },
+                    { key: 'datingPace', label: '交友步調', type: 'select', options: ['很慢熱，要聊很久、剛認識不要太頻繁傳訊息', '偏慢，慢慢聊、等有感覺再說', '順其自然，看相處狀況', '偏快，聊得來就願意盡快見面', '很快，感覺對了就快速推進'] },
+                    { key: 'loveExp', label: '戀愛經驗（選填）', type: 'select', options: ['沒有談過', '1～2 任', '3～4 任', '5 任以上'] },
+                    { key: 'targetLoveExp', label: '期望對方戀愛經驗（選填）', type: 'select', options: ['不介意', '最好沒談過', '最好 2 任以內', '最好 4 任以內', '至少4 任以上'] },
+                    { key: 'conflictStyle', label: '吵架時通常會', type: 'select', options: ['當場講清楚', '稍微緩一下再說', '看情況', '需要一段時間', '傾向迴避'] },
+                    { key: 'personalSpace', label: '個人空間需求', type: 'select', options: ['1（很少）', '2', '3（適中）', '4', '5（很多）'] },
+                    { key: 'dateCost', label: '約會費用怎麼分', type: 'select', options: ['AA', '輪流請', '看情況', '一方多付'] },
+                    { key: 'attachmentSelf', label: '自己在感情中比較像哪一種', type: 'select', options: ['安全型：信任對方，能親密也能各自獨立', '焦慮型：很在乎對方回應，容易擔心被冷落', '逃避型：重視自由，太親密會想退一步', '混亂型：想靠近又怕受傷，情緒比較起伏', '不確定'] },
+                    { key: 'attachmentTarget', label: '希望對方是哪一種', type: 'select', options: ['安全型', '焦慮型', '逃避型', '混亂型', '不在意'] },
+                    { key: 'mbti', label: 'MBTI（先選 I人 / E人，再選具體人格）', type: 'mbtiTwoStep' },
+                    { key: 'relationshipGoal', label: '期待一段感情走向哪裡', type: 'select', options: ['長期：以結婚為前提，想找一輩子的伴侶', '中長期：認真交往，希望走得長久，未來再看是否結婚', '中期：想談一段穩定的戀愛，先好好相處，不急著想未來', '短中期：先從朋友開始，慢慢認識，有感覺再發展', '短期：想要體驗看看，或是有人陪伴，一起跨年等等，之後再看', '不確定：還不確定，先認識看看再說'] }
+                ]
+            },
+            {
+                title: 'C. 你的興趣嗜好（固定開放）',
+                defaultPrivacy: 'open',
+                fields: [
+                    {
+                        key: 'hobbies', label: '興趣嗜好（可複選）', type: 'multiselect', allowOther: true, lockPrivacy: true,
+                        options: ['聽講故事', '追劇', '投資理財', '電影', '音樂', '動漫', '遊戲', '唱歌', '運動健身', '爬山戶外', '旅行', '美食咖啡廳', '閱讀', '攝影', '手作', '寵物', '桌遊', '藝文展覽', '其他']
+                    }
+                ]
+            },
+            {
+                title: 'D. 讓對方更認識你（固定開放）',
+                defaultPrivacy: 'open',
+                fields: [
+                    { key: 'oneSentence', label: '想對未來配對對象說的一句話或一個問題', type: 'text', lockPrivacy: true },
+                    { key: 'bio', label: '自我介紹', type: 'textarea', lockPrivacy: true },
+                    { key: 'idealPartner', label: '想像中伴侶的模樣', type: 'textarea', lockPrivacy: true },
+                    { key: 'icebreakerQuestion', label: '破冰提問', type: 'textarea', lockPrivacy: true }
+                ]
+            }
+        ];
+
+        function openEditPlayerModal(playerId) {
+            const u = getUsers().find(item => String(item.id) === String(playerId));
+            if (!u) return;
+
+            document.getElementById('editPlayerTargetId').value = String(u.id);
+            document.getElementById('editPlayerModalTitle').textContent = `✏️ 編輯玩家資料：${u.nickname}（ID：${u.id}）`;
+
+            const privMap = u.privacy || {};
+            const container = document.getElementById('adminEditPlayerFieldsBody');
+
+            container.innerHTML = ADMIN_EDIT_SECTIONS.map(sec => `
+                <div class="space-y-3 p-4 rounded-2xl bg-pink-50/35 border border-pink-100">
+                    <h4 class="text-sm md:text-base font-bold font-serif-jp text-[#8f4452] border-b border-pink-200/80 pb-1.5">${sec.title}</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                        ${sec.fields.map(f => {
+                            const val = u[f.key];
+                            const curPriv = privMap[f.key] || sec.defaultPrivacy || 'closed';
+                            const isWide = (f.type === 'textarea' || f.type === 'multiselect' || f.type === 'regionCity' || f.type === 'mbtiTwoStep');
+                            const privSelectHtml = f.lockPrivacy ? '' : `
+                                <select id="edit-priv-${f.key}" class="text-[11px] px-2 py-0.5 rounded-lg border border-pink-200 bg-white text-[#8f4452] font-semibold">
+                                    <option value="open" ${curPriv === 'open' ? 'selected' : ''}>開放給好友</option>
+                                    <option value="closed" ${curPriv === 'closed' ? 'selected' : ''}>不開放</option>
+                                </select>
+                            `;
+
+                            let controlHtml = '';
+                            if (f.type === 'regionCity') {
+                                const selReg = u.region || inferRegionByCity(val) || '';
+                                const selCity = val || '';
+                                const cities = selReg ? (REGION_CITIES[selReg] || []) : [];
+                                controlHtml = `
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <select id="edit-field-region" onchange="onAdminEditRegionChange(this.value)" class="w-full p-2 rounded-xl border border-pink-200 bg-white text-xs">
+                                            <option value="">選擇地區...</option>
+                                            ${Object.keys(REGION_CITIES).map(r => `<option value="${r}" ${selReg === r ? 'selected' : ''}>${r}</option>`).join('')}
+                                        </select>
+                                        <select id="edit-field-city" class="w-full p-2 rounded-xl border border-pink-200 bg-white text-xs">
+                                            <option value="">選擇縣市...</option>
+                                            ${cities.map(c => `<option value="${c}" ${selCity === c ? 'selected' : ''}>${c}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                `;
+                            } else if (f.type === 'mbtiTwoStep') {
+                                const selGrp = u.mbtiGroup || inferMbtiGroup(val) || '';
+                                const selCode = val || '';
+                                const subCodes = (selGrp === 'I人' || selGrp === 'E人') ? (MBTI_GROUPS[selGrp] || []) : [];
+                                const isUntested = selGrp === '不知道 / 沒測過';
+                                controlHtml = `
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <select id="edit-field-mbtiGroup" onchange="onAdminEditMbtiGroupChange(this.value)" class="w-full p-2 rounded-xl border border-pink-200 bg-white text-xs">
+                                            <option value="">先選 I人 或 E人...</option>
+                                            <option value="I人" ${selGrp === 'I人' ? 'selected' : ''}>I人（內向型）</option>
+                                            <option value="E人" ${selGrp === 'E人' ? 'selected' : ''}>E人（外向型）</option>
+                                            <option value="不知道 / 沒測過" ${isUntested ? 'selected' : ''}>不知道 / 沒測過</option>
+                                        </select>
+                                        <select id="edit-field-mbti" ${isUntested ? 'disabled' : ''} class="w-full p-2 rounded-xl border border-pink-200 bg-white text-xs">
+                                            ${isUntested
+                                                ? '<option value="不知道 / 沒測過" selected>不知道 / 沒測過</option>'
+                                                : `
+                                                    <option value="">再選具體人格...</option>
+                                                    ${subCodes.map(c => `<option value="${c}" ${selCode === c ? 'selected' : ''}>${c}</option>`).join('')}
+                                                `
+                                            }
+                                        </select>
+                                    </div>
+                                `;
+                            } else if (f.type === 'select') {
+                                const otherTxt = u[`${f.key}Other`] || '';
+                                const showOther = f.allowOther && val === '其他';
+                                controlHtml = `
+                                    <select id="edit-field-${f.key}" ${f.allowOther ? `onchange="onAdminEditSelectOtherChange('${f.key}', this.value)"` : ''} class="w-full p-2 rounded-xl border border-pink-200 bg-white text-xs">
+                                        <option value="">未選擇</option>
+                                        ${f.options.map(opt => `<option value="${opt}" ${val === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                                    </select>
+                                    ${f.allowOther ? `
+                                        <input type="text" id="edit-field-${f.key}Other" value="${otherTxt}" placeholder="請填寫其他說明..." class="w-full p-2 mt-1.5 rounded-xl border border-pink-200 bg-white text-xs ${showOther ? '' : 'hidden'}">
+                                    ` : ''}
+                                `;
+                            } else if (f.type === 'textarea') {
+                                controlHtml = `<textarea id="edit-field-${f.key}" rows="2" class="w-full p-2 rounded-xl border border-pink-200 bg-white text-xs resize-y">${val || ''}</textarea>`;
+                            } else if (f.type === 'multiselect') {
+                                const arr = Array.isArray(val) ? val : [];
+                                const otherTxt = u[`${f.key}Other`] || '';
+                                controlHtml = `
+                                    <div class="grid grid-cols-3 sm:grid-cols-5 gap-1.5 p-2.5 rounded-xl bg-white border border-pink-200">
+                                        ${f.options.map(opt => `
+                                            <label class="flex items-center gap-1.5 text-xs cursor-pointer">
+                                                <input type="checkbox" name="edit-ms-${f.key}" value="${opt}" ${arr.includes(opt) ? 'checked' : ''} onchange="onAdminEditHobbiesChange()" class="accent-[#c96a7b]">
+                                                <span>${opt}</span>
+                                            </label>
+                                        `).join('')}
+                                    </div>
+                                    <input type="text" id="edit-field-${f.key}Other" value="${otherTxt}" placeholder="請填寫其他興趣..." class="w-full p-2 mt-1.5 rounded-xl border border-pink-200 bg-white text-xs ${arr.includes('其他') ? '' : 'hidden'}">
+                                `;
+                            } else {
+                                const minAttr = f.min !== undefined ? `min="${f.min}"` : '';
+                                const maxAttr = f.max !== undefined ? `max="${f.max}"` : '';
+                                controlHtml = `<input type="${f.type}" id="edit-field-${f.key}" value="${val ?? ''}" ${minAttr} ${maxAttr} class="w-full p-2 rounded-xl border border-pink-200 bg-white text-xs">`;
+                            }
+
+                            return `
+                                <div class="${isWide ? 'md:col-span-2' : ''} p-3 rounded-xl bg-white border border-pink-100 space-y-1.5">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <label class="text-xs font-bold text-[#5e464a]">${f.label}</label>
+                                        ${privSelectHtml}
+                                    </div>
+                                    ${controlHtml}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('editPlayerModal').classList.remove('hidden');
+        }
+
+        function closeEditPlayerModal() {
+            document.getElementById('editPlayerModal').classList.add('hidden');
+        }
+
+        function onAdminEditRegionChange(regionVal) {
+            const citySel = document.getElementById('edit-field-city');
+            if (!citySel) return;
+            const cities = regionVal ? (REGION_CITIES[regionVal] || []) : [];
+            citySel.innerHTML = '<option value="">選擇縣市...</option>' +
+                cities.map(c => `<option value="${c}">${c}</option>`).join('');
+            if (cities.length === 1) citySel.value = cities[0];
+        }
+
+        function onAdminEditMbtiGroupChange(groupVal) {
+            const mbtiSel = document.getElementById('edit-field-mbti');
+            if (!mbtiSel) return;
+            if (groupVal === '不知道 / 沒測過') {
+                mbtiSel.disabled = true;
+                mbtiSel.innerHTML = '<option value="不知道 / 沒測過" selected>不知道 / 沒測過</option>';
+                return;
+            }
+            if (!groupVal || !MBTI_GROUPS[groupVal]) {
+                mbtiSel.disabled = true;
+                mbtiSel.innerHTML = '<option value="">先選 I人 或 E人...</option>';
+                return;
+            }
+            const subCodes = MBTI_GROUPS[groupVal];
+            mbtiSel.disabled = false;
+            mbtiSel.innerHTML = `<option value="">請選擇 ${groupVal} 開頭的人格...</option>` +
+                subCodes.map(c => `<option value="${c}">${c}</option>`).join('');
+        }
+
+        function onAdminEditSelectOtherChange(key, val) {
+            const el = document.getElementById(`edit-field-${key}Other`);
+            if (!el) return;
+            if (val === '其他') el.classList.remove('hidden');
+            else {
+                el.classList.add('hidden');
+                el.value = '';
+            }
+        }
+
+        function onAdminEditHobbiesChange() {
+            const checked = Array.from(document.querySelectorAll('input[name="edit-ms-hobbies"]:checked')).map(cb => cb.value);
+            const otherEl = document.getElementById('edit-field-hobbiesOther');
+            if (otherEl) {
+                if (checked.includes('其他')) otherEl.classList.remove('hidden');
+                else {
+                    otherEl.classList.add('hidden');
+                    otherEl.value = '';
+                }
+            }
+        }
+
+        function saveAdminEditedPlayer(e) {
+            e.preventDefault();
+            const targetId = document.getElementById('editPlayerTargetId').value.trim();
+            const users = getUsers();
+            const idx = users.findIndex(u => String(u.id) === String(targetId));
+            if (idx < 0) return;
+
+            const u = { ...users[idx] };
+            const nextPrivacy = { ...(u.privacy || {}) };
+
+            ADMIN_EDIT_SECTIONS.forEach(sec => {
+                sec.fields.forEach(f => {
+                    if (!f.lockPrivacy) {
+                        const privEl = document.getElementById(`edit-priv-${f.key}`);
+                        if (privEl) nextPrivacy[f.key] = privEl.value;
+                    }
+
+                    if (f.type === 'regionCity') {
+                        const regVal = document.getElementById('edit-field-region')?.value || '';
+                        const cityVal = document.getElementById('edit-field-city')?.value || '';
+                        u.region = regVal || inferRegionByCity(cityVal);
+                        u.city = cityVal;
+                    } else if (f.type === 'mbtiTwoStep') {
+                        const grpVal = document.getElementById('edit-field-mbtiGroup')?.value || '';
+                        const mbtiVal = document.getElementById('edit-field-mbti')?.value || '';
+                        u.mbtiGroup = grpVal;
+                        u.mbti = (grpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : mbtiVal;
+                    } else if (f.type === 'multiselect') {
+                        const checked = Array.from(document.querySelectorAll(`input[name="edit-ms-${f.key}"]:checked`)).map(cb => cb.value);
+                        u[f.key] = checked;
+                        if (f.allowOther) {
+                            u[`${f.key}Other`] = checked.includes('其他')
+                                ? (document.getElementById(`edit-field-${f.key}Other`)?.value.trim() || '')
+                                : '';
+                        }
+                    } else {
+                        const el = document.getElementById(`edit-field-${f.key}`);
+                        if (el) {
+                            u[f.key] = el.value.trim();
+                        }
+                        if (f.allowOther) {
+                            u[`${f.key}Other`] = (u[f.key] === '其他')
+                                ? (document.getElementById(`edit-field-${f.key}Other`)?.value.trim() || '')
+                                : '';
+                        }
+                    }
+                });
+            });
+
+            if (u.mbtiGroup && u.mbtiGroup !== '不知道 / 沒測過' && !u.mbti) {
+                alert(`請為該玩家選擇「${u.mbtiGroup}」開頭的具體 MBTI 人格！`);
+                return;
+            }
+
+            nextPrivacy.gender = 'open';
+            nextPrivacy.ig = 'closed';
+            nextPrivacy.hobbies = 'open';
+            nextPrivacy.oneSentence = 'open';
+            nextPrivacy.bio = 'open';
+            nextPrivacy.idealPartner = 'open';
+            nextPrivacy.icebreakerQuestion = 'open';
+
+            u.privacy = nextPrivacy;
+            u.updatedAt = new Date().toLocaleString('zh-TW') + ' (管理員編輯)';
+            u.backupCode = generatePlayerBackupCode(u);
+
+            users[idx] = u;
+            saveUsers(users);
+
+            localStorage.setItem('yuelao_test_event', JSON.stringify({
+                id: 'CMD_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
+                type: 'FILL_PLAYER_DATA',
+                targetPlayerId: String(u.id),
+                ts: Date.now()
+            }));
+
+            closeEditPlayerModal();
+            appendLog(`<span class="text-sky-300">[管理員編輯資料]</span> 已更新玩家 <strong>${u.nickname} (ID:${u.id})</strong> 的個人資料與備份碼，並即時同步至前台！`);
+        }
+
         function viewPlayerDetail(playerId) {
             const users = getUsers();
             const u = users.find(item => String(item.id) === String(playerId));
@@ -1670,9 +2037,14 @@
                 <div class="md:col-span-2 p-3.5 rounded-2xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-300 space-y-2">
                     <div class="flex flex-wrap items-center justify-between gap-2">
                         <span class="text-xs font-bold text-[#8f4452]">🔑 玩家專屬備份／還原通行碼（若玩家遺忘可複製提供給對方）</span>
-                        <button type="button" onclick="copyPlayerBackupCode('${u.id}')" class="px-3 py-1 rounded-xl bg-[#c96a7b] text-white text-xs font-bold shadow-2xs hover:opacity-95 transition">
-                            📋 一鍵複製備份碼
-                        </button>
+                        <div class="flex items-center gap-1.5">
+                            <button type="button" onclick="document.getElementById('playerDetailModal').classList.add('hidden'); openEditPlayerModal('${u.id}')" class="px-3 py-1 rounded-xl bg-sky-600 text-white text-xs font-bold shadow-2xs hover:bg-sky-700 transition">
+                                ✏️ 編輯此玩家資料
+                            </button>
+                            <button type="button" onclick="copyPlayerBackupCode('${u.id}')" class="px-3 py-1 rounded-xl bg-[#c96a7b] text-white text-xs font-bold shadow-2xs hover:opacity-95 transition">
+                                📋 一鍵複製備份碼
+                            </button>
+                        </div>
                     </div>
                     <textarea rows="3" readonly onclick="this.select()" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-[11px] font-mono text-gray-700 resize-none break-all">${latestCode}</textarea>
                 </div>
@@ -1921,6 +2293,10 @@
                     const criteriaHtml = formatCriteriaHtml(u.exactMatchCriteria || {});
                     const displayRegion = u.region || inferRegionByCity(u.city);
                     const locationLabel = displayRegion ? `${displayRegion}・${u.city || '-'}` : (u.city || '-');
+                    const displayMbtiGrp = u.mbtiGroup || inferMbtiGroup(u.mbti);
+                    const mbtiLabel = (u.mbti && u.mbti !== '不知道 / 沒測過' && (displayMbtiGrp === 'I人' || displayMbtiGrp === 'E人'))
+                        ? `${displayMbtiGrp}(${u.mbti})`
+                        : (u.mbti || '-');
 
                     const historyList = Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0
                         ? u.matchedHistory
@@ -1957,7 +2333,7 @@
                                 <div class="font-bold">${u.nickname}</div>
                                 <div class="text-[11px] text-gray-400">${u.ig || ''} ・ ${u.age || '-'}歲</div>
                             </td>
-                            <td class="p-3.5 text-xs">${u.gender} ・ ${u.zodiac || '-'} ・ ${u.mbti || '-'} ・ ${u.status === '其他' && u.statusOther ? `其他（${u.statusOther}）` : (u.status || '-')} ・ ${locationLabel}</td>
+                            <td class="p-3.5 text-xs">${u.gender} ・ ${u.zodiac || '-'} ・ ${mbtiLabel} ・ ${u.status === '其他' && u.statusOther ? `其他（${u.statusOther}）` : (u.status || '-')} ・ ${locationLabel}</td>
                             <td class="p-3.5 text-xs">
                                 ${sessions.length > 0
                                     ? sessions.map(s => `<span class="inline-block px-2 py-0.5 mr-1 mb-1 rounded-full bg-pink-100 text-[#8f4452] font-semibold">${s}</span>`).join('')
@@ -1968,6 +2344,7 @@
                             <td class="p-3.5 text-xs space-y-1">${statusParts.join('<br>')}</td>
                             <td class="p-3.5 text-xs space-x-1 whitespace-nowrap">
                                 <button onclick="viewPlayerDetail('${u.id}')" class="px-2 py-1 rounded-lg border border-pink-200 text-[#8f4452] hover:bg-pink-50">詳情</button>
+                                <button onclick="openEditPlayerModal('${u.id}')" title="編輯此玩家的個人資料" class="px-2 py-1 rounded-lg bg-sky-600 text-white font-semibold hover:bg-sky-700">✏️ 編輯資料</button>
                                 <button onclick="copyPlayerBackupCode('${u.id}')" title="一鍵複製此玩家的備份／還原通行碼" class="px-2 py-1 rounded-lg bg-pink-100 border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-200">🔑 備份碼</button>
                                 <button onclick="togglePlayerMatchBan('${u.id}')" class="px-2 py-1 rounded-lg font-semibold text-white ${u.isMatchBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-700 hover:bg-gray-800'}">
                                     ${u.isMatchBanned ? '✅ 解除配對限制' : '🚫 禁止配對'}
