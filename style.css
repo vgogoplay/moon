@@ -215,3 +215,170 @@ body {
     50% { transform: translateY(50vh) rotate(180deg) translateX(25px); }
     100% { transform: translateY(110vh) rotate(360deg) translateX(-15px); opacity: 0.1; }
 }
+
+
+/* ==================== 後台左側固定選單（Sidebar）與多頁面佈局 ==================== */
+.admin-shell {
+    display: flex;
+    min-height: 100vh;
+}
+
+.admin-sidebar {
+    width: 256px;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(14px);
+    border-right: 1px solid #f5dce2;
+    box-shadow: 4px 0 24px rgba(201, 106, 123, 0.06);
+    padding: 1.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    z-index: 30;
+}
+
+.admin-sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.sidebar-nav-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.75rem 0.95rem;
+    border-radius: 0.9rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #7d5b61;
+    background: #fff9fa;
+    border: 1.5px solid #f2ced7;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.sidebar-nav-link:hover {
+    background: #fff1f4;
+    color: #8f4452;
+    border-color: #f3d2da;
+}
+
+.sidebar-nav-link.active {
+    background: linear-gradient(135deg, #e79aa8 0%, #c96a7b 100%);
+    color: #ffffff;
+    border-color: #c96a7b;
+    box-shadow: 0 6px 18px rgba(201, 106, 123, 0.26);
+}
+
+.admin-content-area {
+    flex: 1;
+    min-width: 0;
+    padding: 1.25rem 1.5rem 2.5rem;
+}
+
+@media (max-width: 900px) {
+    .admin-shell {
+        flex-direction: column;
+    }
+    .admin-sidebar {
+        width: 100%;
+        height: auto;
+        position: static;
+        border-right: none;
+        border-bottom: 1px solid #f5dce2;
+        padding: 1rem;
+    }
+    .admin-sidebar-nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+    .admin-content-area {
+        padding: 1rem;
+    }
+}
+
+/* ==================== 後台選項與表格「格子欄位框框」統一強化樣式 ==================== */
+.admin-grid-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1.5px solid #eebcc9;
+    background-color: #ffffff;
+}
+
+.admin-grid-table thead th {
+    border: 1px solid #eab7c4;
+    background-color: #fff0f4;
+    color: #8f4452;
+    font-weight: 700;
+}
+
+.admin-grid-table tbody td {
+    border: 1px solid #f3cfd8;
+    vertical-align: middle;
+}
+
+.admin-grid-table tbody tr:hover td {
+    background-color: #fff8fa;
+}
+
+.admin-field-box {
+    background-color: #fff9fa;
+    border: 1.5px solid #f1c4d0;
+    border-radius: 0.95rem;
+    padding: 0.72rem 0.85rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.admin-field-box:focus-within {
+    border-color: #c96a7b;
+    box-shadow: 0 0 0 3px rgba(201, 106, 123, 0.12);
+}
+
+.admin-input-box {
+    border: 1.5px solid #e5b0bd !important;
+    background-color: #ffffff !important;
+    border-radius: 0.75rem;
+    transition: all 0.18s ease;
+}
+
+.admin-input-box:hover:not(:disabled) {
+    border-color: #c96a7b !important;
+}
+
+.admin-input-box:focus {
+    outline: none;
+    border-color: #b54d60 !important;
+    box-shadow: 0 0 0 3px rgba(201, 106, 123, 0.16);
+}
+
+.sim-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    padding: 0.65rem 0.85rem;
+    border: 1.5px solid #e5b0bd;
+    border-radius: 0.85rem;
+    background-color: #fff9fa;
+    color: #6e3a43;
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.4;
+    text-align: left;
+    box-shadow: 0 1px 3px rgba(201, 106, 123, 0.08);
+    transition: all 0.18s ease;
+    cursor: pointer;
+}
+
+.sim-btn:hover {
+    border-color: #c96a7b;
+    background-color: #fff0f4;
+    color: #8f4452;
+    box-shadow: 0 4px 12px rgba(201, 106, 123, 0.16);
+    transform: translateY(-1px);
+}

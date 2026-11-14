@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>信件・回報與測試 ✉️ 月老神社後台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body data-admin-page="ops">
+    <div id="adminLayoutMount" class="space-y-6">
+        <!-- 玩家問題回報清單 -->
+        <div class="card-jp rounded-2xl overflow-hidden border-2 border-pink-200">
+            <div class="p-5 border-b border-pink-200 flex items-center justify-between bg-amber-50/40">
+                <div>
+                    <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">📮 玩家問題回報表單（僅後台管理員可見）</h2>
+                </div>
+                <button onclick="renderAdminAll()" class="text-xs px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50">
+                    ↻ 重新整理
+                </button>
+            </div>
+            <div class="overflow-x-auto p-3 bg-white">
+                <table class="admin-grid-table text-left text-xs md:text-sm">
+                    <thead>
+                        <tr class="text-xs">
+                            <th class="p-3.5">單號 / 時間</th>
+                            <th class="p-3.5">問題類型</th>
+                            <th class="p-3.5">回報玩家</th>
+                            <th class="p-3.5">問題內容描述</th>
+                            <th class="p-3.5">處理狀態</th>
+                            <th class="p-3.5">管理操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reportsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ==================== 🧪 互動流程測試工具 ==================== -->
+        <div class="card-jp rounded-2xl p-5 bg-pink-50/50 border-2 border-pink-200 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🧪 互動流程測試工具（即時連動前台畫面）</h2>
+                    <p class="text-xs text-gray-500">可指定特定玩家 ID 一鍵填滿全部資料，或連續點擊新增多位好友（不限人數，可測試 6 位好友與每隔 2 天心動通知）</p>
+                </div>
+                <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold text-[#8f4452]">測試場次：</span>
+                    <select id="adminSessionSelect" class="p-2 admin-input-box text-xs font-bold text-[#8f4452]"></select>
+                    <button onclick="runSessionMatch(false)" class="px-4 py-2 rounded-xl bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition">
+                        🌙 立即模擬 20:00 到點自動配對
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                <div class="admin-field-box flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold text-[#8f4452]">📝 指定玩家 ID 填滿資料：</span>
+                    <input type="text" id="fillTargetPlayerId" placeholder="輸入玩家 ID（如 10001）" class="w-40 p-2 admin-input-box text-xs font-mono">
+                    <button onclick="adminFillPlayerFullData()" class="px-3.5 py-2 rounded-xl bg-[#8f4452] text-white text-xs font-bold hover:bg-[#753541] transition">
+                        ✨ 一鍵填滿該 ID 全部資料
+                    </button>
+                </div>
+
+                <div class="admin-field-box flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold text-[#8f4452]">💞 測試 C 連動好友（可連續點加到6位）：</span>
+                    <input type="text" id="linkFriendCTargetId" placeholder="輸入需聯動的玩家 ID" class="w-40 p-2 admin-input-box text-xs font-mono">
+                    <button onclick="adminLinkFriendCToPlayer()" class="px-3.5 py-2 rounded-xl bg-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition">
+                        💞 連動新增一位好友
+                    </button>
+                </div>
+            </div>
+
+            <div class="p-4 rounded-2xl bg-white border-2 border-pink-200 space-y-2.5">
+                <p class="text-xs font-bold text-[#8f4452]">⚡ 快速流程測試選項：</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    <button type="button" onclick="seedSampleABCDE()" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
+                        👥 1. 匯入 A~E 測試名單（A/B/C男 + D/E女）
+                    </button>
+                    <button type="button" onclick="seedAsymmetricPool()" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
+                        📊 2. 模擬 100男 (10001~10100) vs 10女 (20001~20010)
+                    </button>
+                    <button type="button" onclick="triggerFrontendTestEvent('ADVANCE_CONFESSION_2000')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
+                        💘 3. 連動前台：推進至每隔 2 天 20:00 心動抉擇
+                    </button>
+                    <button type="button" onclick="triggerFrontendTestEvent('MINUS_ONE_DAY')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
+                        ⏩ 4. 連動前台：過 20:00 剩餘天數 -1 天
+                    </button>
+                    <button type="button" onclick="triggerFrontendTestEvent('EXPIRE_TO_ZERO_DAYS')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
+                        ⏳ 5. 連動前台：剩餘 0 天（禁止發話＆觸發是否繼續）
+                    </button>
+                    <button type="button" onclick="triggerFrontendTestEvent('PARTNER_ACCEPT_CONTINUE')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
+                        💖 6. 連動前台：模擬對方按下「繼續配對」
+                    </button>
+                    <button type="button" onclick="triggerFrontendTestEvent('PARTNER_DECLINE_OR_TIMEOUT')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
+                        💔 7. 連動前台：模擬對方沒按繼續（雙方清空好友）
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ✉️ 管理員發送信件／文字給前台玩家 ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-4">
+            <div>
+                <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">✉️ 發送信件 / 文字給前台玩家（玩家可於前台「✉️ 信件」點開閱讀）</h2>
+                <p class="text-xs text-gray-500">可指定特定玩家 ID 單獨發送，或選擇「全體玩家」群發系統公告與提醒信件</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-stretch">
+                <div class="md:col-span-3 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 收件對象（玩家 ID 或全體）</label>
+                    <div class="flex gap-1.5">
+                        <input type="text" id="mailTargetPlayerId" value="ALL" placeholder="輸入玩家 ID 或 ALL" class="w-full p-2.5 admin-input-box text-xs font-mono">
+                        <button type="button" onclick="document.getElementById('mailTargetPlayerId').value='ALL'" class="px-2.5 py-2 rounded-xl bg-pink-100 border border-pink-300 text-[#8f4452] text-[11px] font-bold shrink-0 hover:bg-pink-200">
+                            全體
+                        </button>
+                    </div>
+                </div>
+                <div class="md:col-span-3 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">2. 信件標題 <span class="text-rose-500">*</span></label>
+                    <input type="text" id="mailTitleInput" placeholder="例如：月老小提醒 / 系統通知" class="w-full p-2.5 admin-input-box text-xs">
+                </div>
+                <div class="md:col-span-4 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">3. 信件文字內容 <span class="text-rose-500">*</span></label>
+                    <input type="text" id="mailContentInput" placeholder="輸入要發送給玩家的文字內容..." class="w-full p-2.5 admin-input-box text-xs">
+                </div>
+                <div class="md:col-span-2 admin-field-box flex flex-col justify-end">
+                    <label class="block text-[11px] font-semibold text-gray-500 mb-1.5">確認寄出</label>
+                    <button type="button" onclick="sendAdminMailboxMessage()" class="w-full py-2.5 px-4 rounded-xl bg-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition shadow">
+                        📤 發送信件
+                    </button>
+                </div>
+            </div>
+
+            <div id="adminSentMailsList" class="space-y-1.5 pt-1"></div>
+        </div>
+
+        <!-- ==================== 🚫 禁止字眼與警告帳號規則管理 ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 space-y-3">
+            <div>
+                <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🚫 禁止字眼與警告帳號規則設定</h2>
+                <p class="text-xs text-gray-500">玩家前台填寫資料包含以下禁止字眼並按保存後，系統將顯示「目前警告帳號 不提供配對」並封鎖其配對資格</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-stretch">
+                <div class="md:col-span-4 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 套用檢查欄位</label>
+                    <select id="banFieldSelect" class="w-full p-2.5 admin-input-box text-xs font-semibold text-[#8f4452]">
+                        <option value="ig">IG 帳號欄位</option>
+                        <option value="nickname">暱稱欄位</option>
+                        <option value="bio">自我介紹欄位</option>
+                        <option value="all">全部文字欄位</option>
+                    </select>
+                </div>
+                <div class="md:col-span-5 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">2. 禁止字眼關鍵字</label>
+                    <input type="text" id="banKeywordInput" placeholder="輸入禁止字眼（例如：gak）" class="w-full p-2.5 admin-input-box text-xs">
+                </div>
+                <div class="md:col-span-3 admin-field-box flex flex-col justify-end">
+                    <label class="block text-[11px] font-semibold text-gray-500 mb-1.5">加入規則</label>
+                    <button onclick="addBannedRule()" class="w-full px-4 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 transition">
+                        ➕ 新增禁止字眼
+                    </button>
+                </div>
+            </div>
+
+            <div id="bannedRulesList" class="flex flex-wrap gap-2 pt-1"></div>
+        </div>
+    </div>
+
+    
+
+    <!-- 前後台共用核心層 -->
+    <script src="shared/schedule.js"></script>
+    <script src="shared/schema.js"></script>
+    <script src="shared/cloud-store.js"></script>
+    <!-- 後台共用狀態與頁面模組 -->
+    <script src="backend/state.js"></script>
+    <script src="backend/matching.js"></script>
+    <script src="backend/ops.js"></script>
+    <!-- 渲染左側選單與登入驗證 -->
+    <script src="backend/layout.js"></script>
+</body>
+</html>
