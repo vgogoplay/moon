@@ -880,6 +880,7 @@ function refreshAllUI() {
     }
 
     // 渲染第 2 種活動（後台創建並開啟的專屬活動按鈕，僅在後台開啟時顯示）
+    const customSectionBox = document.getElementById('customActivitySection');
     const customBtnBox = document.getElementById('customActivitiesBtnContainer');
     const customAlertBox = document.getElementById('customActivityAlertBox');
     const openCustomActs = (typeof Store.getOpenCustomActivities === 'function') ? Store.getOpenCustomActivities() : [];
@@ -887,11 +888,13 @@ function refreshAllUI() {
 
     if (customBtnBox && customAlertBox) {
         if (openCustomActs.length === 0) {
+            if (customSectionBox) customSectionBox.classList.add('hidden');
             customBtnBox.classList.add('hidden');
             customBtnBox.innerHTML = '';
             customAlertBox.classList.add('hidden');
             customAlertBox.innerHTML = '';
         } else {
+            if (customSectionBox) customSectionBox.classList.remove('hidden');
             customBtnBox.classList.remove('hidden');
             customBtnBox.innerHTML = openCustomActs.map(act => {
                 const isReg = Boolean(myCustomRegs[act.id]);
@@ -939,7 +942,7 @@ function refreshAllUI() {
 
             customAlertBox.classList.remove('hidden');
             customAlertBox.innerHTML = `
-                <div class="text-xs space-y-1">
+                <div class="text-xs space-y-2">
                     <p class="font-bold text-[#8f4452]">✨ 獨立專屬活動通知（與上方週三／週六場次互不影響）：</p>
                     ${statusLines.map(line => `<p>${line}</p>`).join('')}
                 </div>
