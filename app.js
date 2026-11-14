@@ -171,7 +171,16 @@ function syncFromSharedStorage() {
             if (me.privacy && typeof me.privacy === 'object') {
                 appState.privacy = { ...appState.privacy, ...me.privacy };
             }
+            if (typeof deriveFixedBackupCode === 'function') {
+                appState.backupCode = deriveFixedBackupCode(appState.playerId);
+            }
             stateChanged = true;
+        }
+        if (appState.playerId && typeof deriveFixedBackupCode === 'function') {
+            const fixedCode = deriveFixedBackupCode(appState.playerId);
+            if (appState.backupCode !== fixedCode) {
+                appState.backupCode = fixedCode;
+            }
         }
 
         // 同步後台禁止發話狀態
@@ -1468,7 +1477,7 @@ document.getElementById('profileForm').addEventListener('submit', function(e) {
     }
     showMiniNotice(
         '✨ 保存成功',
-        `玩家專屬 ID：${appState.playerId}\n\n現在可前往「緣分首頁」勾選場次報名配對。`
+        `玩家專屬 ID：${appState.playerId}\n5 碼專屬通行碼：${appState.backupCode || ''}\n（換手機或瀏覽器時輸入此 5 碼即可讀取紀錄）\n\n現在可前往「緣分首頁」勾選場次報名配對。`
     );
 });
 
@@ -2286,29 +2295,17 @@ function submitEveningConfession() {
     );
 }
 
-// ==================== 紅線永久通行碼（改用專用多行視窗，解決瀏覽器 prompt 2000 字截斷問題） ====================
-function encodeBackupPayload(payloadObj) {
-    const jsonStr = JSON.stringify(payloadObj);
-    if (typeof TextEncoder !== 'undefined') {
-        const bytes = new TextEncoder().encode(jsonStr);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return btoa(binary);
-    }
-    return btoa(unescape(encodeURIComponent(jsonStr)));
-}
+// ==================== 紅線 5 碼英數通行碼（備份 / 跨瀏覽器還原） ====================
+let backupRestoreFailCount = 0;
+let backupRestoreLockUntil = 0;
 
-function decodeBackupPayload(rawCodeStr) {
-    // 自動清除 LINE / 瀏覽器複製時可能夾帶的換行、空白或全形空白，並補齊 Base64 尾端 '='
+function decodeLegacyBackupPayload(rawCodeStr) {
     let cleaned = String(rawCodeStr || '').replace(/[\s　]+/g, '');
     if (!cleaned) throw new Error('EMPTY_CODE');
     cleaned = cleaned.replace(/-/g, '+').replace(/_/g, '/');
     while (cleaned.length % 4 !== 0) {
         cleaned += '=';
     }
-
     const binary = atob(cleaned);
     let jsonStr = '';
     if (typeof TextDecoder !== 'undefined') {
@@ -2324,31 +2321,15 @@ function decodeBackupPayload(rawCodeStr) {
 }
 
 function buildCurrentBackupCode() {
-    if (typeof buildBackupCodeFromParts === 'function') {
-        return buildBackupCodeFromParts(appState.playerId || null, appState.profile, appState.privacy);
+    if (!appState.playerId) return '';
+    const fixedCode = (typeof deriveFixedBackupCode === 'function')
+        ? deriveFixedBackupCode(appState.playerId)
+        : String(appState.backupCode || '').trim().toUpperCase();
+    if (fixedCode && appState.backupCode !== fixedCode) {
+        appState.backupCode = fixedCode;
+        Store.save(appState);
     }
-    const compactProfile = {};
-    if (appState.profile && typeof appState.profile === 'object') {
-        Object.entries(appState.profile).forEach(([k, v]) => {
-            if (v !== '' && v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)) {
-                compactProfile[k] = v;
-            }
-        });
-    }
-    const defaultPrivacy = Store.getDefaultState().privacy;
-    const compactPrivacy = {};
-    if (appState.privacy && typeof appState.privacy === 'object') {
-        Object.entries(appState.privacy).forEach(([k, v]) => {
-            if (v && v !== defaultPrivacy[k]) {
-                compactPrivacy[k] = v;
-            }
-        });
-    }
-    return encodeBackupPayload({
-        playerId: appState.playerId || null,
-        profile: compactProfile,
-        privacy: compactPrivacy
-    });
+    return fixedCode;
 }
 
 function exportBackupCode() {
@@ -2375,7 +2356,10 @@ function closeBackupModal() {
 
 async function copyBackupCodeToClipboard() {
     const exportBox = document.getElementById('backupExportTextarea');
-    if (!exportBox || !exportBox.value) return;
+    if (!exportBox || !exportBox.value) {
+        showMiniNotice('⚠️ 尚未產生通行碼', '請先填寫個人資料並點擊「保存」，系統即會自動產生專屬 5 碼英數通行碼！');
+        return;
+    }
     exportBox.focus();
     exportBox.select();
     exportBox.setSelectionRange(0, exportBox.value.length);
@@ -2395,68 +2379,136 @@ async function copyBackupCodeToClipboard() {
     }
 
     if (copied) {
-        showMiniNotice('📋 複製成功', '已完整複製你的紅線永久通行碼！可至其他瀏覽器或手機貼上還原。');
+        showMiniNotice('📋 複製成功', `已複製您的 5 碼專屬通行碼【${exportBox.value}】！\n可至其他瀏覽器或手機輸入此 5 碼讀取紀錄。`);
     } else {
-        showMiniNotice('💡 請手動複製', '已為你全選通行碼文字框，請按 Ctrl+C（或長按選單「複製」）。');
+        showMiniNotice('💡 請手動複製', `已為您全選通行碼【${exportBox.value}】，請按 Ctrl+C（或長按「複製」）。`);
     }
 }
 
-function restoreFromBackupCode() {
-    const importBox = document.getElementById('backupImportTextarea');
-    const rawInput = importBox ? importBox.value : '';
-    if (!rawInput || !rawInput.trim()) {
-        showMiniNotice('⚠️ 尚未貼上通行碼', '請先在下方文字框貼上你要還原的 eyJ... 通行碼！');
+async function restoreFromBackupCode() {
+    const now = Date.now();
+    if (now < backupRestoreLockUntil) {
+        const waitSec = Math.ceil((backupRestoreLockUntil - now) / 1000);
+        showMiniNotice('⏳ 請稍候再試', `連續輸入錯誤次數過多，請於 ${waitSec} 秒後再重新輸入 5 碼通行碼。`);
         return;
     }
 
-    try {
-        const restored = decodeBackupPayload(rawInput);
-        if (!restored || typeof restored !== 'object' || !restored.profile) {
-            throw new Error('INVALID_PAYLOAD');
-        }
-
-        const freshBase = Store.getDefaultState();
-        if (restored.playerId) {
-            appState.playerId = String(restored.playerId);
-        }
-        appState.profile = { ...freshBase.profile, ...restored.profile };
-        if (!appState.profile.region && appState.profile.city) {
-            appState.profile.region = inferRegionByCity(appState.profile.city);
-        }
-        appState.privacy = { ...freshBase.privacy, ...(restored.privacy || {}) };
-        FIELD_SECTIONS.forEach(sec => {
-            sec.fields.forEach(f => {
-                if (f.alwaysOpen) appState.privacy[f.key] = 'open';
-            });
-        });
-        appState.privacy.ig = 'closed';
-
-        // 若雲端/後台已有該玩家 ID 的報名場次與條件，一併同步載入避免覆蓋
-        if (appState.playerId) {
-            const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-            const cloudUser = users.find(u => String(u.id) === String(appState.playerId));
-            if (cloudUser) {
-                if (Array.isArray(cloudUser.registeredSessions)) {
-                    appState.registeredSessions = Array.from(new Set(cloudUser.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
-                }
-                if (cloudUser.exactMatchCriteria && typeof cloudUser.exactMatchCriteria === 'object') {
-                    appState.exactMatchCriteria = { ...cloudUser.exactMatchCriteria };
-                }
-                appState.isWarnedAccount = Boolean(cloudUser.isWarned);
-                appState.warningReason = cloudUser.warningReason || '';
-                appState.isChatBanned = Boolean(cloudUser.isChatBanned);
-            }
-        }
-
-        Store.save(appState);
-        syncFromSharedStorage();
-        renderProfileForm();
-        refreshAllUI();
-        closeBackupModal();
-        showMiniNotice('🌸 還原成功', `通行碼還原成功！${appState.playerId ? `（玩家專屬 ID：${appState.playerId}）` : ''}你的個人資料與隱私設定已載入。`);
-    } catch (err) {
-        showMiniNotice('⚠️ 格式錯誤', '通行碼格式不正確或文字不完整（請確認在原本的瀏覽器重新開啟「備份/還原碼」並點擊「一鍵複製全部」）。');
+    const importBox = document.getElementById('backupImportTextarea');
+    const rawInput = importBox ? importBox.value : '';
+    const cleaned = String(rawInput || '').replace(/[\s　]+/g, '').toUpperCase();
+    if (!cleaned) {
+        showMiniNotice('⚠️ 尚未輸入通行碼', '請先在下方欄位輸入您的 5 碼英數通行碼（例如：K8M2P）！');
+        return;
     }
+
+    // 相容舊版長字串 Base64 通行碼
+    if (cleaned.length > 12) {
+        try {
+            const restored = decodeLegacyBackupPayload(rawInput);
+            if (!restored || typeof restored !== 'object' || !restored.profile) {
+                throw new Error('INVALID_PAYLOAD');
+            }
+            const freshBase = Store.getDefaultState();
+            if (restored.playerId) appState.playerId = String(restored.playerId);
+            appState.profile = { ...freshBase.profile, ...restored.profile };
+            if (!appState.profile.region && appState.profile.city) {
+                appState.profile.region = inferRegionByCity(appState.profile.city);
+            }
+            appState.privacy = { ...freshBase.privacy, ...(restored.privacy || {}) };
+            FIELD_SECTIONS.forEach(sec => {
+                sec.fields.forEach(f => {
+                    if (f.alwaysOpen) appState.privacy[f.key] = 'open';
+                });
+            });
+            appState.privacy.ig = 'closed';
+            Store.save(appState);
+            syncFromSharedStorage();
+            renderProfileForm();
+            refreshAllUI();
+            closeBackupModal();
+            showMiniNotice('🌸 還原成功', `舊版通行碼還原成功，並已為您升級為最新 5 碼通行碼【${appState.backupCode}】！`);
+        } catch (err) {
+            showMiniNotice('⚠️ 格式錯誤', '通行碼格式不正確，請確認是否輸入完整。');
+        }
+        return;
+    }
+
+    if (!/^[A-Z0-9]{5}$/.test(cleaned)) {
+        showMiniNotice('⚠️ 格式不符', '請輸入正確的「5 碼英文＋數字」通行碼（例如：K8M2P）！');
+        return;
+    }
+
+    // 先向 Firebase 同步最新玩家資料庫，確保跨瀏覽器／新手機可即時查到
+    if (typeof CloudSync !== 'undefined' && CloudSync.inFlightWrites === 0) {
+        await CloudSync.fetchFullTree();
+    }
+
+    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const matchedUser = users.find(u => {
+        if (!u || !u.id) return false;
+        const storedCode = String(u.backupCode || '').trim().toUpperCase();
+        const derivedCode = (typeof deriveFixedBackupCode === 'function') ? deriveFixedBackupCode(u.id) : '';
+        return storedCode === cleaned || derivedCode === cleaned;
+    });
+
+    if (!matchedUser) {
+        backupRestoreFailCount++;
+        if (backupRestoreFailCount >= 5) {
+            backupRestoreLockUntil = Date.now() + 30000;
+            backupRestoreFailCount = 0;
+            showMiniNotice('⏳ 輸錯次數過多', '連續輸錯 5 次，系統已暫時鎖定 30 秒，請確認通行碼後再試。');
+        } else {
+            showMiniNotice('⚠️ 查無此通行碼', `找不到通行碼【${cleaned}】對應的玩家紀錄（剩餘可嘗試 ${5 - backupRestoreFailCount} 次），請確認英數字是否輸入正確。`);
+        }
+        return;
+    }
+
+    backupRestoreFailCount = 0;
+    const pid = String(matchedUser.id);
+    const loadedState = Store.loadByPlayerId(pid);
+    const freshBase = Store.getDefaultState();
+
+    loadedState.playerId = pid;
+    loadedState.backupCode = cleaned;
+    loadedState.lastSyncedCloudUpdatedAt = matchedUser.updatedAt || '';
+    loadedState.isWarnedAccount = Boolean(matchedUser.isWarned);
+    loadedState.warningReason = matchedUser.warningReason || '';
+    loadedState.isChatBanned = Boolean(matchedUser.isChatBanned);
+    loadedState.profile = { ...freshBase.profile, ...loadedState.profile, ...matchedUser };
+    if (!loadedState.profile.region && loadedState.profile.city) {
+        loadedState.profile.region = inferRegionByCity(loadedState.profile.city);
+    }
+    if (!loadedState.profile.mbtiGroup && loadedState.profile.mbti) {
+        loadedState.profile.mbtiGroup = inferMbtiGroup(loadedState.profile.mbti);
+    }
+    loadedState.privacy = { ...freshBase.privacy, ...(matchedUser.privacy || loadedState.privacy || {}) };
+    FIELD_SECTIONS.forEach(sec => {
+        sec.fields.forEach(f => {
+            if (f.alwaysOpen) loadedState.privacy[f.key] = 'open';
+        });
+    });
+    loadedState.privacy.ig = 'closed';
+
+    if (Array.isArray(matchedUser.registeredSessions)) {
+        loadedState.registeredSessions = Array.from(new Set(matchedUser.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+    }
+    if (matchedUser.exactMatchCriteria && typeof matchedUser.exactMatchCriteria === 'object') {
+        loadedState.exactMatchCriteria = { ...matchedUser.exactMatchCriteria };
+    }
+
+    appState = loadedState;
+    lastRenderedChatSignature = '';
+    Store.save(appState);
+    syncFromSharedStorage();
+    renderProfileForm();
+    refreshAllUI();
+    updateMailboxBadge();
+    closeBackupModal();
+
+    showMiniNotice(
+        '🌸 讀取紀錄成功',
+        `已透過 5 碼通行碼【${cleaned}】成功載入您的紀錄！\n\n玩家暱稱：${matchedUser.nickname || '未設定'}\n玩家專屬 ID：${pid}`
+    );
 }
 
 

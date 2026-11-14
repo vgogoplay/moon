@@ -1,6 +1,6 @@
 /* data.js - SCHEMA_VERSION 27：男女生人數限制開關、性別限選男女、地區與縣市聯動、MBTI 二段式選單（先選I人/E人再選人格）、玩家備份還原碼 */
 
-const SCHEMA_VERSION = 27;
+const SCHEMA_VERSION = 29;
 // 🧪 測試階段開關：true = 全部欄位暫時免必填；正式上線時改為 false 即可恢復全部必填驗證
 const TEST_MODE_OPTIONAL_FIELDS = false;
 
@@ -746,60 +746,67 @@ const FIELD_SECTIONS = [
     }
 ];
 
-// 共享備份還原碼編碼器（前／後台一致格式，供玩家遺忘時由後台查詢提供）
-function encodeBackupPayloadShared(payloadObj) {
-    const jsonStr = JSON.stringify(payloadObj);
-    if (typeof TextEncoder !== 'undefined') {
-        const bytes = new TextEncoder().encode(jsonStr);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return btoa(binary);
-    }
-    return btoa(unescape(encodeURIComponent(jsonStr)));
+// 固定唯一 5 碼英數混合備份／還原通行碼產生器（雙射演算法綁定唯一玩家 ID，跨裝置與前後台永遠固定不變且 100% 不重複）
+const SHORT_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function isValidShortBackupCode(code) {
+    return /^[A-Z0-9]{5}$/.test(String(code || '').trim().toUpperCase());
 }
 
-function buildBackupCodeFromParts(playerId, profileObj, privacyObj) {
-    const allowedProfileKeys = new Set(['region', 'statusOther', 'hobbiesOther', 'mbtiGroup']);
-    FIELD_SECTIONS.forEach(sec => {
-        sec.fields.forEach(f => {
-            allowedProfileKeys.add(f.key);
-            if (f.allowOther) allowedProfileKeys.add(`${f.key}Other`);
-        });
-    });
-
-    const compactProfile = {};
-    if (profileObj && typeof profileObj === 'object') {
-        Object.entries(profileObj).forEach(([k, v]) => {
-            if (!allowedProfileKeys.has(k)) return;
-            if (v !== '' && v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)) {
-                compactProfile[k] = v;
-            }
-        });
+function deriveFixedBackupCode(playerId) {
+    const s = String(playerId || '').trim();
+    if (!s) return '';
+    const MASK = 0x1FFFFFF; // 2^25 - 1 = 33,554,431 (32^5 - 1)
+    let x = 0;
+    if (/^\d+$/.test(s)) {
+        const n = parseInt(s, 10);
+        x = (n + 135791) & MASK;
+    } else {
+        let h = 2166136261 >>> 0;
+        for (let i = 0; i < s.length; i++) {
+            h ^= s.charCodeAt(i);
+            h = Math.imul(h, 16777619) >>> 0;
+        }
+        x = h & MASK;
     }
 
-    const defaultPrivacy = {};
-    FIELD_SECTIONS.forEach(sec => {
-        sec.fields.forEach(f => {
-            defaultPrivacy[f.key] = f.alwaysOpen ? 'open' : (sec.defaultPrivacy || 'closed');
-        });
-    });
+    // 三輪 25-bit 雙射置換（一對一映射，確保不同玩家 ID 永遠產生不同且固定不變的 5 碼英數）
+    x = (Math.imul(x, 22695477) + 1234567) & MASK;
+    x ^= (x >>> 13);
+    x = (Math.imul(x, 1103515245) + 7654321) & MASK;
+    x ^= (x >>> 11);
+    x = (Math.imul(x, 134775813) + 9876543) & MASK;
+    x ^= (x >>> 12);
 
-    const compactPrivacy = {};
-    if (privacyObj && typeof privacyObj === 'object') {
-        Object.entries(privacyObj).forEach(([k, v]) => {
-            if (v && v !== defaultPrivacy[k]) {
-                compactPrivacy[k] = v;
-            }
-        });
+    let code = '';
+    let temp = x >>> 0;
+    for (let i = 0; i < 5; i++) {
+        code += SHORT_CODE_CHARS[temp & 31];
+        temp >>>= 5;
     }
+    return code;
+}
 
-    return encodeBackupPayloadShared({
-        playerId: playerId ? String(playerId) : null,
-        profile: compactProfile,
-        privacy: compactPrivacy
+function generateUniqueShortBackupCode(existingUsers = [], excludePlayerId = null) {
+    if (excludePlayerId) {
+        return deriveFixedBackupCode(excludePlayerId);
+    }
+    const usedCodes = new Set();
+    (Array.isArray(existingUsers) ? existingUsers : []).forEach(u => {
+        if (!u) return;
+        const c = String(u.backupCode || '').trim().toUpperCase();
+        if (isValidShortBackupCode(c)) usedCodes.add(c);
     });
+    for (let seed = 1; seed <= 50000; seed++) {
+        const candidate = deriveFixedBackupCode(seed);
+        if (!usedCodes.has(candidate)) return candidate;
+    }
+    return deriveFixedBackupCode(Date.now());
+}
+
+function buildBackupCodeFromParts(playerId, profileObj, privacyObj, preferredCode = '', existingUsers = null) {
+    if (!playerId) return '';
+    return deriveFixedBackupCode(playerId);
 }
 
 // 4. 唯一玩家 ID 分配器（男 10001 起 / 女 20001 起）
@@ -977,6 +984,7 @@ const Store = {
         return {
             version: SCHEMA_VERSION,
             playerId: null,
+            backupCode: '',
             lastSyncedCloudUpdatedAt: '',
             isWarnedAccount: false,
             warningReason: '',
@@ -1075,6 +1083,7 @@ const Store = {
             if (userRec) {
                 const state = this.normalizeParsedState({
                     playerId: pid,
+                    backupCode: deriveFixedBackupCode(pid),
                     lastSyncedCloudUpdatedAt: userRec.updatedAt || '',
                     isWarnedAccount: Boolean(userRec.isWarned),
                     warningReason: userRec.warningReason || '',
@@ -1153,7 +1162,8 @@ const Store = {
                 region: state.profile.region || inferRegionByCity(state.profile.city),
                 mbtiGroup: state.profile.mbtiGroup || inferMbtiGroup(state.profile.mbti)
             };
-            const generatedBackupCode = buildBackupCodeFromParts(state.playerId, mergedProfileForRecord, state.privacy);
+            const generatedBackupCode = deriveFixedBackupCode(state.playerId);
+            state.backupCode = generatedBackupCode;
             const nowUpdatedStr = new Date().toLocaleString('zh-TW');
             state.lastSyncedCloudUpdatedAt = nowUpdatedStr;
 

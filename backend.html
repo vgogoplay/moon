@@ -858,54 +858,49 @@
         }
 
 
-        // ==================== 🔑 玩家專屬備份／還原通行碼產生與複製（供玩家遺忘時提供） ====================
-        const SYSTEM_ONLY_USER_KEYS = new Set([
-            'id', 'privacy', 'backupCode', 'isWarned', 'warningReason',
-            'isMatchBanned', 'isChatBanned', 'registeredSessions', 'registeredSession',
-            'exactMatchCriteria', 'matchedHistory', 'matchedSession',
-            'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt'
-        ]);
+        // ==================== 🔑 玩家專屬固定唯一 5 碼英數備份／還原通行碼產生與複製（供玩家遺忘時提供） ====================
+        const SHORT_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-        function encodeBackupPayload(payloadObj) {
-            const jsonStr = JSON.stringify(payloadObj);
-            if (typeof TextEncoder !== 'undefined') {
-                const bytes = new TextEncoder().encode(jsonStr);
-                let binary = '';
-                for (let i = 0; i < bytes.length; i++) {
-                    binary += String.fromCharCode(bytes[i]);
-                }
-                return btoa(binary);
-            }
-            return btoa(unescape(encodeURIComponent(jsonStr)));
+        function isValidShortBackupCode(code) {
+            return /^[A-Z0-9]{5}$/.test(String(code || '').trim().toUpperCase());
         }
 
-        function generatePlayerBackupCode(userObj) {
-            if (!userObj || !userObj.id) return '';
-            const compactProfile = {};
-            Object.entries(userObj).forEach(([k, v]) => {
-                if (SYSTEM_ONLY_USER_KEYS.has(k)) return;
-                if (v !== '' && v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)) {
-                    compactProfile[k] = v;
+        function deriveFixedBackupCode(playerId) {
+            const s = String(playerId || '').trim();
+            if (!s) return '';
+            const MASK = 0x1FFFFFF;
+            let x = 0;
+            if (/^\d+$/.test(s)) {
+                const n = parseInt(s, 10);
+                x = (n + 135791) & MASK;
+            } else {
+                let h = 2166136261 >>> 0;
+                for (let i = 0; i < s.length; i++) {
+                    h ^= s.charCodeAt(i);
+                    h = Math.imul(h, 16777619) >>> 0;
                 }
-            });
-            if (!compactProfile.region && compactProfile.city) {
-                compactProfile.region = inferRegionByCity(compactProfile.city);
+                x = h & MASK;
             }
 
-            const compactPrivacy = {};
-            if (userObj.privacy && typeof userObj.privacy === 'object') {
-                Object.entries(userObj.privacy).forEach(([k, v]) => {
-                    if (v && k !== 'ig') {
-                        compactPrivacy[k] = v;
-                    }
-                });
-            }
+            x = (Math.imul(x, 22695477) + 1234567) & MASK;
+            x ^= (x >>> 13);
+            x = (Math.imul(x, 1103515245) + 7654321) & MASK;
+            x ^= (x >>> 11);
+            x = (Math.imul(x, 134775813) + 9876543) & MASK;
+            x ^= (x >>> 12);
 
-            return encodeBackupPayload({
-                playerId: String(userObj.id),
-                profile: compactProfile,
-                privacy: compactPrivacy
-            });
+            let code = '';
+            let temp = x >>> 0;
+            for (let i = 0; i < 5; i++) {
+                code += SHORT_CODE_CHARS[temp & 31];
+                temp >>>= 5;
+            }
+            return code;
+        }
+
+        function generatePlayerBackupCode(userObj, allUsers = null) {
+            if (!userObj || !userObj.id) return '';
+            return deriveFixedBackupCode(userObj.id);
         }
 
         async function copyTextToClipboardAdmin(textVal, successLabel = '已複製') {
@@ -939,16 +934,16 @@
             const u = users.find(item => String(item.id) === String(playerId));
             if (!u) return;
 
-            const code = generatePlayerBackupCode(u);
+            const code = generatePlayerBackupCode(u, users);
             if (u.backupCode !== code) {
                 u.backupCode = code;
                 saveUsers(users);
             }
 
             const ok = await copyTextToClipboardAdmin(code);
-            appendLog(`<span class="text-pink-300">[備份碼查詢]</span> 已取得玩家 <strong>${u.nickname} (ID:${u.id})</strong> 的備份／還原通行碼${ok ? '並複製到剪貼簿' : ''}。`);
+            appendLog(`<span class="text-pink-300">[備份碼查詢]</span> 已取得玩家 <strong>${u.nickname} (ID:${u.id})</strong> 的 5 碼通行碼 <strong>${code}</strong>${ok ? ' 並複製到剪貼簿' : ''}。`);
             if (ok) {
-                alert(`✅ 已複製玩家「${u.nickname} (ID:${u.id})」的專屬備份／還原通行碼！\n\n可直接貼上傳送給該玩家於前台「個人與隱私 → 備份/還原碼」貼上還原。`);
+                alert(`✅ 已複製玩家「${u.nickname} (ID:${u.id})」的 5 碼專屬通行碼：【${code}】\n\n可直接傳送給該玩家於前台「個人與隱私 → 備份/還原碼」輸入讀取紀錄。`);
             } else {
                 viewPlayerDetail(playerId);
             }
@@ -989,7 +984,7 @@
             });
             users.forEach(u => {
                 if (u && u.id) {
-                    const expectedCode = generatePlayerBackupCode(u);
+                    const expectedCode = generatePlayerBackupCode(u, users);
                     if (expectedCode && u.backupCode !== expectedCode) {
                         u.backupCode = expectedCode;
                         migrated = true;
@@ -998,6 +993,9 @@
             });
             if (migrated) {
                 localStorage.setItem(USERS_KEY, JSON.stringify(users));
+                if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+                    CloudSync.syncUsersArray(users);
+                }
             }
             return users;
         }
@@ -1006,7 +1004,7 @@
             if (Array.isArray(users)) {
                 users.forEach(u => {
                     if (u && u.id) {
-                        u.backupCode = generatePlayerBackupCode(u);
+                        u.backupCode = generatePlayerBackupCode(u, users);
                     }
                 });
             }
@@ -2006,7 +2004,7 @@
 
             u.privacy = nextPrivacy;
             u.updatedAt = new Date().toLocaleString('zh-TW') + ' (管理員編輯)';
-            u.backupCode = generatePlayerBackupCode(u);
+            u.backupCode = generatePlayerBackupCode(u, users);
 
             users[idx] = u;
             saveUsers(users);
@@ -2026,7 +2024,7 @@
             const users = getUsers();
             const u = users.find(item => String(item.id) === String(playerId));
             if (!u) return;
-            const latestCode = generatePlayerBackupCode(u);
+            const latestCode = generatePlayerBackupCode(u, users);
             if (u.backupCode !== latestCode) {
                 u.backupCode = latestCode;
                 saveUsers(users);
@@ -2036,17 +2034,17 @@
             const backupBannerHtml = `
                 <div class="md:col-span-2 p-3.5 rounded-2xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-300 space-y-2">
                     <div class="flex flex-wrap items-center justify-between gap-2">
-                        <span class="text-xs font-bold text-[#8f4452]">🔑 玩家專屬備份／還原通行碼（若玩家遺忘可複製提供給對方）</span>
+                        <span class="text-xs font-bold text-[#8f4452]">🔑 玩家專屬 5 碼英數通行碼（若玩家遺忘可複製提供給對方）</span>
                         <div class="flex items-center gap-1.5">
                             <button type="button" onclick="document.getElementById('playerDetailModal').classList.add('hidden'); openEditPlayerModal('${u.id}')" class="px-3 py-1 rounded-xl bg-sky-600 text-white text-xs font-bold shadow-2xs hover:bg-sky-700 transition">
                                 ✏️ 編輯此玩家資料
                             </button>
                             <button type="button" onclick="copyPlayerBackupCode('${u.id}')" class="px-3 py-1 rounded-xl bg-[#c96a7b] text-white text-xs font-bold shadow-2xs hover:opacity-95 transition">
-                                📋 一鍵複製備份碼
+                                📋 一鍵複製 5 碼通行碼
                             </button>
                         </div>
                     </div>
-                    <textarea rows="3" readonly onclick="this.select()" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-[11px] font-mono text-gray-700 resize-none break-all">${latestCode}</textarea>
+                    <input type="text" readonly onclick="this.select()" value="${latestCode}" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-lg font-mono font-bold tracking-[0.28em] text-center text-[#8f4452]">
                 </div>
             `;
             document.getElementById('detailModalBody').innerHTML = backupBannerHtml + entries.map(([k, v]) => `
@@ -2345,7 +2343,7 @@
                             <td class="p-3.5 text-xs space-x-1 whitespace-nowrap">
                                 <button onclick="viewPlayerDetail('${u.id}')" class="px-2 py-1 rounded-lg border border-pink-200 text-[#8f4452] hover:bg-pink-50">詳情</button>
                                 <button onclick="openEditPlayerModal('${u.id}')" title="編輯此玩家的個人資料" class="px-2 py-1 rounded-lg bg-sky-600 text-white font-semibold hover:bg-sky-700">✏️ 編輯資料</button>
-                                <button onclick="copyPlayerBackupCode('${u.id}')" title="一鍵複製此玩家的備份／還原通行碼" class="px-2 py-1 rounded-lg bg-pink-100 border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-200">🔑 備份碼</button>
+                                <button onclick="copyPlayerBackupCode('${u.id}')" title="一鍵複製此玩家的 5 碼備份／還原通行碼" class="px-2 py-1 rounded-lg bg-pink-100 border border-pink-300 text-[#8f4452] font-mono font-bold hover:bg-pink-200">🔑 ${u.backupCode || '備份碼'}</button>
                                 <button onclick="togglePlayerMatchBan('${u.id}')" class="px-2 py-1 rounded-lg font-semibold text-white ${u.isMatchBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-700 hover:bg-gray-800'}">
                                     ${u.isMatchBanned ? '✅ 解除配對限制' : '🚫 禁止配對'}
                                 </button>
