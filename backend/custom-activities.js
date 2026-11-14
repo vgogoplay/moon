@@ -482,7 +482,7 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                     : '<span class="text-gray-400">尚無玩家報名</span>';
 
                 return `
-                    <div class="p-4 rounded-2xl bg-white border-2 ${act.isOpen ? 'border-emerald-300 shadow-2xs' : 'border-pink-200'} flex flex-col lg:flex-row lg:items-stretch justify-between gap-3">
+                    <div class="p-4 rounded-2xl bg-white border-2 ${act.isOpen ? 'border-emerald-300 shadow-sm' : 'border-pink-200'} flex flex-col lg:flex-row lg:items-stretch justify-between gap-3">
                         <div class="space-y-2 min-w-0 flex-1 p-3 rounded-xl bg-pink-50/30 border border-pink-200">
                             <div class="flex flex-wrap items-center gap-2">
                                 <span class="text-xs px-2.5 py-0.5 rounded-full font-bold ${act.isOpen ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600 border border-gray-300'}">

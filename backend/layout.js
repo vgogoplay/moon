@@ -1,5 +1,36 @@
 /* backend/layout.js - 後台共用左側選單（Sidebar）、登入驗證遮罩與頂部概覽列（無需伺服器，支援直接雙擊開啟） */
 
+function ensureAdminCoreStyles() {
+    if (document.getElementById('adminCoreFallbackStyles')) return;
+    const styleEl = document.createElement('style');
+    styleEl.id = 'adminCoreFallbackStyles';
+    styleEl.textContent = `
+        .card-jp { background: rgba(255, 255, 255, 0.96); backdrop-filter: blur(14px); box-shadow: 0 10px 30px rgba(201, 106, 123, 0.1); }
+        .admin-shell { display: flex; min-height: 100vh; }
+        .admin-shell.hidden { display: none !important; }
+        .admin-sidebar { width: 256px; flex-shrink: 0; background: rgba(255, 255, 255, 0.96); backdrop-filter: blur(14px); border-right: 1px solid #f5dce2; box-shadow: 4px 0 24px rgba(201, 106, 123, 0.06); padding: 1.5rem 1rem; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; z-index: 30; }
+        .admin-sidebar-nav { display: flex; flex-direction: column; gap: 0.45rem; }
+        .sidebar-nav-link { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.75rem 0.95rem; border-radius: 0.9rem; font-size: 0.85rem; font-weight: 600; color: #7d5b61; background: #fff9fa; border: 1.5px solid #f2ced7; text-decoration: none; transition: all 0.2s ease; }
+        .sidebar-nav-link:hover { background: #fff1f4; color: #8f4452; border-color: #f3d2da; }
+        .sidebar-nav-link.active { background: linear-gradient(135deg, #e79aa8 0%, #c96a7b 100%); color: #ffffff; border-color: #c96a7b; box-shadow: 0 6px 18px rgba(201, 106, 123, 0.26); }
+        .admin-content-area { flex: 1; min-width: 0; padding: 1.25rem 1.5rem 2.5rem; }
+        @media (max-width: 900px) {
+            .admin-shell { flex-direction: column; }
+            .admin-sidebar { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid #f5dce2; padding: 1rem; }
+            .admin-sidebar-nav { flex-direction: row; flex-wrap: wrap; }
+            .admin-content-area { padding: 1rem; }
+        }
+        .admin-grid-table { width: 100%; border-collapse: collapse; border: 1.5px solid #eebcc9; background-color: #ffffff; }
+        .admin-grid-table thead th { border: 1px solid #eab7c4; background-color: #fff0f4; color: #8f4452; font-weight: 700; white-space: nowrap; }
+        .admin-grid-table tbody td { border: 1px solid #f3cfd8; vertical-align: middle; }
+        .admin-grid-table tbody tr:hover td { background-color: #fff8fa; }
+        .admin-field-box { background-color: #fff9fa; border: 1.5px solid #f1c4d0; border-radius: 0.95rem; padding: 0.72rem 0.85rem; }
+        .admin-input-box { border: 1.5px solid #e5b0bd !important; background-color: #ffffff !important; border-radius: 0.75rem; }
+        .sim-btn { display: flex; align-items: center; gap: 0.45rem; width: 100%; padding: 0.65rem 0.85rem; border: 1.5px solid #e5b0bd; border-radius: 0.85rem; background-color: #fff9fa; color: #6e3a43; font-size: 0.78rem; font-weight: 600; line-height: 1.4; text-align: left; box-shadow: 0 1px 3px rgba(201, 106, 123, 0.08); cursor: pointer; }
+    `;
+    document.head.appendChild(styleEl);
+}
+
 function getCurrentAdminPageKey() {
     const pageAttr = document.body ? document.body.dataset.adminPage : '';
     if (pageAttr) return pageAttr;
@@ -10,6 +41,7 @@ function getCurrentAdminPageKey() {
 }
 
 function renderAdminSharedShell() {
+    ensureAdminCoreStyles();
     const currentPage = getCurrentAdminPageKey();
     const mountEl = document.getElementById('adminLayoutMount');
     if (!mountEl) return;
@@ -62,7 +94,7 @@ function renderAdminSharedShell() {
                             <button type="button" onclick="advanceToNextBatch()" class="px-3.5 py-2.5 rounded-xl bg-amber-50 border-2 border-amber-400 text-amber-900 text-xs font-bold hover:bg-amber-100 transition">
                                 🔄 刷新至下一屆（釋放鎖定名單）
                             </button>
-                            <button type="button" onclick="clearAllAdminData()" class="px-4 py-2.5 rounded-xl border-2 border-rose-500 bg-rose-50 text-rose-800 text-xs font-bold hover:bg-rose-100 transition shadow-2xs">
+                            <button type="button" onclick="clearAllAdminData()" class="px-4 py-2.5 rounded-xl border-2 border-rose-500 bg-rose-50 text-rose-800 text-xs font-bold hover:bg-rose-100 transition shadow-sm">
                                 🗑️ 清空全部資料
                             </button>
                         </div>
@@ -89,7 +121,7 @@ function renderAdminSharedShell() {
                     </div>
 
                     <!-- ==================== 🔐 清空全部資料：管理員密碼驗證 ＋ 二次確定視窗 ==================== -->
-                    <div id="clearAllConfirmModal" class="hidden fixed inset-0 bg-black/55 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                    <div id="clearAllConfirmModal" class="hidden fixed inset-0 bg-black/55 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                         <div class="bg-white rounded-3xl max-w-md w-full p-6 md:p-7 shadow-2xl border-2 border-rose-400 space-y-4">
                             <div class="flex items-center justify-between border-b border-rose-100 pb-3">
                                 <div class="flex items-center gap-2">

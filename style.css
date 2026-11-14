@@ -17,6 +17,20 @@ body {
     border-bottom: 1px solid rgba(245, 208, 216, 0.7);
 }
 
+.card-jp {
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 10px 30px rgba(201, 106, 123, 0.1);
+}
+
+.shadow-2xs {
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.backdrop-blur-xs {
+    backdrop-filter: blur(2px);
+}
+
 .glass-card {
     background: rgba(255, 255, 255, 0.88);
     backdrop-filter: blur(16px);
@@ -223,6 +237,10 @@ body {
     min-height: 100vh;
 }
 
+.admin-shell.hidden {
+    display: none !important;
+}
+
 .admin-sidebar {
     width: 256px;
     flex-shrink: 0;
@@ -315,6 +333,7 @@ body {
     background-color: #fff0f4;
     color: #8f4452;
     font-weight: 700;
+    white-space: nowrap;
 }
 
 .admin-grid-table tbody td {

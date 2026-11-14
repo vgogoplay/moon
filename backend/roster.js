@@ -214,7 +214,7 @@ function openEditPlayerModal(playerId) {
                     }
 
                     return `
-                        <div class="${isWide ? 'md:col-span-2' : ''} p-3.5 rounded-xl bg-white border-2 border-pink-200/80 space-y-2 shadow-2xs">
+                        <div class="${isWide ? 'md:col-span-2' : ''} p-3.5 rounded-xl bg-white border-2 border-pink-200/80 space-y-2 shadow-sm">
                             <div class="flex items-center justify-between gap-2">
                                 <label class="text-xs font-bold text-[#5e464a]">${f.label}</label>
                                 ${privSelectHtml}
@@ -380,10 +380,10 @@ function viewPlayerDetail(playerId) {
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="text-xs font-bold text-[#8f4452]">🔑 玩家專屬 5 碼英數通行碼（若玩家遺忘可複製提供給對方）</span>
                 <div class="flex items-center gap-1.5">
-                    <button type="button" onclick="document.getElementById('playerDetailModal').classList.add('hidden'); openEditPlayerModal('${u.id}')" class="px-3 py-1 rounded-xl bg-sky-600 text-white text-xs font-bold shadow-2xs hover:bg-sky-700 transition">
+                    <button type="button" onclick="document.getElementById('playerDetailModal').classList.add('hidden'); openEditPlayerModal('${u.id}')" class="px-3 py-1 rounded-xl bg-sky-600 text-white text-xs font-bold shadow-sm hover:bg-sky-700 transition">
                         ✏️ 編輯此玩家資料
                     </button>
-                    <button type="button" onclick="copyPlayerBackupCode('${u.id}')" class="px-3 py-1 rounded-xl bg-[#c96a7b] text-white text-xs font-bold shadow-2xs hover:opacity-95 transition">
+                    <button type="button" onclick="copyPlayerBackupCode('${u.id}')" class="px-3 py-1 rounded-xl bg-[#c96a7b] text-white text-xs font-bold shadow-sm hover:opacity-95 transition">
                         📋 一鍵複製 5 碼通行碼
                     </button>
                 </div>
@@ -608,7 +608,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
             { val: 'all', label: '全部' }
         ].map(opt => {
             const active = rosterPageSize === opt.val;
-            return `<button type="button" onclick="onRosterPageSizeChange('${opt.val}')" class="px-2.5 h-7 rounded-lg font-bold transition ${active ? 'bg-[#c96a7b] text-white shadow-2xs' : 'bg-white border border-pink-300 text-[#8f4452] hover:bg-pink-100'}">${opt.label}</button>`;
+            return `<button type="button" onclick="onRosterPageSizeChange('${opt.val}')" class="px-2.5 h-7 rounded-lg font-bold transition ${active ? 'bg-[#c96a7b] text-white shadow-sm' : 'bg-white border border-pink-300 text-[#8f4452] hover:bg-pink-100'}">${opt.label}</button>`;
         }).join('');
 
         if (totalFiltered === 0) {
@@ -627,7 +627,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
                 if (p === 1 || p === totalRosterPages || Math.abs(p - currentRosterPage) <= 1) {
                     const isCur = p === currentRosterPage;
                     pageBtns.push(`
-                        <button type="button" onclick="goToRosterPage(${p})" class="min-w-[30px] h-7 px-2 rounded-lg font-bold transition ${isCur ? 'bg-[#c96a7b] text-white shadow-2xs' : 'bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50'}">
+                        <button type="button" onclick="goToRosterPage(${p})" class="min-w-[30px] h-7 px-2 rounded-lg font-bold transition ${isCur ? 'bg-[#c96a7b] text-white shadow-sm' : 'bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50'}">
                             ${p}
                         </button>
                     `);
@@ -707,42 +707,44 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
 
             return `
                 <tr class="hover:bg-pink-50/30">
-                    <td class="p-3.5 font-mono font-bold text-[#8f4452]">${u.id}</td>
-                    <td class="p-3.5">
-                        <div class="font-bold">${u.nickname}</div>
-                        <div class="text-[11px] text-gray-400">${u.ig || ''} ・ ${u.age || '-'}歲</div>
+                    <td class="p-3 font-mono font-bold text-[#8f4452] whitespace-nowrap">${u.id}</td>
+                    <td class="p-3 min-w-[125px]">
+                        <div class="font-bold text-gray-800">${u.nickname}</div>
+                        <div class="text-[11px] text-gray-400 break-all">${u.ig || ''} ・ ${u.age || '-'}歲</div>
                     </td>
-                    <td class="p-3.5 text-xs">${u.gender} ・ ${u.zodiac || '-'} ・ ${mbtiLabel} ・ ${u.status === '其他' && u.statusOther ? `其他（${u.statusOther}）` : (u.status || '-')} ・ ${locationLabel}</td>
-                    <td class="p-3.5 text-xs">
+                    <td class="p-3 text-xs min-w-[175px] leading-relaxed">${u.gender} ・ ${u.zodiac || '-'} ・ ${mbtiLabel}<br><span class="text-gray-500">${u.status === '其他' && u.statusOther ? `其他（${u.statusOther}）` : (u.status || '-')} ・ ${locationLabel}</span></td>
+                    <td class="p-3 text-xs min-w-[140px]">
                         ${(() => {
-                            const regBadges = sessions.map(s => `<span class="inline-flex items-center gap-1 px-2 py-0.5 mr-1 mb-1 rounded-full bg-pink-100 text-[#8f4452] font-semibold">${s}<button type="button" onclick="clearPlayerRegularSession('${u.id}', '${s}')" title="取消此場次報名並同步至前台" class="text-rose-600 hover:text-rose-900 font-bold ml-0.5">✕</button></span>`);
+                            const regBadges = sessions.map(s => `<span class="inline-flex items-center gap-1 px-2 py-0.5 mr-1 mb-1 rounded-full bg-pink-100 text-[#8f4452] font-semibold whitespace-nowrap">${s}<button type="button" onclick="clearPlayerRegularSession('${u.id}', '${s}')" title="取消此場次報名並同步至前台" class="text-rose-600 hover:text-rose-900 font-bold ml-0.5">✕</button></span>`);
                             const cRegs = (u.customActivityRegs && typeof u.customActivityRegs === 'object') ? Object.values(u.customActivityRegs) : [];
                             cRegs.forEach(cr => {
                                 if (cr && cr.activityName) {
                                     const extraPick = cr.fortuneNumber
                                         ? `・第${cr.fortuneNumber}首`
                                         : (cr.twoChoiceValue ? `・${cr.twoChoiceValue}` : '');
-                                    regBadges.push(`<span class="inline-block px-2 py-0.5 mr-1 mb-1 rounded-full bg-amber-100 text-amber-900 font-semibold">🎪 ${cr.activityName}${extraPick}</span>`);
+                                    regBadges.push(`<span class="inline-block px-2 py-0.5 mr-1 mb-1 rounded-full bg-amber-100 text-amber-900 font-semibold whitespace-nowrap">🎪 ${cr.activityName}${extraPick}</span>`);
                                 }
                             });
                             return regBadges.length > 0
                                 ? regBadges.join('')
-                                : `<span class="px-2.5 py-1 rounded-full bg-gray-100 text-gray-400">未報名</span>`;
+                                : `<span class="px-2.5 py-1 rounded-full bg-gray-100 text-gray-400 whitespace-nowrap">未報名</span>`;
                         })()}
                     </td>
-                    <td class="p-3.5 text-xs">${criteriaHtml}</td>
-                    <td class="p-3.5 text-xs space-y-1">${statusParts.join('<br>')}</td>
-                    <td class="p-3.5 text-xs space-x-1 whitespace-nowrap">
-                        <button onclick="viewPlayerDetail('${u.id}')" class="px-2 py-1 rounded-lg border border-pink-200 text-[#8f4452] hover:bg-pink-50">詳情</button>
-                        <button onclick="openEditPlayerModal('${u.id}')" title="編輯此玩家的個人資料" class="px-2 py-1 rounded-lg bg-sky-600 text-white font-semibold hover:bg-sky-700">✏️ 編輯資料</button>
-                        <button onclick="copyPlayerBackupCode('${u.id}')" title="一鍵複製此玩家的 5 碼備份／還原通行碼" class="px-2 py-1 rounded-lg bg-pink-100 border border-pink-300 text-[#8f4452] font-mono font-bold hover:bg-pink-200">🔑 ${u.backupCode || '備份碼'}</button>
-                        <button onclick="togglePlayerMatchBan('${u.id}')" class="px-2 py-1 rounded-lg font-semibold text-white ${u.isMatchBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-700 hover:bg-gray-800'}">
-                            ${u.isMatchBanned ? '✅ 解除配對限制' : '🚫 禁止配對'}
-                        </button>
-                        <button onclick="togglePlayerChatBan('${u.id}')" class="px-2 py-1 rounded-lg font-semibold text-white ${u.isChatBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}">
-                            ${u.isChatBanned ? '🔊 解除禁言' : '🔇 禁止發話'}
-                        </button>
-                        <button onclick="deletePlayerEntirely('${u.id}')" class="px-2 py-1 rounded-lg bg-rose-600 text-white font-semibold hover:bg-rose-700">🗑️ 刪除資料</button>
+                    <td class="p-3 text-xs min-w-[145px] leading-relaxed">${criteriaHtml}</td>
+                    <td class="p-3 text-xs min-w-[140px] space-y-1">${statusParts.join('<br>')}</td>
+                    <td class="p-3 text-xs min-w-[235px]">
+                        <div class="flex flex-wrap gap-1.5">
+                            <button onclick="viewPlayerDetail('${u.id}')" class="px-2 py-1 rounded-lg border border-pink-200 text-[#8f4452] hover:bg-pink-50 whitespace-nowrap">詳情</button>
+                            <button onclick="openEditPlayerModal('${u.id}')" title="編輯此玩家的個人資料" class="px-2 py-1 rounded-lg bg-sky-600 text-white font-semibold hover:bg-sky-700 whitespace-nowrap">✏️ 編輯資料</button>
+                            <button onclick="copyPlayerBackupCode('${u.id}')" title="一鍵複製此玩家的 5 碼備份／還原通行碼" class="px-2 py-1 rounded-lg bg-pink-100 border border-pink-300 text-[#8f4452] font-mono font-bold hover:bg-pink-200 whitespace-nowrap">🔑 ${u.backupCode || '備份碼'}</button>
+                            <button onclick="togglePlayerMatchBan('${u.id}')" class="px-2 py-1 rounded-lg font-semibold text-white whitespace-nowrap ${u.isMatchBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-700 hover:bg-gray-800'}">
+                                ${u.isMatchBanned ? '✅ 解除配對限制' : '🚫 禁止配對'}
+                            </button>
+                            <button onclick="togglePlayerChatBan('${u.id}')" class="px-2 py-1 rounded-lg font-semibold text-white whitespace-nowrap ${u.isChatBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}">
+                                ${u.isChatBanned ? '🔊 解除禁言' : '🔇 禁止發話'}
+                            </button>
+                            <button onclick="deletePlayerEntirely('${u.id}')" class="px-2 py-1 rounded-lg bg-rose-600 text-white font-semibold hover:bg-rose-700 whitespace-nowrap">🗑️ 刪除資料</button>
+                        </div>
                     </td>
                 </tr>
             `;
