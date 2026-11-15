@@ -12,18 +12,22 @@ function syncProfileDomToDraft() {
             if (f.type === 'regionCity') {
                 const regEl = document.getElementById('profileRegionSelect');
                 const cityEl = document.getElementById('profileCitySelect');
-                const regVal = regEl ? regEl.value.trim() : (fd.get('region') ? String(fd.get('region')).trim() : '');
                 const cityVal = cityEl ? cityEl.value.trim() : (fd.get('city') ? String(fd.get('city')).trim() : '');
+                const regVal = (regEl && regEl.value.trim()) || (fd.get('region') ? String(fd.get('region')).trim() : '') || inferRegionByCity(cityVal);
                 appState.profile.region = regVal;
                 appState.profile.city = cityVal;
             } else if (f.type === 'mbtiTwoStep') {
                 const grpEl = document.getElementById('profileMbtiGroupSelect');
                 const selMbtiEl = document.getElementById('profileMbtiSelect');
                 const hidMbtiEl = document.getElementById('profileMbtiHidden');
-                const grpVal = grpEl ? grpEl.value.trim() : (fd.get('mbtiGroup') ? String(fd.get('mbtiGroup')).trim() : '');
-                const selMbtiVal = (selMbtiEl && selMbtiEl.value) ? selMbtiEl.value : (hidMbtiEl ? hidMbtiEl.value : '');
-                appState.profile.mbtiGroup = grpVal;
-                appState.profile.mbti = (grpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : String(selMbtiVal || '').trim();
+                const rawGrpVal = grpEl ? grpEl.value.trim() : (fd.get('mbtiGroup') ? String(fd.get('mbtiGroup')).trim() : '');
+                const rawMbtiVal = (selMbtiEl && !selMbtiEl.disabled && selMbtiEl.value)
+                    ? selMbtiEl.value.trim()
+                    : (hidMbtiEl ? hidMbtiEl.value.trim() : '');
+                const finalMbti = (rawGrpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : rawMbtiVal;
+                const finalGrp = rawGrpVal || inferMbtiGroup(finalMbti);
+                appState.profile.mbtiGroup = finalGrp;
+                appState.profile.mbti = finalMbti;
             } else if (f.type === 'multiselect') {
                 const menu = document.getElementById(`ms-menu-${f.key}`);
                 if (menu) {
@@ -60,15 +64,16 @@ function getMissingRequiredFields() {
             if (!isFieldRequired(f)) continue;
             const cleanLabel = f.label.split('（')[0];
             if (f.type === 'regionCity') {
-                const regVal = String(appState.profile.region || '').trim();
+                const cityVal = String(appState.profile.city || '').trim();
+                const regVal = String(appState.profile.region || inferRegionByCity(cityVal) || '').trim();
                 if (!regVal || !Object.prototype.hasOwnProperty.call(REGION_CITIES, regVal)) {
                     missing.push({ key: 'region', label: `${cleanLabel}（地區）` });
-                } else if (!String(appState.profile.city || '').trim()) {
+                } else if (!cityVal) {
                     missing.push({ key: 'city', label: `${cleanLabel}（縣市）` });
                 }
             } else if (f.type === 'mbtiTwoStep') {
-                const grp = String(appState.profile.mbtiGroup || inferMbtiGroup(appState.profile.mbti) || '').trim();
                 const code = String(appState.profile.mbti || '').trim();
+                const grp = String(appState.profile.mbtiGroup || inferMbtiGroup(code) || '').trim();
                 if (!grp) {
                     missing.push({ key: 'mbti', label: `${cleanLabel}（請先選 I人 或 E人）` });
                 } else if (grp !== '不知道 / 沒測過' && !code) {
@@ -150,16 +155,6 @@ function renderProfileForm() {
                 <span>管理員已開啟「不讓玩家填寫資料」，所有個人資料欄位已反灰鎖定（不可修改或新增），但「個人隱私開放／隱藏」仍可自由調整。</span>
             </div>
         `;
-    } else if (!appState.playerId && (quota.maleFull || quota.femaleFull)) {
-        const fullText = quota.maleFull
-            ? `男生人數已滿（${quota.maleCount}/${quota.limit} 人），男生禁止選取，性別只能選擇「女生」。`
-            : `女生人數已滿（${quota.femaleCount}/${quota.limit} 人），女生禁止選取，性別只能選擇「男生」。`;
-        topNoticeHtml = `
-            <div class="p-4 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-800 font-semibold flex items-center gap-2">
-                <span>⚠️</span>
-                <span>${fullText}</span>
-            </div>
-        `;
     } else if (isTestOptional) {
         topNoticeHtml = `
             <div class="p-3.5 rounded-2xl bg-pink-50/80 border border-pink-200 text-xs text-[#8f4452] font-medium flex items-center gap-2">
@@ -192,7 +187,7 @@ function renderProfileForm() {
 
 function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota) {
     let val = appState.profile[field.key];
-    const priv = field.alwaysOpen ? 'open' : (appState.privacy[field.key] || sectionDefaultPriv || 'closed');
+    const priv = field.alwaysOpen ? 'open' : (appState.privacy[field.key] || field.defaultPrivacy || sectionDefaultPriv || 'closed');
     const fullWidthClass = (field.type === 'textarea' || field.type === 'multiselect' || field.type === 'regionCity' || field.type === 'mbtiTwoStep') ? 'md:col-span-2' : '';
     const isGenderLocked = (field.key === 'gender' && !!appState.playerId);
     const isInputDisabled = isProfileLocked || isGenderLocked;
@@ -430,7 +425,10 @@ window.onProfileGenderChange = function(genderVal) {
 window.onProfileRegionChange = function(regionVal) {
     if (Store.getSystemConfig().profileLocked) return;
     appState.profile.region = regionVal || '';
-    appState.profile.city = '';
+    const cities = regionVal ? (REGION_CITIES[regionVal] || []) : [];
+    if (!cities.includes(appState.profile.city)) {
+        appState.profile.city = '';
+    }
 
     const citySel = document.getElementById('profileCitySelect');
     if (citySel) {
@@ -438,10 +436,9 @@ window.onProfileRegionChange = function(regionVal) {
             citySel.disabled = true;
             citySel.innerHTML = '<option value="">請先選擇左側地區...</option>';
         } else {
-            const cities = REGION_CITIES[regionVal] || [];
             citySel.disabled = false;
             citySel.innerHTML = '<option value="">請選擇縣市...</option>' +
-                cities.map(c => `<option value="${c}">${c}</option>`).join('');
+                cities.map(c => `<option value="${c}" ${appState.profile.city === c ? 'selected' : ''}>${c}</option>`).join('');
             if (cities.length === 1) {
                 citySel.value = cities[0];
                 appState.profile.city = cities[0];
@@ -453,6 +450,9 @@ window.onProfileRegionChange = function(regionVal) {
 window.onProfileCityChange = function(cityVal) {
     if (Store.getSystemConfig().profileLocked) return;
     appState.profile.city = cityVal || '';
+    if (cityVal && !appState.profile.region) {
+        appState.profile.region = inferRegionByCity(cityVal);
+    }
 };
 
 window.onProfileMbtiGroupChange = function(groupVal) {
@@ -634,7 +634,7 @@ if (profileFormEl) {
 }
 
 // 點保存
-document.getElementById('profileForm').addEventListener('submit', function(e) {
+document.getElementById('profileForm').addEventListener('submit', async function(e) {
     e.preventDefault();
 
     const quota = Store.getGenderQuotaStatus();
@@ -648,30 +648,46 @@ document.getElementById('profileForm').addEventListener('submit', function(e) {
         return;
     }
 
+    syncProfileDomToDraft();
     const fd = new FormData(this);
 
     const nextProfile = { ...appState.profile };
     FIELD_SECTIONS.forEach(sec => {
         sec.fields.forEach(f => {
             if (f.type === 'regionCity') {
-                const regVal = fd.get('region') ? fd.get('region').trim() : (document.getElementById('profileRegionSelect')?.value || '');
-                const cityVal = fd.get('city') ? fd.get('city').trim() : (document.getElementById('profileCitySelect')?.value || '');
+                const regEl = document.getElementById('profileRegionSelect');
+                const cityEl = document.getElementById('profileCitySelect');
+                const cityVal = (cityEl ? cityEl.value.trim() : '') || (fd.get('city') ? String(fd.get('city')).trim() : '') || String(appState.profile.city || '').trim();
+                const regVal = (regEl ? regEl.value.trim() : '') || (fd.get('region') ? String(fd.get('region')).trim() : '') || String(appState.profile.region || '').trim() || inferRegionByCity(cityVal);
                 nextProfile.region = regVal;
                 nextProfile.city = cityVal;
             } else if (f.type === 'mbtiTwoStep') {
-                const grpVal = document.getElementById('profileMbtiGroupSelect')?.value || (fd.get('mbtiGroup') ? fd.get('mbtiGroup').trim() : '');
-                const selMbtiVal = document.getElementById('profileMbtiSelect')?.value || document.getElementById('profileMbtiHidden')?.value || '';
-                nextProfile.mbtiGroup = grpVal;
-                nextProfile.mbti = (grpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : selMbtiVal.trim();
+                const grpEl = document.getElementById('profileMbtiGroupSelect');
+                const selMbtiEl = document.getElementById('profileMbtiSelect');
+                const hidMbtiEl = document.getElementById('profileMbtiHidden');
+                const grpVal = (grpEl ? grpEl.value.trim() : '') || (fd.get('mbtiGroup') ? String(fd.get('mbtiGroup')).trim() : '') || String(appState.profile.mbtiGroup || '').trim();
+                const selMbtiVal = (selMbtiEl && !selMbtiEl.disabled && selMbtiEl.value ? selMbtiEl.value.trim() : '') ||
+                                   (hidMbtiEl && hidMbtiEl.value ? hidMbtiEl.value.trim() : '') ||
+                                   String(appState.profile.mbti || '').trim();
+                const finalMbti = (grpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : selMbtiVal;
+                nextProfile.mbtiGroup = grpVal || inferMbtiGroup(finalMbti);
+                nextProfile.mbti = finalMbti;
             } else if (f.type === 'multiselect') {
                 if (f.allowOther) {
-                    nextProfile[`${f.key}Other`] = fd.get(`${f.key}Other`) ? fd.get(`${f.key}Other`).trim() : '';
+                    nextProfile[`${f.key}Other`] = fd.get(`${f.key}Other`) ? String(fd.get(`${f.key}Other`)).trim() : '';
                 }
             } else {
-                nextProfile[f.key] = fd.get(f.key) ? fd.get(f.key).trim() : '';
+                const rawVal = fd.get(f.key);
+                if (rawVal !== null) {
+                    nextProfile[f.key] = String(rawVal).trim();
+                } else if (nextProfile[f.key] !== undefined && nextProfile[f.key] !== null) {
+                    nextProfile[f.key] = String(nextProfile[f.key]).trim();
+                } else {
+                    nextProfile[f.key] = '';
+                }
                 if (f.allowOther) {
                     nextProfile[`${f.key}Other`] = (nextProfile[f.key] === '其他' && fd.get(`${f.key}Other`))
-                        ? fd.get(`${f.key}Other`).trim()
+                        ? String(fd.get(`${f.key}Other`)).trim()
                         : '';
                 }
             }
@@ -792,7 +808,7 @@ document.getElementById('profileForm').addEventListener('submit', function(e) {
     }
 
     hasUnsavedProfileDraft = false;
-    Store.save(appState, true);
+    await Store.save(appState, true);
     renderProfileForm();
     refreshAllUI();
 

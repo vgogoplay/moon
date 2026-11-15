@@ -134,7 +134,7 @@ function openEditPlayerModal(playerId) {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 ${sec.fields.map(f => {
                     const val = u[f.key];
-                    const curPriv = privMap[f.key] || sec.defaultPrivacy || 'closed';
+                    const curPriv = privMap[f.key] || f.defaultPrivacy || sec.defaultPrivacy || 'closed';
                     const isWide = (f.type === 'textarea' || f.type === 'multiselect' || f.type === 'regionCity' || f.type === 'mbtiTwoStep');
                     const privSelectHtml = f.lockPrivacy ? '' : `
                         <select id="edit-priv-${f.key}" class="text-[11px] px-2.5 py-1 admin-input-box text-[#8f4452] font-semibold">
@@ -348,7 +348,6 @@ function saveAdminEditedPlayer(e) {
     nextPrivacy.hobbies = 'open';
     nextPrivacy.oneSentence = 'open';
     nextPrivacy.bio = 'open';
-    nextPrivacy.idealPartner = 'open';
     nextPrivacy.icebreakerQuestion = 'open';
 
     u.privacy = nextPrivacy;
@@ -784,6 +783,10 @@ function submitAddNewPlayer(e) {
         id: newId,
         gender: gender,
         nickname: `未命名玩家_${newId}`,
+        region: '',
+        city: '',
+        mbtiGroup: '',
+        mbti: '',
         backupCode: newBackupCode,
         isWarned: false,
         warningReason: '',
@@ -797,7 +800,7 @@ function submitAddNewPlayer(e) {
         matchedWithId: null,
         matchedWithName: null,
         updatedAt: new Date().toLocaleString('zh-TW'),
-        privacy: { ...freshBase.privacy, gender: 'open', ig: 'closed' }
+        privacy: { ...freshBase.privacy, gender: 'open', ig: 'closed', idealPartner: 'closed' }
     };
     
     const users = getUsers();

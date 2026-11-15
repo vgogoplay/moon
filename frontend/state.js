@@ -201,6 +201,11 @@ function syncFromSharedStorage() {
         const isEditingProfileNow = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft);
         if (me && me.updatedAt && me.updatedAt !== appState.lastSyncedCloudUpdatedAt && !isEditingProfileNow) {
             appState.lastSyncedCloudUpdatedAt = me.updatedAt;
+            const prevRegion = appState.profile.region || '';
+            const prevCity = appState.profile.city || '';
+            const prevMbtiGroup = appState.profile.mbtiGroup || '';
+            const prevMbti = appState.profile.mbti || '';
+
             const skipSyncKeys = new Set([
                 'id', 'privacy', 'backupCode', 'isWarned', 'warningReason',
                 'isMatchBanned', 'isChatBanned', 'registeredSessions', 'registeredSession',
@@ -212,11 +217,14 @@ function syncFromSharedStorage() {
                     appState.profile[k] = v;
                 }
             });
-            if (!appState.profile.region && appState.profile.city) {
-                appState.profile.region = inferRegionByCity(appState.profile.city);
+
+            if (!appState.profile.city && prevCity) appState.profile.city = prevCity;
+            if (!appState.profile.region) {
+                appState.profile.region = inferRegionByCity(appState.profile.city) || prevRegion;
             }
-            if (appState.profile.mbti && !appState.profile.mbtiGroup) {
-                appState.profile.mbtiGroup = inferMbtiGroup(appState.profile.mbti);
+            if (!appState.profile.mbti && prevMbti) appState.profile.mbti = prevMbti;
+            if (!appState.profile.mbtiGroup) {
+                appState.profile.mbtiGroup = inferMbtiGroup(appState.profile.mbti) || prevMbtiGroup;
             }
             if (me.privacy && typeof me.privacy === 'object') {
                 appState.privacy = { ...appState.privacy, ...me.privacy };
@@ -439,6 +447,9 @@ function applyBackendTestEvent(cmd, latestUsers) {
                 appState.profile = { ...appState.profile, ...userRecord };
                 if (!appState.profile.region && appState.profile.city) {
                     appState.profile.region = inferRegionByCity(appState.profile.city);
+                }
+                if (!appState.profile.mbtiGroup && appState.profile.mbti) {
+                    appState.profile.mbtiGroup = inferMbtiGroup(appState.profile.mbti);
                 }
                 appState.isWarnedAccount = !!userRecord.isWarned;
                 appState.warningReason = userRecord.warningReason || '';

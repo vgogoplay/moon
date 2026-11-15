@@ -63,7 +63,7 @@ const CloudSync = {
         return merged;
     },
 
-    setSharedPendingUser(pid, record, ttlMs = 15000) {
+    setSharedPendingUser(pid, record, ttlMs = 25000) {
         const key = String(pid || '').trim();
         if (!key || !record) return;
         this.clearSharedDeletedUser(key);
@@ -196,6 +196,10 @@ const CloudSync = {
             if (!u || typeof u !== 'object') return u;
             const cleanUser = { ...u };
             delete cleanUser.registeredSession;
+            cleanUser.city = String(cleanUser.city || '').trim();
+            cleanUser.region = String(cleanUser.region || inferRegionByCity(cleanUser.city) || '').trim();
+            cleanUser.mbti = String(cleanUser.mbti || '').trim();
+            cleanUser.mbtiGroup = String(cleanUser.mbtiGroup || inferMbtiGroup(cleanUser.mbti) || '').trim();
             cleanUser.registeredSessions = Array.isArray(cleanUser.registeredSessions)
                 ? Array.from(new Set(cleanUser.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)))
                 : [];
@@ -467,6 +471,10 @@ const CloudSync = {
         if (!forcePush && this.isUserDeleted(pid)) return;
         const cleanRecord = { ...record };
         delete cleanRecord.registeredSession;
+        cleanRecord.city = String(cleanRecord.city || '').trim();
+        cleanRecord.region = String(cleanRecord.region || inferRegionByCity(cleanRecord.city) || '').trim();
+        cleanRecord.mbti = String(cleanRecord.mbti || '').trim();
+        cleanRecord.mbtiGroup = String(cleanRecord.mbtiGroup || inferMbtiGroup(cleanRecord.mbti) || '').trim();
         cleanRecord.registeredSessions = Array.isArray(cleanRecord.registeredSessions)
             ? Array.from(new Set(cleanRecord.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)))
             : [];
@@ -479,7 +487,7 @@ const CloudSync = {
         const serialized = JSON.stringify(cleanRecord);
         if (!forcePush && this.lastPushedUsersJson[pid] === serialized) return;
         this.lastPushedUsersJson[pid] = serialized;
-        this.setSharedPendingUser(pid, cleanRecord, 15000);
+        this.setSharedPendingUser(pid, cleanRecord, 25000);
 
         await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord);
         const cleanupTasks = [];
@@ -507,7 +515,7 @@ const CloudSync = {
             await Promise.all(cleanupTasks);
         }
         if (!this.isUserDeleted(pid)) {
-            this.setSharedPendingUser(pid, cleanRecord, 8000);
+            this.setSharedPendingUser(pid, cleanRecord, 15000);
         }
     },
 
@@ -716,6 +724,8 @@ const Store = {
             sec.fields.forEach(f => {
                 if (f.alwaysOpen) {
                     privacy[f.key] = 'open';
+                } else if (f.defaultPrivacy) {
+                    privacy[f.key] = f.defaultPrivacy;
                 } else {
                     privacy[f.key] = sec.defaultPrivacy || 'closed';
                 }
@@ -880,11 +890,11 @@ const Store = {
         });
         state.privacy.ig = 'closed';
 
-        if (state.profile && state.profile.city && !state.profile.region) {
-            state.profile.region = inferRegionByCity(state.profile.city);
-        }
-        if (state.profile && state.profile.mbti && !state.profile.mbtiGroup) {
-            state.profile.mbtiGroup = inferMbtiGroup(state.profile.mbti);
+        if (state.profile) {
+            state.profile.city = String(state.profile.city || '').trim();
+            state.profile.region = String(state.profile.region || inferRegionByCity(state.profile.city) || '').trim();
+            state.profile.mbti = String(state.profile.mbti || '').trim();
+            state.profile.mbtiGroup = String(state.profile.mbtiGroup || inferMbtiGroup(state.profile.mbti) || '').trim();
         }
 
         if (Array.isArray(state.registeredSessions)) {
@@ -902,11 +912,23 @@ const Store = {
             const idx = users.findIndex(u => String(u.id) === String(state.playerId));
             const existingRecord = idx >= 0 ? users[idx] : {};
 
+            const resolvedCity = String(state.profile.city || existingRecord.city || '').trim();
+            const resolvedRegion = String(state.profile.region || inferRegionByCity(resolvedCity) || existingRecord.region || '').trim();
+            const resolvedMbti = String(state.profile.mbti || existingRecord.mbti || '').trim();
+            const resolvedMbtiGroup = String(state.profile.mbtiGroup || inferMbtiGroup(resolvedMbti) || existingRecord.mbtiGroup || '').trim();
+
+            state.profile.city = resolvedCity;
+            state.profile.region = resolvedRegion;
+            state.profile.mbti = resolvedMbti;
+            state.profile.mbtiGroup = resolvedMbtiGroup;
+
             const mergedProfileForRecord = {
                 ...state.profile,
                 nickname: (state.profile.nickname && String(state.profile.nickname).trim()) || `玩家_${state.playerId}`,
-                region: state.profile.region || inferRegionByCity(state.profile.city),
-                mbtiGroup: state.profile.mbtiGroup || inferMbtiGroup(state.profile.mbti)
+                region: resolvedRegion,
+                city: resolvedCity,
+                mbtiGroup: resolvedMbtiGroup,
+                mbti: resolvedMbti
             };
             const generatedBackupCode = deriveFixedBackupCode(state.playerId);
             state.backupCode = generatedBackupCode;

@@ -1,6 +1,6 @@
 /* shared/schema.js - 前後台共用：表單欄位結構、地區/MBTI對照表、戀愛語錄與 5 碼通行碼演算法 */
 
-const SCHEMA_VERSION = 30;
+const SCHEMA_VERSION = 31;
 // 🧪 測試階段開關：true = 全部欄位暫時免必填；正式上線時改為 false 即可恢復全部必填驗證
 const TEST_MODE_OPTIONAL_FIELDS = false;
 
@@ -342,7 +342,7 @@ const FIELD_SECTIONS = [
         fields: [
             { key: 'oneSentence', label: '想對未來配對對象說的一句話或一個問題', type: 'text', required: true, alwaysOpen: true, placeholder: '一句話就好，不用想太久' },
             { key: 'bio', label: '自我介紹（推薦認真寫）', type: 'textarea', required: true, alwaysOpen: true, placeholder: '個性、平常在忙什麼、喜歡怎麼過週末' },
-            { key: 'idealPartner', label: '稍微描述一下想像中伴侶的模樣吧！', type: 'textarea', required: true, alwaysOpen: true, placeholder: '例如：希望對方也喜歡貓、不考慮遠距...' },
+            { key: 'idealPartner', label: '稍微描述一下想像中伴侶的模樣吧！', type: 'textarea', required: true, defaultPrivacy: 'closed', placeholder: '例如：希望對方也喜歡貓、不考慮遠距...' },
             {
                 key: 'icebreakerQuestion',
                 label: '破冰提問（第一句話你希望對方問你什麼？）',
