@@ -121,7 +121,7 @@ function renderHomeStatsCharts() {
     `;
 }
 
-// ==================== 複選場次與完全吻合條件（居住先選地區，可配對全區或指定縣市） ====================
+// ==================== 複選場次與完全吻合條件（當前居住地區僅選北部、中部、南部、東部） ====================
 function handleApplyClick() {
     const sysConfig = Store.getSystemConfig();
     const quota = Store.getGenderQuotaStatus();
@@ -180,30 +180,6 @@ function openRegisterModal() {
 
     const savedCriteria = appState.exactMatchCriteria || {};
     document.getElementById('exactMatchOptionsList').innerHTML = EXACT_MATCH_OPTIONS.map(item => {
-        if (item.type === 'regionCity') {
-            const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, 'region');
-            const selectedReg = (savedCriteria.region && REGION_CITIES[savedCriteria.region]) ? savedCriteria.region : REGION_OPTIONS[0];
-            const selectedCity = (savedCriteria.region && REGION_CITIES[savedCriteria.region]) ? (savedCriteria.city || '') : '';
-            const regCities = REGION_CITIES[selectedReg] || [];
-            return `
-                <div class="sm:col-span-2 p-2.5 rounded-xl border border-pink-200 bg-pink-50/30 space-y-1.5">
-                    <label class="flex items-center gap-2 text-xs font-semibold text-[#5e464a] cursor-pointer">
-                        <input type="checkbox" name="exactFieldCheck" value="region" ${isChecked ? 'checked' : ''} onchange="toggleExactSelect('region')" class="accent-[#c96a7b]">
-                        <span>${item.label}</span>
-                    </label>
-                    <div id="exact-region-wrap" class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 ${isChecked ? '' : 'hidden'}">
-                        <select id="exact-select-region" onchange="onExactRegionChange()" class="input-jp !py-1.5 !text-xs">
-                            ${REGION_OPTIONS.map(r => `<option value="${r}" ${selectedReg === r ? 'selected' : ''}>${r}（全區）</option>`).join('')}
-                        </select>
-                        <select id="exact-select-region-city" class="input-jp !py-1.5 !text-xs">
-                            <option value="">不限縣市（整個${selectedReg}皆可配對）</option>
-                            ${regCities.map(c => `<option value="${c}" ${selectedCity === c ? 'selected' : ''}>限定：${c}</option>`).join('')}
-                        </select>
-                    </div>
-                </div>
-            `;
-        }
-
         const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, item.key);
         const selectedVal = savedCriteria[item.key] || item.choices[0];
         return `
@@ -236,27 +212,10 @@ window.onRegSessionCheckChange = function() {
 
 window.toggleExactSelect = function(key) {
     const cb = document.querySelector(`input[name="exactFieldCheck"][value="${key}"]`);
-    if (key === 'region') {
-        const wrap = document.getElementById('exact-region-wrap');
-        if (cb && wrap) {
-            wrap.classList.toggle('hidden', !cb.checked);
-        }
-        return;
-    }
     const sel = document.getElementById(`exact-select-${key}`);
     if (cb && sel) {
         sel.classList.toggle('hidden', !cb.checked);
     }
-};
-
-window.onExactRegionChange = function() {
-    const regSel = document.getElementById('exact-select-region');
-    const citySel = document.getElementById('exact-select-region-city');
-    if (!regSel || !citySel) return;
-    const regVal = regSel.value;
-    const cities = REGION_CITIES[regVal] || [];
-    citySel.innerHTML = `<option value="">不限縣市（整個${regVal}皆可配對）</option>` +
-        cities.map(c => `<option value="${c}">限定：${c}</option>`).join('');
 };
 
 function closeRegisterModal() {
@@ -267,9 +226,7 @@ function formatCriteriaDisplayList(criteria) {
     const keys = Object.keys(criteria || {}).filter(k => k !== 'city');
     return keys.map(k => {
         if (k === 'region') {
-            const regName = criteria.region;
-            const cityName = criteria.city;
-            return cityName ? `居住地區：${regName}（${cityName}）` : `居住地區：${regName}（全區所有縣市皆可）`;
+            return `當前居住地區：${criteria.region}`;
         }
         const label = EXACT_MATCH_OPTIONS.find(o => o.key === k)?.label || k;
         return `${label}：${criteria[k]}`;
@@ -307,20 +264,9 @@ async function confirmRegistration() {
     const criteria = {};
     document.querySelectorAll('input[name="exactFieldCheck"]:checked').forEach(cb => {
         const key = cb.value;
-        if (key === 'region') {
-            const regSel = document.getElementById('exact-select-region');
-            const citySel = document.getElementById('exact-select-region-city');
-            if (regSel && regSel.value) {
-                criteria.region = regSel.value;
-                if (citySel && citySel.value) {
-                    criteria.city = citySel.value;
-                }
-            }
-        } else {
-            const sel = document.getElementById(`exact-select-${key}`);
-            if (sel) {
-                criteria[key] = sel.value;
-            }
+        const sel = document.getElementById(`exact-select-${key}`);
+        if (sel && sel.value) {
+            criteria[key] = sel.value;
         }
     });
 
@@ -402,7 +348,7 @@ function renderCustomFortuneButtons(selectedNum, isLocked = false) {
     const grid = document.getElementById('customActFortuneGrid');
     if (!grid) return;
     const sel = String(selectedNum || '');
-    grid.innerHTML = Array.from({ length: 10 }, (_, idx) => {
+    grid.innerHTML = Array.from({ length: 5 }, (_, idx) => {
         const num = String(idx + 1);
         const isSelected = sel === num;
 
@@ -448,7 +394,7 @@ window.selectCustomFortuneNumber = function(num) {
 
     const chosenStr = String(num || '').trim();
     const chosenNum = parseInt(chosenStr, 10);
-    if (isNaN(chosenNum) || chosenNum < 1 || chosenNum > 10) return;
+    if (isNaN(chosenNum) || chosenNum < 1 || chosenNum > 5) return;
 
     const hiddenEl = document.getElementById('customActSelectedFortune');
     if (hiddenEl) hiddenEl.value = String(chosenNum);
@@ -576,7 +522,7 @@ function openCustomActivityModal(activityId) {
             confirmBtn.classList.add('hidden');
         } else {
             renderCustomFortuneButtons(savedFortune, false);
-            statusBox.innerHTML = `🎋 <strong>【${act.name}】月老籤詩請選擇1~10首號碼！</strong><br>選擇相同號碼的玩家將於管理員執行配對時成功牽線（單獨號碼不會配對；送出保存後不可更改號碼）。`;
+            statusBox.innerHTML = `🎋 <strong>【${act.name}】月老籤詩請選擇1~5首號碼！</strong><br>選擇相同號碼的玩家將於管理員執行配對時成功牽線（單獨號碼不會配對；送出保存後不可更改號碼）。`;
             cancelBtn.classList.add('hidden');
             confirmBtn.classList.remove('hidden');
             confirmBtn.textContent = `✨ 確認報名【${act.name}】`;
@@ -612,30 +558,6 @@ function openCustomActivityModal(activityId) {
         }
 
         document.getElementById('customActExactOptionsList').innerHTML = EXACT_MATCH_OPTIONS.map(item => {
-            if (item.type === 'regionCity') {
-                const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, 'region');
-                const selectedReg = (savedCriteria.region && REGION_CITIES[savedCriteria.region]) ? savedCriteria.region : REGION_OPTIONS[0];
-                const selectedCity = (savedCriteria.region && REGION_CITIES[savedCriteria.region]) ? (savedCriteria.city || '') : '';
-                const regCities = REGION_CITIES[selectedReg] || [];
-                return `
-                    <div class="sm:col-span-2 p-2.5 rounded-xl border border-pink-200 bg-pink-50/30 space-y-1.5">
-                        <label class="flex items-center gap-2 text-xs font-semibold text-[#5e464a] cursor-pointer">
-                            <input type="checkbox" name="customActExactCheck" value="region" ${isChecked ? 'checked' : ''} onchange="toggleCustomActExactSelect('region')" class="accent-[#c96a7b]">
-                            <span>${item.label}</span>
-                        </label>
-                        <div id="custom-exact-region-wrap" class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 ${isChecked ? '' : 'hidden'}">
-                            <select id="custom-exact-select-region" onchange="onCustomActExactRegionChange()" class="input-jp !py-1.5 !text-xs">
-                                ${REGION_OPTIONS.map(r => `<option value="${r}" ${selectedReg === r ? 'selected' : ''}>${r}（全區）</option>`).join('')}
-                            </select>
-                            <select id="custom-exact-select-region-city" class="input-jp !py-1.5 !text-xs">
-                                <option value="">不限縣市（整個${selectedReg}皆可配對）</option>
-                                ${regCities.map(c => `<option value="${c}" ${selectedCity === c ? 'selected' : ''}>限定：${c}</option>`).join('')}
-                            </select>
-                        </div>
-                    </div>
-                `;
-            }
-
             const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, item.key);
             const selectedVal = savedCriteria[item.key] || item.choices[0];
             return `
@@ -657,23 +579,8 @@ function openCustomActivityModal(activityId) {
 
 window.toggleCustomActExactSelect = function(key) {
     const cb = document.querySelector(`input[name="customActExactCheck"][value="${key}"]`);
-    if (key === 'region') {
-        const wrap = document.getElementById('custom-exact-region-wrap');
-        if (cb && wrap) wrap.classList.toggle('hidden', !cb.checked);
-        return;
-    }
     const sel = document.getElementById(`custom-exact-select-${key}`);
     if (cb && sel) sel.classList.toggle('hidden', !cb.checked);
-};
-
-window.onCustomActExactRegionChange = function() {
-    const regSel = document.getElementById('custom-exact-select-region');
-    const citySel = document.getElementById('custom-exact-select-region-city');
-    if (!regSel || !citySel) return;
-    const regVal = regSel.value;
-    const cities = REGION_CITIES[regVal] || [];
-    citySel.innerHTML = `<option value="">不限縣市（整個${regVal}皆可配對）</option>` +
-        cities.map(c => `<option value="${c}">限定：${c}</option>`).join('');
 };
 
 function closeCustomActivityModal() {
@@ -715,8 +622,8 @@ async function confirmCustomActivityRegistration() {
             return;
         }
         const chosenNum = parseInt(document.getElementById('customActSelectedFortune').value, 10);
-        if (isNaN(chosenNum) || chosenNum < 1 || chosenNum > 10) {
-            showMiniNotice('🎋 請選擇籤詩號碼', '月老籤詩請選擇1~10首號碼後再送出報名！');
+        if (isNaN(chosenNum) || chosenNum < 1 || chosenNum > 5) {
+            showMiniNotice('🎋 請選擇籤詩號碼', '月老籤詩請選擇1~5首號碼後再送出報名！');
             return;
         }
         customActivitySyncSuppressUntil = Date.now() + 6000;
@@ -776,19 +683,8 @@ async function confirmCustomActivityRegistration() {
     const criteria = {};
     document.querySelectorAll('input[name="customActExactCheck"]:checked').forEach(cb => {
         const key = cb.value;
-        if (key === 'region') {
-            const regSel = document.getElementById('custom-exact-select-region');
-            const citySel = document.getElementById('custom-exact-select-region-city');
-            if (regSel && regSel.value) {
-                criteria.region = regSel.value;
-                if (citySel && citySel.value) {
-                    criteria.city = citySel.value;
-                }
-            }
-        } else {
-            const sel = document.getElementById(`custom-exact-select-${key}`);
-            if (sel) criteria[key] = sel.value;
-        }
+        const sel = document.getElementById(`custom-exact-select-${key}`);
+        if (sel && sel.value) criteria[key] = sel.value;
     });
 
     customActivitySyncSuppressUntil = Date.now() + 6000;
@@ -1075,7 +971,7 @@ function refreshAllUI() {
                     return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（配對條件：<strong>${cSummary}</strong>）${timeTag}`;
                 }
                 const typeHint = actType === 'fortune_number'
-                    ? '（月老籤詩請選擇1~10首號碼）'
+                    ? '（月老籤詩請選擇1~5首號碼）'
                     : (actType === 'two_choice' ? `（默契大考驗二選一：${act.optionA || ''} / ${act.optionB || ''}）` : '');
                 const descTxt = act.description ? ` — ${act.description}` : '';
                 return `🎪 專屬活動 <strong>【${act.name}】</strong> 開放報名中${typeHint}${descTxt}${timeTag}`;

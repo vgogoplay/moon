@@ -87,15 +87,14 @@ const ROMANCE_MOMENTS = [
     }
 ];
 
-// 2. 報名時「希望對方哪個欄位要完全吻合」選項（居住改為先選地區、可再選縣市）
+// 2. 報名時「希望對方哪個欄位要完全吻合」選項（居住地區僅選北部、中部、南部、東部）
 const EXACT_MATCH_OPTIONS = [
     { key: 'mbti', label: 'MBTI', choices: ['INTJ', 'INTP', 'ENTJ', 'ENTP', 'INFJ', 'INFP', 'ENFJ', 'ENFP', 'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ', 'ISTP', 'ISFP', 'ESTP', 'ESFP'] },
     { key: 'gender', label: '性別', choices: ['男', '女'] },
     { key: 'ageRange', label: '年齡範圍', choices: ['22~25歲', '26~30歲', '31~35歲', '36~40歲'] },
     {
         key: 'region',
-        label: '當前居住地區（選地區可配對全區，亦可指定縣市）',
-        type: 'regionCity',
+        label: '當前居住地區',
         choices: REGION_OPTIONS
     },
     { key: 'height', label: '你的身高', choices: ['150cm以上', '155cm以上', '160cm以上', '165cm以上', '170cm以上', '175cm以上', '180cm以上'] },

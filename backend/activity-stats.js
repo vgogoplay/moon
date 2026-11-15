@@ -131,7 +131,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
         }
 
         const typeLabel = actType === 'fortune_number'
-            ? '自定義（月老籤詩1~10）'
+            ? '自定義（月老籤詩1~5）'
             : (actType === 'two_choice' ? `自定義（二選一：${act?.twoChoiceText || ''}）` : '自定義（條件配對）');
 
         return {

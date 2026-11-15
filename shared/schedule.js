@@ -262,9 +262,6 @@ function sharedMatchesGenderPreference(seeker, candidate, criteria = {}) {
 function sharedCheckSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
     if (!candidate) return false;
     if (key === 'region') {
-        if (seekerCriteria.city) {
-            return candidate.city === seekerCriteria.city;
-        }
         const candidateRegion = candidate.region || (typeof inferRegionByCity === 'function' ? inferRegionByCity(candidate.city) : '');
         const regionCities = (typeof REGION_CITIES !== 'undefined' && REGION_CITIES[desiredVal]) ? REGION_CITIES[desiredVal] : [];
         return candidateRegion === desiredVal || regionCities.includes(candidate.city);

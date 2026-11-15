@@ -422,8 +422,7 @@ function formatCriteriaHtml(criteria) {
     }
     return cKeys.map(k => {
         if (k === 'region') {
-            const desc = criteria.city ? `${criteria.region}（${criteria.city}）` : `${criteria.region}（全區皆可）`;
-            return `居住地區：<strong>${desc}</strong>`;
+            return `當前居住地區：<strong>${criteria.region}</strong>`;
         }
         return `${FIELD_LABELS[k] || k}：<strong>${criteria[k]}</strong>`;
     }).join(' <span class="text-pink-400">OR</span> ');

@@ -385,20 +385,23 @@ function unmatchPlayerPair(userId, specificPartnerId = null) {
 }
 
 function checkSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
+    if (typeof sharedCheckSingleCriterion === 'function') {
+        return sharedCheckSingleCriterion(key, desiredVal, candidate, seekerCriteria);
+    }
     if (!candidate) return false;
     if (key === 'region') {
-        if (seekerCriteria.city) {
-            return candidate.city === seekerCriteria.city;
-        }
         const candidateRegion = candidate.region || inferRegionByCity(candidate.city);
         const regionCities = REGION_CITIES[desiredVal] || [];
         return candidateRegion === desiredVal || regionCities.includes(candidate.city);
     }
     if (key === 'gender') {
-        const cid = String(candidate.id);
-        if (desiredVal === '女') return candidate.gender === '女' && cid.startsWith('2');
-        if (desiredVal === '男') return candidate.gender === '男' && cid.startsWith('1');
-        return candidate.gender === desiredVal;
+        const cid = String(candidate.id || '');
+        const cGender = (candidate.gender === '男' || candidate.gender === '女')
+            ? candidate.gender
+            : (cid.startsWith('1') ? '男' : (cid.startsWith('2') ? '女' : ''));
+        if (desiredVal === '女' || desiredVal === '女生') return cGender === '女';
+        if (desiredVal === '男' || desiredVal === '男生') return cGender === '男';
+        return cGender === desiredVal;
     }
     if (key === 'ageRange') {
         const age = Number(candidate.age);
@@ -423,9 +426,24 @@ function checkSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
 
 function acceptsCandidate(seeker, candidate) {
     const criteria = seeker.exactMatchCriteria || {};
-    const keys = Object.keys(criteria).filter(k => !(k === 'city' && criteria.region));
-    if (keys.length === 0) return true;
-    return keys.some(k => checkSingleCriterion(k, criteria[k], candidate, criteria));
+    if (typeof sharedMatchesGenderPreference === 'function') {
+        if (!sharedMatchesGenderPreference(seeker, candidate, criteria)) return false;
+    } else {
+        const cid = String(candidate.id || '');
+        const cGender = (candidate.gender === '男' || candidate.gender === '女')
+            ? candidate.gender
+            : (cid.startsWith('1') ? '男' : (cid.startsWith('2') ? '女' : ''));
+        if (cGender !== '男' && cGender !== '女') return false;
+        const pref = String(seeker.targetGender || '').trim();
+        if ((pref === '男生' || pref === '男') && cGender !== '男') return false;
+        if ((pref === '女生' || pref === '女') && cGender !== '女') return false;
+        const critG = String(criteria.gender || '').trim();
+        if ((critG === '男生' || critG === '男') && cGender !== '男') return false;
+        if ((critG === '女生' || critG === '女') && cGender !== '女') return false;
+    }
+    const otherKeys = Object.keys(criteria).filter(k => k !== 'gender' && !(k === 'city' && criteria.region));
+    if (otherKeys.length === 0) return true;
+    return otherKeys.some(k => checkSingleCriterion(k, criteria[k], candidate, criteria));
 }
 
 function canPair(A, B) {
