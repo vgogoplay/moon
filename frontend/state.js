@@ -316,9 +316,12 @@ function syncFromSharedStorage() {
             }
         }
 
-        // 3. 同步所有已配對好友（不限數量，支援 matchedHistory 與單筆 matchedWithId）
-        const historyList = (me && Array.isArray(me.matchedHistory)) ? [...me.matchedHistory] : [];
-        if (me && me.matchedSession && me.matchedWithId && !historyList.some(h => String(h.partnerId) === String(me.matchedWithId))) {
+        // 3. 同步所有已配對好友（不限數量，以正規化後的 matchedHistory 為唯一真實來源，避免殘留 matchedWithId 幽靈復活）
+        const hasHistoryField = Boolean(me && me.matchedHistory !== undefined && me.matchedHistory !== null);
+        const historyList = (me && typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
+            ? CloudSync.normalizeMatchedHistoryList(me.matchedHistory)
+            : ((me && Array.isArray(me.matchedHistory)) ? [...me.matchedHistory] : []);
+        if (!hasHistoryField && me && me.matchedSession && me.matchedWithId && !historyList.some(h => String(h.partnerId) === String(me.matchedWithId))) {
             historyList.push({
                 session: me.matchedSession,
                 partnerId: String(me.matchedWithId),
@@ -373,12 +376,16 @@ function syncFromSharedStorage() {
             }
         });
 
-        // 4. 檢查後台是否已彈性解除特定配對（僅移除被解除的那位好友，其餘好友完整保留）
+        // 4. 檢查後台是否已彈性解除特定配對（僅移除被解除的那位好友，其餘好友完整保留，並去重防止重複卡片）
         const activeBackendPartnerIds = new Set(historyList.map(h => String(h.partnerId)));
         const beforeCount = appState.friends.length;
+        const seenFriendIds = new Set();
         appState.friends = appState.friends.filter(f => {
-            if (String(f.id).startsWith('MOCK_FRIEND_')) return true;
-            return activeBackendPartnerIds.has(String(f.id));
+            const fid = String(f.id);
+            if (seenFriendIds.has(fid)) return false;
+            seenFriendIds.add(fid);
+            if (fid.startsWith('MOCK_FRIEND_')) return true;
+            return activeBackendPartnerIds.has(fid);
         });
         if (appState.friends.length !== beforeCount) {
             if (appState.friends.length < 2) {

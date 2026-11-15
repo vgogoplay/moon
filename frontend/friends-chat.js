@@ -574,7 +574,7 @@ function recordMutualContinueVote(myId, partnerId, voterNickname, isSimulatedPar
         if (String(userA.matchedWithId) === idB) userA.matchedAt = extendedMatchedAt;
         if (String(userB.matchedWithId) === idA) userB.matchedAt = extendedMatchedAt;
 
-        Store.saveSharedUsers(users);
+        Store.saveSharedUsers(users, { isMatchMutation: true });
 
         const sysText = `🌸 雙方皆按下「繼續配對」成為好友！緣分已再延後 7 天（剩餘 7 天），聊天室已重新開放並自動解鎖彼此 IG 帳號，可以繼續聊天囉！`;
         const updatedMsgs = ChatStore.appendMessage(idA, idB, { senderId: 'system', text: sysText });
@@ -595,7 +595,7 @@ function recordMutualContinueVote(myId, partnerId, voterNickname, isSimulatedPar
         const votesArr = Array.from(voteSet);
         itemA.continueVotes = votesArr;
         itemB.continueVotes = votesArr;
-        Store.saveSharedUsers(users);
+        Store.saveSharedUsers(users, { isMatchMutation: true });
 
         const sysText = `💖 ${voterNickname} 已按下「繼續配對」，等待另一方也按下繼續中...`;
         const updatedMsgs = ChatStore.appendMessage(idA, idB, { senderId: 'system', text: sysText });
@@ -686,7 +686,7 @@ function clearMutualFriendship(friend, noticeMsg) {
             }
         }
     });
-    Store.saveSharedUsers(users);
+    Store.saveSharedUsers(users, { isMatchMutation: true });
 
     // 直接解除配對時，才清空雙方聊天歷史紀錄
     if (appState.playerId && friend.id) {

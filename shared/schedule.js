@@ -210,7 +210,7 @@ function getCustomActivityScheduleState(act, nowTs = Date.now()) {
         status: 'open',
         canRegister: true,
         canCancel: true,
-        label: summary.endText ? `開放報名中（${formatShortDateTime(summary.endTs)} 截止）` : '開放報名中'
+        label: summary.endTs ? `開放報名中（${formatShortDateTime(summary.endTs)} 截止）` : '開放報名中'
     };
 }
 
@@ -221,6 +221,42 @@ function sharedShuffleArray(arr) {
         [copy[i], copy[j]] = [copy[j], copy[i]];
     }
     return copy;
+}
+
+function normalizeGenderCode(rawVal) {
+    const s = String(rawVal || '').trim();
+    if (s === '男' || s === '男生') return '男';
+    if (s === '女' || s === '女生') return '女';
+    if (s === '都可以' || s === '不限') return '都可以';
+    return '';
+}
+
+function resolveUserActualGender(user) {
+    if (!user) return '';
+    const g = normalizeGenderCode(user.gender);
+    if (g === '男' || g === '女') return g;
+    const uid = String(user.id || '').trim();
+    if (uid.startsWith('1')) return '男';
+    if (uid.startsWith('2')) return '女';
+    return '';
+}
+
+function sharedMatchesGenderPreference(seeker, candidate, criteria = {}) {
+    if (!seeker || !candidate) return false;
+    const candidateGender = resolveUserActualGender(candidate);
+    if (candidateGender !== '男' && candidateGender !== '女') return false;
+
+    // 1. 個人資料「你想配對的性別」(男生 / 女生 / 都可以) 為硬性條件，不可被 OR 條件覆蓋
+    const profilePref = normalizeGenderCode(seeker.targetGender);
+    if (profilePref === '男' && candidateGender !== '男') return false;
+    if (profilePref === '女' && candidateGender !== '女') return false;
+
+    // 2. 報名彈窗「希望完全吻合條件」若有勾選性別，同樣為硬性條件
+    const critGender = normalizeGenderCode(criteria && criteria.gender);
+    if (critGender === '男' && candidateGender !== '男') return false;
+    if (critGender === '女' && candidateGender !== '女') return false;
+
+    return true;
 }
 
 function sharedCheckSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
@@ -234,10 +270,11 @@ function sharedCheckSingleCriterion(key, desiredVal, candidate, seekerCriteria =
         return candidateRegion === desiredVal || regionCities.includes(candidate.city);
     }
     if (key === 'gender') {
-        const cid = String(candidate.id);
-        if (desiredVal === '女') return candidate.gender === '女' && cid.startsWith('2');
-        if (desiredVal === '男') return candidate.gender === '男' && cid.startsWith('1');
-        return candidate.gender === desiredVal;
+        const candidateGender = resolveUserActualGender(candidate);
+        const wantGender = normalizeGenderCode(desiredVal);
+        if (wantGender === '女') return candidateGender === '女';
+        if (wantGender === '男') return candidateGender === '男';
+        return candidateGender === desiredVal;
     }
     if (key === 'ageRange') {
         const age = Number(candidate.age);
@@ -334,9 +371,10 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     const acceptsCustomFn = (seeker, candidate) => {
         const reg = seeker.customActivityRegs && seeker.customActivityRegs[act.id];
         const criteria = (reg && reg.exactMatchCriteria) ? reg.exactMatchCriteria : {};
-        const keys = Object.keys(criteria).filter(k => !(k === 'city' && criteria.region));
-        if (keys.length === 0) return true;
-        return keys.some(k => sharedCheckSingleCriterion(k, criteria[k], candidate, criteria));
+        if (!sharedMatchesGenderPreference(seeker, candidate, criteria)) return false;
+        const otherKeys = Object.keys(criteria).filter(k => k !== 'gender' && !(k === 'city' && criteria.region));
+        if (otherKeys.length === 0) return true;
+        return otherKeys.some(k => sharedCheckSingleCriterion(k, criteria[k], candidate, criteria));
     };
 
     const eligiblePool = sharedShuffleArray(users.filter(u => {
@@ -371,8 +409,8 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
         });
 
         Object.keys(buckets).sort((a, b) => Number(a) - Number(b)).forEach(num => {
-            const males = sharedShuffleArray(buckets[num].filter(u => u.gender === '男'));
-            const females = sharedShuffleArray(buckets[num].filter(u => u.gender === '女'));
+            const males = sharedShuffleArray(buckets[num].filter(u => resolveUserActualGender(u) === '男'));
+            const females = sharedShuffleArray(buckets[num].filter(u => resolveUserActualGender(u) === '女'));
             for (let i = 0; i < males.length; i++) {
                 const M = males[i];
                 if (pairedThisRunIds.has(String(M.id))) continue;
@@ -403,8 +441,8 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
         });
 
         Object.keys(buckets).forEach(choice => {
-            const males = sharedShuffleArray(buckets[choice].filter(u => u.gender === '男'));
-            const females = sharedShuffleArray(buckets[choice].filter(u => u.gender === '女'));
+            const males = sharedShuffleArray(buckets[choice].filter(u => resolveUserActualGender(u) === '男'));
+            const females = sharedShuffleArray(buckets[choice].filter(u => resolveUserActualGender(u) === '女'));
             for (let i = 0; i < males.length; i++) {
                 const M = males[i];
                 if (pairedThisRunIds.has(String(M.id))) continue;
@@ -471,8 +509,8 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     const matchedUsersToPush = [];
     users.forEach(u => {
         if (u && u.id) {
-            if (typeof generatePlayerBackupCode === 'function') {
-                u.backupCode = generatePlayerBackupCode(u, users);
+            if (typeof deriveFixedBackupCode === 'function') {
+                u.backupCode = deriveFixedBackupCode(u.id);
             }
             if (pairedThisRunIds.has(String(u.id))) {
                 matchedUsersToPush.push(u);
@@ -482,7 +520,7 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
 
     localStorage.setItem(USERS_KEY, JSON.stringify(users));
     if (matchedUsersToPush.length > 0 && typeof CloudSync !== 'undefined') {
-        await Promise.all(matchedUsersToPush.map(u => CloudSync.upsertUser(u, true)));
+        await Promise.all(matchedUsersToPush.map(u => CloudSync.upsertUser(u, true, { isMatchMutation: true })));
     }
 
     if (typeof renderAdminAll === 'function') {

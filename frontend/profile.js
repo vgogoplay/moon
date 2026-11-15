@@ -1060,8 +1060,8 @@ async function restoreFromBackupCode() {
         return;
     }
 
-    // 先向 Firebase 同步最新玩家資料庫，確保跨瀏覽器／新手機可即時查到
-    if (typeof CloudSync !== 'undefined' && CloudSync.inFlightWrites === 0) {
+    // 無條件向 Firebase 拉取最新完整玩家資料庫，確保跨裝置／重複登入讀取到最新好友名單
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchFullTree === 'function') {
         await CloudSync.fetchFullTree();
     }
 
@@ -1125,11 +1125,13 @@ async function restoreFromBackupCode() {
         loadedState.exactMatchCriteria = { ...matchedUser.exactMatchCriteria };
     }
 
+    // 清空本地舊好友快取，完全依據雲端最新 matchedHistory 重建好友名單，確保每次登入一致
+    loadedState.friends = [];
     appState = loadedState;
     hasUnsavedProfileDraft = false;
     lastRenderedChatSignature = '';
-    Store.save(appState);
     syncFromSharedStorage();
+    Store.save(appState, false, true);
     renderProfileForm();
     refreshAllUI();
     updateMailboxBadge();
@@ -1176,6 +1178,7 @@ function switchTestPlayerAccount() {
     }
 
     appState = Store.loadByPlayerId(trimmed);
+    appState.friends = [];
     hasUnsavedProfileDraft = false;
     lastRenderedChatSignature = '';
     syncFromSharedStorage();

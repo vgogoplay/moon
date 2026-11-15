@@ -399,9 +399,12 @@ function areAlreadyFriends(userA, userB) {
 function acceptsCandidateForCustomActivity(seeker, candidate, activityId) {
     const reg = seeker.customActivityRegs && seeker.customActivityRegs[activityId];
     const criteria = (reg && reg.exactMatchCriteria) ? reg.exactMatchCriteria : {};
-    const keys = Object.keys(criteria).filter(k => !(k === 'city' && criteria.region));
-    if (keys.length === 0) return true;
-    return keys.some(k => checkSingleCriterion(k, criteria[k], candidate, criteria));
+    if (typeof sharedMatchesGenderPreference === 'function' && !sharedMatchesGenderPreference(seeker, candidate, criteria)) {
+        return false;
+    }
+    const otherKeys = Object.keys(criteria).filter(k => k !== 'gender' && !(k === 'city' && criteria.region));
+    if (otherKeys.length === 0) return true;
+    return otherKeys.some(k => sharedCheckSingleCriterion(k, criteria[k], candidate, criteria));
 }
 
 function canPairInCustomActivity(A, B, activityId) {

@@ -352,7 +352,7 @@ function saveAdminEditedPlayer(e) {
 
     u.privacy = nextPrivacy;
     u.updatedAt = new Date().toLocaleString('zh-TW') + ' (管理員編輯)';
-    u.backupCode = generatePlayerBackupCode(u, users);
+    u.backupCode = (typeof deriveFixedBackupCode === 'function') ? deriveFixedBackupCode(u.id) : (typeof generatePlayerBackupCode === 'function' ? generatePlayerBackupCode(u, users) : u.backupCode);
 
     users[idx] = u;
     saveUsers(users);
@@ -372,7 +372,7 @@ function viewPlayerDetail(playerId) {
     const users = getUsers();
     const u = users.find(item => String(item.id) === String(playerId));
     if (!u) return;
-    const latestCode = generatePlayerBackupCode(u, users);
+    const latestCode = (typeof deriveFixedBackupCode === 'function') ? deriveFixedBackupCode(u.id) : (typeof generatePlayerBackupCode === 'function' ? generatePlayerBackupCode(u, users) : u.backupCode);
     if (u.backupCode !== latestCode) {
         u.backupCode = latestCode;
         saveUsers(users);

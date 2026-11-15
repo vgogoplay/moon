@@ -155,6 +155,49 @@ const CloudSync = {
         return [];
     },
 
+    normalizeStringArray(raw) {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw.map(v => String(v ?? '').trim()).filter(Boolean);
+        if (typeof raw === 'object') return Object.values(raw).map(v => String(v ?? '').trim()).filter(Boolean);
+        return [];
+    },
+
+    normalizeMatchedHistoryList(rawHistory) {
+        const items = this.mapToArray(rawHistory);
+        const byPartner = new Map();
+        items.forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const pid = String(item.partnerId || '').trim();
+            if (!pid) return;
+            const votes = Array.from(new Set(this.normalizeStringArray(item.continueVotes)));
+            const normalizedItem = {
+                ...item,
+                partnerId: pid,
+                partnerName: String(item.partnerName || '').trim(),
+                session: String(item.session || '').trim(),
+                matchedAt: Number(item.matchedAt || 0) || Date.now(),
+                igUnlocked: Boolean(item.igUnlocked),
+                continueVotes: votes
+            };
+            const prev = byPartner.get(pid);
+            if (!prev) {
+                byPartner.set(pid, normalizedItem);
+            } else {
+                const mergedVotes = Array.from(new Set([...(prev.continueVotes || []), ...votes]));
+                byPartner.set(pid, {
+                    ...prev,
+                    ...normalizedItem,
+                    partnerName: normalizedItem.partnerName || prev.partnerName,
+                    session: normalizedItem.session || prev.session,
+                    matchedAt: Math.max(Number(prev.matchedAt || 0), Number(normalizedItem.matchedAt || 0)),
+                    igUnlocked: Boolean(prev.igUnlocked || normalizedItem.igUnlocked),
+                    continueVotes: mergedVotes
+                });
+            }
+        });
+        return Array.from(byPartner.values());
+    },
+
     chatsMapToLocal(raw) {
         const result = {};
         if (!raw || typeof raw !== 'object') return result;
@@ -200,9 +243,10 @@ const CloudSync = {
             cleanUser.region = String(cleanUser.region || inferRegionByCity(cleanUser.city) || '').trim();
             cleanUser.mbti = String(cleanUser.mbti || '').trim();
             cleanUser.mbtiGroup = String(cleanUser.mbtiGroup || inferMbtiGroup(cleanUser.mbti) || '').trim();
-            cleanUser.registeredSessions = Array.isArray(cleanUser.registeredSessions)
-                ? Array.from(new Set(cleanUser.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)))
-                : [];
+            cleanUser.registeredSessions = Array.from(new Set(
+                this.normalizeStringArray(cleanUser.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
+            ));
+            cleanUser.matchedHistory = this.normalizeMatchedHistoryList(cleanUser.matchedHistory);
             cleanUser.exactMatchCriteria = (cleanUser.exactMatchCriteria && typeof cleanUser.exactMatchCriteria === 'object' && !Array.isArray(cleanUser.exactMatchCriteria))
                 ? cleanUser.exactMatchCriteria
                 : {};
@@ -477,19 +521,32 @@ const CloudSync = {
         await this.deleteNode(`${USERS_KEY}/${pid}`);
     },
 
-    async upsertUser(record, forcePush = false) {
+    async upsertUser(record, forcePush = false, options = {}) {
         if (!record || !record.id) return;
         const pid = String(record.id);
         if (!forcePush && this.isUserDeleted(pid)) return;
+        const isMatchMutation = Boolean(options && options.isMatchMutation);
+        const existingTreeUser = (this.tree && this.tree[USERS_KEY] && this.tree[USERS_KEY][pid] && typeof this.tree[USERS_KEY][pid] === 'object')
+            ? this.tree[USERS_KEY][pid]
+            : null;
         const cleanRecord = { ...record };
         delete cleanRecord.registeredSession;
         cleanRecord.city = String(cleanRecord.city || '').trim();
         cleanRecord.region = String(cleanRecord.region || inferRegionByCity(cleanRecord.city) || '').trim();
         cleanRecord.mbti = String(cleanRecord.mbti || '').trim();
         cleanRecord.mbtiGroup = String(cleanRecord.mbtiGroup || inferMbtiGroup(cleanRecord.mbti) || '').trim();
-        cleanRecord.registeredSessions = Array.isArray(cleanRecord.registeredSessions)
-            ? Array.from(new Set(cleanRecord.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)))
-            : [];
+        cleanRecord.registeredSessions = Array.from(new Set(
+            this.normalizeStringArray(cleanRecord.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
+        ));
+        cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory);
+        if (!isMatchMutation && existingTreeUser) {
+            // 非配對／解除配對異動時，絕不以本地舊快照覆蓋雲端最新的好友配對紀錄
+            cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory);
+            cleanRecord.matchedSession = existingTreeUser.matchedSession || null;
+            cleanRecord.matchedWithId = existingTreeUser.matchedWithId || null;
+            cleanRecord.matchedWithName = existingTreeUser.matchedWithName || null;
+            cleanRecord.matchedAt = existingTreeUser.matchedAt || null;
+        }
         cleanRecord.exactMatchCriteria = (cleanRecord.exactMatchCriteria && typeof cleanRecord.exactMatchCriteria === 'object' && !Array.isArray(cleanRecord.exactMatchCriteria))
             ? cleanRecord.exactMatchCriteria
             : {};
@@ -531,12 +588,12 @@ const CloudSync = {
         }
     },
 
-    syncUsersArray(usersArr) {
+    syncUsersArray(usersArr, options = { isMatchMutation: true }) {
         const list = Array.isArray(usersArr) ? usersArr : [];
         // 僅同步更新名單內的玩家，絕不因舊快照暫時缺少某 ID 而誤發 DELETE 刪除雲端玩家（刪除僅由管理員明確刪除操作觸發）
         list.forEach(u => {
             if (u && u.id && !this.isUserDeleted(u.id)) {
-                this.upsertUser(u);
+                this.upsertUser(u, false, options);
             }
         });
     },
@@ -961,10 +1018,14 @@ const Store = {
             }
             const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
             const idx = users.findIndex(u => String(u.id) === String(state.playerId));
-            const cloudTreeRec = (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][String(state.playerId)])
-                ? CloudSync.tree[USERS_KEY][String(state.playerId)]
-                : {};
+            const hasCloudTreeRec = Boolean(typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][String(state.playerId)]);
+            const cloudTreeRec = hasCloudTreeRec ? CloudSync.tree[USERS_KEY][String(state.playerId)] : {};
             const existingRecord = idx >= 0 ? { ...cloudTreeRec, ...users[idx] } : { ...cloudTreeRec };
+            // 配對歷史與封鎖狀態以雲端最新樹為準，避免本地快取回寫覆蓋新配對好友
+            const authMatchSource = hasCloudTreeRec ? cloudTreeRec : existingRecord;
+            const preservedMatchedHistory = (typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
+                ? CloudSync.normalizeMatchedHistoryList(authMatchSource.matchedHistory)
+                : (Array.isArray(authMatchSource.matchedHistory) ? authMatchSource.matchedHistory : []);
 
             const resolvedCity = String(state.profile.city || existingRecord.city || '').trim();
             const resolvedRegion = String(state.profile.region || inferRegionByCity(resolvedCity) || existingRecord.region || '').trim();
@@ -997,15 +1058,15 @@ const Store = {
                 backupCode: generatedBackupCode,
                 isWarned: !!state.isWarnedAccount,
                 warningReason: state.warningReason || '',
-                isMatchBanned: Boolean(existingRecord.isMatchBanned),
-                isChatBanned: Boolean(existingRecord.isChatBanned),
+                isMatchBanned: Boolean(authMatchSource.isMatchBanned),
+                isChatBanned: Boolean(authMatchSource.isChatBanned),
                 registeredSessions: state.isWarnedAccount ? [] : (Array.isArray(state.registeredSessions) ? state.registeredSessions : []),
                 exactMatchCriteria: state.exactMatchCriteria || {},
                 customActivityRegs: state.isWarnedAccount ? {} : (state.customActivityRegs || {}),
-                matchedHistory: Array.isArray(existingRecord.matchedHistory) ? existingRecord.matchedHistory : [],
-                matchedSession: state.matchedSession || existingRecord.matchedSession || null,
-                matchedWithId: existingRecord.matchedWithId || null,
-                matchedWithName: state.friends.map(f => f.nickname).join(', ') || existingRecord.matchedWithName || null,
+                matchedHistory: preservedMatchedHistory,
+                matchedSession: authMatchSource.matchedSession || state.matchedSession || null,
+                matchedWithId: authMatchSource.matchedWithId || null,
+                matchedWithName: authMatchSource.matchedWithName || state.friends.map(f => f.nickname).join(', ') || null,
                 updatedAt: nowUpdatedStr
             };
             delete record.registeredSession;
@@ -1030,9 +1091,16 @@ const Store = {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     },
 
-    saveSharedUsers(users) {
+    saveSharedUsers(users, options = { isMatchMutation: true }) {
         localStorage.setItem(USERS_KEY, JSON.stringify(users));
-        if (typeof CloudSync !== 'undefined') CloudSync.syncUsersArray(users);
+        if (typeof CloudSync !== 'undefined') {
+            const list = Array.isArray(users) ? users : [];
+            list.forEach(u => {
+                if (u && u.id && !CloudSync.isUserDeleted(u.id)) {
+                    CloudSync.upsertUser(u, false, options);
+                }
+            });
+        }
     },
 
     addIssueReport(report) {
