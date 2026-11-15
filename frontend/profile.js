@@ -786,22 +786,78 @@ document.getElementById('profileForm').addEventListener('submit', async function
         }
     }
 
-    const normalizedIg = String(nextProfile.ig || '').trim().replace(/^@+/, '').toLowerCase();
-    if (normalizedIg) {
-        const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-        const isDuplicate = users.some(u => {
-            if (appState.playerId && String(u.id) === String(appState.playerId)) return false;
-            const existingIg = String(u.ig || '').trim().replace(/^@+/, '').toLowerCase();
-            return existingIg !== '' && existingIg === normalizedIg;
+    // 先保留玩家目前已填寫的所有欄位草稿（未分配 ID 前僅暫存本地草稿，絕不寫入半套註冊資料）
+    appState.profile = { ...nextProfile };
+    hasUnsavedProfileDraft = true;
+    Store.save(appState, false, true);
+
+    const normalizeNickname = (rawName) => String(rawName || '').trim().toLowerCase();
+    const rawNickname = String(nextProfile.nickname || '').trim();
+    const normalizedNickname = normalizeNickname(rawNickname);
+
+    if (normalizedNickname) {
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const prevBtnText = submitBtn ? submitBtn.textContent : '保存';
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = '檢查暱稱中...';
+        }
+        try {
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchFullTree === 'function') {
+                await CloudSync.fetchFullTree();
+            }
+        } catch (err) {
+        } finally {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = prevBtnText;
+            }
+        }
+
+        const localUsers = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        const cloudUsersMap = (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && typeof CloudSync.tree[USERS_KEY] === 'object')
+            ? CloudSync.tree[USERS_KEY]
+            : {};
+        const mergedUsersMap = new Map();
+        localUsers.forEach(u => {
+            if (u && u.id) mergedUsersMap.set(String(u.id), u);
+        });
+        Object.entries(cloudUsersMap).forEach(([k, u]) => {
+            if (u && typeof u === 'object') {
+                const uid = String(u.id || k || '').trim();
+                if (uid) mergedUsersMap.set(uid, { ...u, id: uid });
+            }
         });
 
-        if (isDuplicate) {
-            showMiniNotice('⚠️ 註冊提示', '已重複註冊');
+        const duplicateUser = Array.from(mergedUsersMap.values()).find(u => {
+            if (!u || !u.id) return false;
+            const uid = String(u.id).trim();
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.isUserDeleted === 'function' && CloudSync.isUserDeleted(uid)) {
+                return false;
+            }
+            if (appState.playerId && uid === String(appState.playerId).trim()) return false;
+            const existingNickname = normalizeNickname(u.nickname);
+            return existingNickname !== '' && existingNickname === normalizedNickname;
+        });
+
+        if (duplicateUser) {
+            appState.profile = { ...nextProfile };
+            hasUnsavedProfileDraft = true;
+            Store.save(appState, false, true);
+
+            const nickCard = document.getElementById('field-card-nickname');
+            if (nickCard) {
+                nickCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const nickInput = nickCard.querySelector('input[name="nickname"]');
+                if (nickInput) nickInput.focus();
+            }
+            showMiniNotice(
+                '⚠️ 暱稱重複提醒',
+                `暱稱「${rawNickname}」已經有人使用囉！\n\n您目前已填寫的其他資料皆已完整保留，請重新填寫一個新的暱稱後，再按一次「保存」即可繼續完成註冊。`
+            );
             return;
         }
     }
-
-    appState.profile = nextProfile;
 
     const violatedRule = Store.checkProfileBanned(nextProfile);
     if (violatedRule) {
