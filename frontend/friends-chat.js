@@ -424,10 +424,16 @@ function renderActiveFriendWorkspace() {
         `;
     }).join('');
 
+    // Force scrolling to the latest message every time the workspace is rendered
+    // to ensure the user doesn't have to scroll down when opening a chat window.
     if (currentSignature !== lastRenderedChatSignature) {
         lastRenderedChatSignature = currentSignature;
-        chatBox.scrollTop = chatBox.scrollHeight;
     }
+    
+    // We use setTimeout to allow the browser to paint the new messages first
+    setTimeout(() => {
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }, 10);
 }
 
 function handleLockedChatClick() {
