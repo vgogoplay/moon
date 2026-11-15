@@ -365,7 +365,7 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
     } else if (field.autoOpenAfter7Days) {
         privacyControlHtml = `
             <span class="text-[11px] px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 font-semibold">
-                ⏳ 預設不開放（雙方7天後成為好友自動開放）
+                若不想開放，請點擊上方"回報"給管理員調整
             </span>
         `;
         privHint = '🔒 前 7 天預設隱藏；滿 7 天雙方皆按下「繼續配對」成為好友時，系統會自動開放給對方';
