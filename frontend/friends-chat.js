@@ -295,13 +295,14 @@ function renderActiveFriendWorkspace() {
     if (totalOpen > 0) {
         const displayDayLabel = dayNum >= 3 ? '第 3 天以上（已全部解鎖）' : `第 ${dayNum} 天`;
         const progressBadgeHtml = lockedCount > 0
-            ? `<div class="p-2.5 rounded-xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-200 flex items-center justify-between text-[11px]">
-                    <span class="font-bold text-[#8f4452]">📅 ${displayDayLabel}・逐步解鎖中</span>
-                    <span class="font-semibold text-[#c96a7b]">已顯示 ${unlockedCount} / ${totalOpen} 個欄位（${lockedCount} 個待明日顯示）</span>
+            ? `<div class="p-3 rounded-xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-200 space-y-1 text-xs leading-relaxed">
+                    <div class="font-bold text-[#8f4452]">📅 ${displayDayLabel}・逐步解鎖中</div>
+                    <div class="font-semibold text-[#c96a7b]">已顯示 ${unlockedCount} / ${totalOpen} 個欄位</div>
+                    <div class="font-semibold text-[#c96a7b]">（${lockedCount} 個待明日顯示）</div>
                </div>`
-            : `<div class="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 flex items-center justify-between text-[11px]">
-                    <span class="font-bold text-emerald-800">✨ ${displayDayLabel}</span>
-                    <span class="font-semibold text-emerald-700">已顯示全部 ${totalOpen} 個開放欄位</span>
+            : `<div class="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 space-y-1 text-xs leading-relaxed">
+                    <div class="font-bold text-emerald-800">✨ ${displayDayLabel}</div>
+                    <div class="font-semibold text-emerald-700">已顯示全部 ${totalOpen} 個開放欄位</div>
                </div>`;
 
         const revealedCardsHtml = orderedItems.slice(0, unlockedCount).map(item => `
