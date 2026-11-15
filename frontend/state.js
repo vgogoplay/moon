@@ -100,8 +100,12 @@ function syncFromSharedStorage() {
     let stateChanged = false;
 
     const sysCfgNow = Store.getSystemConfig();
+    const prevSysCfg = (() => { try { return JSON.parse(lastControlsSnapshot || '{}'); } catch (e) { return {}; } })();
     const currentControlsStr = JSON.stringify(sysCfgNow);
     if (currentControlsStr !== lastControlsSnapshot || sysCfgNow.currentBatch !== lastActiveBatch) {
+        if (Boolean(prevSysCfg.profileLocked) !== Boolean(sysCfgNow.profileLocked)) {
+            formLockStateChanged = true;
+        }
         lastControlsSnapshot = currentControlsStr;
         lastActiveBatch = sysCfgNow.currentBatch;
         stateChanged = true;
@@ -120,10 +124,21 @@ function syncFromSharedStorage() {
         }
     }
 
-    const currentQuotaStr = JSON.stringify(Store.getGenderQuotaStatus());
-    if (currentQuotaStr !== lastGenderQuotaSnapshot) {
-        lastGenderQuotaSnapshot = currentQuotaStr;
+    const quotaObjNow = Store.getGenderQuotaStatus();
+    const effectiveQuotaSnapshot = JSON.stringify({
+        enabled: quotaObjNow.enabled,
+        limit: quotaObjNow.limit,
+        maleFull: quotaObjNow.maleFull,
+        femaleFull: quotaObjNow.femaleFull,
+        bothFull: quotaObjNow.bothFull,
+        maleCount: quotaObjNow.enabled ? quotaObjNow.maleCount : 0,
+        femaleCount: quotaObjNow.enabled ? quotaObjNow.femaleCount : 0
+    });
+    let formLockStateChanged = false;
+    if (effectiveQuotaSnapshot !== lastGenderQuotaSnapshot) {
+        lastGenderQuotaSnapshot = effectiveQuotaSnapshot;
         stateChanged = true;
+        formLockStateChanged = true;
     }
 
     let chatsChanged = false;
@@ -140,8 +155,11 @@ function syncFromSharedStorage() {
             const cmd = JSON.parse(testCmdRaw);
             if (cmd && cmd.id && cmd.id !== appState.lastProcessedTestCmdId) {
                 appState.lastProcessedTestCmdId = cmd.id;
-                applyBackendTestEvent(cmd, users);
-                stateChanged = true;
+                const isFreshCmd = !cmd.ts || (Date.now() - Number(cmd.ts) <= 60000);
+                if (isFreshCmd) {
+                    applyBackendTestEvent(cmd, users);
+                    stateChanged = true;
+                }
             }
         } catch (err) {}
     }
@@ -150,8 +168,9 @@ function syncFromSharedStorage() {
         const me = users.find(u => String(u.id) === String(appState.playerId));
 
         // 2. 若雲端已初始化且玩家資料已被後台管理員整筆刪除，同步重置前台本地狀態
-        const isPendingSync = (typeof CloudSync !== 'undefined' && typeof CloudSync.isUserPending === 'function' && CloudSync.isUserPending(appState.playerId));
-        if (!me && !isPendingSync && (typeof CloudSync === 'undefined' || CloudSync.initialized)) {
+        const isDeletedByAdmin = (typeof CloudSync !== 'undefined' && typeof CloudSync.isUserDeleted === 'function' && CloudSync.isUserDeleted(appState.playerId));
+        const isPendingSync = !isDeletedByAdmin && (typeof CloudSync !== 'undefined' && typeof CloudSync.isUserPending === 'function' && CloudSync.isUserPending(appState.playerId));
+        if ((!me && !isPendingSync && (typeof CloudSync === 'undefined' || CloudSync.initialized)) || isDeletedByAdmin) {
             appState = Store.getDefaultState();
             appState.lastProcessedTestCmdId = JSON.parse(localStorage.getItem('yuelao_test_event') || '{}').id || null;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
@@ -161,8 +180,9 @@ function syncFromSharedStorage() {
             return;
         }
 
-        // 若管理員於後台編輯了此玩家的個人資料，自動同步更新至前台
-        if (me && me.updatedAt && me.updatedAt !== appState.lastSyncedCloudUpdatedAt) {
+        // 若管理員於後台編輯了此玩家的個人資料，自動同步更新至前台（玩家正在編輯尚未保存草稿時不覆蓋）
+        const isEditingProfileNow = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft);
+        if (me && me.updatedAt && me.updatedAt !== appState.lastSyncedCloudUpdatedAt && !isEditingProfileNow) {
             appState.lastSyncedCloudUpdatedAt = me.updatedAt;
             const skipSyncKeys = new Set([
                 'id', 'privacy', 'backupCode', 'isWarned', 'warningReason',
@@ -358,15 +378,23 @@ function syncFromSharedStorage() {
     updateMailboxBadge();
 
     if (stateChanged) {
+        if (typeof syncProfileDomToDraft === 'function') {
+            syncProfileDomToDraft();
+        }
+        const isEditingDraft = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft);
         Store.save(appState, false, true);
-        renderProfileForm();
+        const profileTabEl = document.getElementById('tab-profile');
+        const isOnProfileTab = profileTabEl && !profileTabEl.classList.contains('hidden');
+        if (!isOnProfileTab || formLockStateChanged || !isEditingDraft) {
+            renderProfileForm();
+        }
         refreshAllUI();
         if (isEveningConfessionPending()) {
             openEveningConfessionModal();
         }
     } else {
         if (chatsChanged) {
-            Store.save(appState);
+            Store.save(appState, false, true);
         }
         const curUsersRaw = localStorage.getItem(USERS_KEY) || '[]';
         if (curUsersRaw !== lastUsersStatsSnapshot) {
@@ -444,6 +472,40 @@ function applyBackendTestEvent(cmd, latestUsers) {
             ]
         });
         appState.activeFriendId = newMockId;
+    } else if (cmd.type === 'REMOVE_FRIEND_C') {
+        if (targetId && String(appState.playerId) !== targetId) return;
+        const targetMockId = cmd.mockFriendId ? String(cmd.mockFriendId) : '';
+        if (targetMockId && appState.friends.some(f => String(f.id) === targetMockId)) {
+            appState.friends = appState.friends.filter(f => String(f.id) !== targetMockId);
+        } else {
+            let lastMockIdx = -1;
+            for (let i = appState.friends.length - 1; i >= 0; i--) {
+                if (String(appState.friends[i].id).startsWith('MOCK_FRIEND_')) {
+                    lastMockIdx = i;
+                    break;
+                }
+            }
+            if (lastMockIdx >= 0) {
+                appState.friends.splice(lastMockIdx, 1);
+            }
+        }
+        if (appState.activeFriendId && !appState.friends.some(f => String(f.id) === String(appState.activeFriendId))) {
+            appState.activeFriendId = appState.friends[0] ? String(appState.friends[0].id) : null;
+        }
+        if (appState.friends.length < 2) {
+            appState.multiFriendSince = null;
+            appState.confessionUnlockAt = null;
+        }
+    } else if (cmd.type === 'CLEAR_ALL_FRIEND_C') {
+        if (targetId && String(appState.playerId) !== targetId) return;
+        appState.friends = appState.friends.filter(f => !String(f.id).startsWith('MOCK_FRIEND_'));
+        if (appState.activeFriendId && !appState.friends.some(f => String(f.id) === String(appState.activeFriendId))) {
+            appState.activeFriendId = appState.friends[0] ? String(appState.friends[0].id) : null;
+        }
+        if (appState.friends.length < 2) {
+            appState.multiFriendSince = null;
+            appState.confessionUnlockAt = null;
+        }
     } else if (cmd.type === 'ADVANCE_CONFESSION_2000') {
         if (appState.friends.length >= 2) {
             appState.confessionUnlockAt = Date.now() - 1000;

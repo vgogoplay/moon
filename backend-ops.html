@@ -62,12 +62,21 @@
                     </button>
                 </div>
 
-                <div class="admin-field-box flex flex-wrap items-center gap-2">
-                    <span class="text-xs font-bold text-[#8f4452]">💞 測試 C 連動好友（可連續點加到6位）：</span>
-                    <input type="text" id="linkFriendCTargetId" placeholder="輸入需聯動的玩家 ID" class="w-40 p-2 admin-input-box text-xs font-mono">
-                    <button onclick="adminLinkFriendCToPlayer()" class="px-3.5 py-2 rounded-xl bg-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition">
-                        💞 連動新增一位好友
-                    </button>
+                <div class="admin-field-box flex flex-col gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-xs font-bold text-[#8f4452]">💞 測試 C 連動好友（可連續點加到6位）：</span>
+                        <input type="text" id="linkFriendCTargetId" oninput="renderLinkedMockFriendsList()" placeholder="輸入需聯動的玩家 ID" class="w-40 p-2 admin-input-box text-xs font-mono">
+                        <button type="button" onclick="adminLinkFriendCToPlayer()" class="px-3.5 py-2 rounded-xl bg-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition">
+                            💞 連動新增一位好友
+                        </button>
+                        <button type="button" onclick="adminRemoveOneFriendCFromPlayer()" class="px-3 py-2 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 text-xs font-bold hover:bg-rose-100 transition">
+                            🗑️ 刪除一位測試好友
+                        </button>
+                        <button type="button" onclick="adminClearAllFriendCFromPlayer()" class="px-3 py-2 rounded-xl bg-white border border-gray-300 text-gray-600 text-xs font-semibold hover:bg-gray-100 transition">
+                            🧹 清空測試好友
+                        </button>
+                    </div>
+                    <div id="linkedMockFriendsList" class="text-xs text-gray-500"></div>
                 </div>
             </div>
 
@@ -172,12 +181,12 @@
 
     <!-- 前後台共用核心層 -->
     <script src="shared/schedule.js"></script>
-    <script src="shared/schema.js"></script>
-    <script src="shared/cloud-store.js"></script>
+    <script src="shared/schema.js?v=20261115d"></script>
+    <script src="shared/cloud-store.js?v=20261115g"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261115"></script>
-    <script src="backend/matching.js?v=20261115"></script>
-    <script src="backend/ops.js?v=20261115"></script>
+    <script src="backend/matching.js?v=20261115f"></script>
+    <script src="backend/ops.js?v=20261115f"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261115"></script>
 </body>

@@ -99,6 +99,11 @@ function deletePlayerEntirely(playerId) {
     localStorage.setItem(CHATS_KEY, JSON.stringify(allChats));
 
     const remaining = users.filter(u => String(u.id) !== String(playerId));
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.deleteUser === 'function') {
+        CloudSync.deleteUser(playerId);
+    } else if (typeof CloudSync !== 'undefined') {
+        CloudSync.deleteNode(`${USERS_KEY}/${playerId}`);
+    }
     saveUsers(remaining);
     appendLog(`<span class="text-rose-400">[刪除玩家資料]</span> 已將玩家 <strong>${target.nickname} (ID:${target.id})</strong> 的整個資料徹底刪除。`);
 }

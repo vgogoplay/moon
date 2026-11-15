@@ -84,22 +84,171 @@ function adminFillPlayerFullData() {
     appendLog(`<span class="text-emerald-300">[一鍵填滿資料]</span> 已將玩家 ID:<strong>${targetId}</strong> 的全部個人資料填寫完成並同步至前台！`);
 }
 
-function adminLinkFriendCToPlayer() {
-    let targetId = document.getElementById('linkFriendCTargetId').value.trim();
+function resolveLinkFriendCTargetId() {
+    const inputEl = document.getElementById('linkFriendCTargetId');
+    let targetId = inputEl ? inputEl.value.trim() : '';
     const frontendState = JSON.parse(localStorage.getItem(FRONTEND_STORAGE_KEY) || '{}');
     if (!targetId && frontendState.playerId) {
         targetId = String(frontendState.playerId);
-        document.getElementById('linkFriendCTargetId').value = targetId;
+        if (inputEl) inputEl.value = targetId;
     }
+    return targetId;
+}
+
+function getLinkedMockFriendsForTarget(targetId) {
+    const pid = String(targetId || '').trim();
+    if (!pid) return [];
+    const seen = new Map();
+    const collectFromState = (rawStr) => {
+        if (!rawStr) return;
+        try {
+            const st = JSON.parse(rawStr);
+            if (!st || String(st.playerId || '') !== pid || !Array.isArray(st.friends)) return;
+            st.friends.forEach(f => {
+                if (f && String(f.id).startsWith('MOCK_FRIEND_')) {
+                    seen.set(String(f.id), f);
+                }
+            });
+        } catch (e) {}
+    };
+    collectFromState(localStorage.getItem(PLAYER_STATE_PREFIX + pid));
+    collectFromState(localStorage.getItem(FRONTEND_STORAGE_KEY));
+    return Array.from(seen.values());
+}
+
+function mutateLocalMockFriendsForTarget(targetId, filterKeepFn) {
+    const pid = String(targetId || '').trim();
+    if (!pid) return 0;
+    let removedCount = 0;
+
+    const patchStateKey = (storageKey) => {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return;
+        try {
+            const st = JSON.parse(raw);
+            if (!st || String(st.playerId || '') !== pid || !Array.isArray(st.friends)) return;
+            const beforeLen = st.friends.length;
+            st.friends = st.friends.filter(f => {
+                if (!f || !String(f.id).startsWith('MOCK_FRIEND_')) return true;
+                return filterKeepFn(f);
+            });
+            const diff = beforeLen - st.friends.length;
+            if (diff > removedCount) removedCount = diff;
+            if (diff > 0) {
+                if (st.activeFriendId && !st.friends.some(f => String(f.id) === String(st.activeFriendId))) {
+                    st.activeFriendId = st.friends[0] ? String(st.friends[0].id) : null;
+                }
+                if (st.friends.length < 2) {
+                    st.multiFriendSince = null;
+                    st.confessionUnlockAt = null;
+                }
+                localStorage.setItem(storageKey, JSON.stringify(st));
+            }
+        } catch (e) {}
+    };
+
+    patchStateKey(PLAYER_STATE_PREFIX + pid);
+    patchStateKey(FRONTEND_STORAGE_KEY);
+    return removedCount;
+}
+
+function renderLinkedMockFriendsList() {
+    const box = document.getElementById('linkedMockFriendsList');
+    if (!box) return;
+    const inputEl = document.getElementById('linkFriendCTargetId');
+    let targetId = inputEl ? inputEl.value.trim() : '';
+    if (!targetId) {
+        const frontendState = JSON.parse(localStorage.getItem(FRONTEND_STORAGE_KEY) || '{}');
+        if (frontendState.playerId) {
+            targetId = String(frontendState.playerId);
+            if (inputEl && document.activeElement !== inputEl) {
+                inputEl.value = targetId;
+            }
+        }
+    }
+    if (!targetId) {
+        box.innerHTML = `<span class="text-[11px] text-gray-400">請輸入玩家 ID 後可新增或刪除測試好友。</span>`;
+        return;
+    }
+
+    const mockList = getLinkedMockFriendsForTarget(targetId);
+    if (mockList.length === 0) {
+        box.innerHTML = `<span class="text-[11px] text-gray-400">玩家 ID：<strong>${targetId}</strong> 目前尚無測試 C 連動好友（若前台在另一瀏覽器開啟，可直接點「刪除一位測試好友」或「清空測試好友」同步移除）。</span>`;
+        return;
+    }
+
+    box.innerHTML = `
+        <div class="flex flex-wrap items-center gap-1.5 pt-1">
+            <span class="text-[11px] font-bold text-[#8f4452]">玩家 ID:${targetId} 目前測試好友（${mockList.length} 位）：</span>
+            ${mockList.map(f => `
+                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-pink-100 border border-pink-300 text-[#8f4452] font-semibold text-[11px]">
+                    <span>💞 ${f.nickname}</span>
+                    <button type="button" onclick="adminRemoveSpecificFriendC('${targetId}', '${f.id}')" title="刪除此測試好友" class="text-rose-600 hover:text-rose-900 font-bold ml-0.5">✕</button>
+                </span>
+            `).join('')}
+        </div>
+    `;
+}
+
+function adminLinkFriendCToPlayer() {
+    const targetId = resolveLinkFriendCTargetId();
     if (!targetId) {
         alert('請輸入需要聯動的玩家 ID！');
         return;
     }
 
     triggerFrontendTestEvent('ADD_FRIEND_C', targetId);
+    setTimeout(renderLinkedMockFriendsList, 350);
+    setTimeout(renderLinkedMockFriendsList, 1200);
 }
 
-function triggerFrontendTestEvent(type, targetPlayerId = '') {
+function adminRemoveOneFriendCFromPlayer() {
+    const targetId = resolveLinkFriendCTargetId();
+    if (!targetId) {
+        alert('請輸入要刪除測試好友的玩家 ID！');
+        return;
+    }
+
+    const mockList = getLinkedMockFriendsForTarget(targetId);
+    const lastMock = mockList[mockList.length - 1];
+    if (lastMock) {
+        mutateLocalMockFriendsForTarget(targetId, f => String(f.id) !== String(lastMock.id));
+        triggerFrontendTestEvent('REMOVE_FRIEND_C', targetId, { mockFriendId: String(lastMock.id) });
+        appendLog(`<span class="text-amber-300">[刪除測試好友]</span> 已移除玩家 ID:<strong>${targetId}</strong> 的測試好友「<strong>${lastMock.nickname}</strong>」。`);
+    } else {
+        triggerFrontendTestEvent('REMOVE_FRIEND_C', targetId);
+        appendLog(`<span class="text-amber-300">[刪除測試好友]</span> 已發送移除指令至玩家 ID:<strong>${targetId}</strong>，前台將刪除最後一位測試好友。`);
+    }
+    renderLinkedMockFriendsList();
+}
+
+function adminRemoveSpecificFriendC(targetId, mockFriendId) {
+    const pid = String(targetId || '').trim();
+    const mid = String(mockFriendId || '').trim();
+    if (!pid || !mid) return;
+
+    const mockList = getLinkedMockFriendsForTarget(pid);
+    const targetFriend = mockList.find(f => String(f.id) === mid);
+    mutateLocalMockFriendsForTarget(pid, f => String(f.id) !== mid);
+    triggerFrontendTestEvent('REMOVE_FRIEND_C', pid, { mockFriendId: mid });
+    renderLinkedMockFriendsList();
+    appendLog(`<span class="text-amber-300">[刪除測試好友]</span> 已移除玩家 ID:<strong>${pid}</strong> 的測試好友${targetFriend ? `「<strong>${targetFriend.nickname}</strong>」` : ''}。`);
+}
+
+function adminClearAllFriendCFromPlayer() {
+    const targetId = resolveLinkFriendCTargetId();
+    if (!targetId) {
+        alert('請輸入要清空測試好友的玩家 ID！');
+        return;
+    }
+
+    const removed = mutateLocalMockFriendsForTarget(targetId, () => false);
+    triggerFrontendTestEvent('CLEAR_ALL_FRIEND_C', targetId);
+    renderLinkedMockFriendsList();
+    appendLog(`<span class="text-amber-300">[清空測試好友]</span> 已清空玩家 ID:<strong>${targetId}</strong> 的全部測試 C 連動好友${removed > 0 ? `（共 ${removed} 位）` : ''}。`);
+}
+
+function triggerFrontendTestEvent(type, targetPlayerId = '', extraPayload = {}) {
     if (type === 'MINUS_ONE_DAY' || type === 'EXPIRE_TO_ZERO_DAYS') {
         const users = getUsers();
         const dayMs = 24 * 60 * 60 * 1000;
@@ -128,12 +277,17 @@ function triggerFrontendTestEvent(type, targetPlayerId = '') {
         }
     }
 
-    localStorage.setItem('yuelao_test_event', JSON.stringify({
+    const cmdObj = {
         id: 'CMD_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
         type: type,
-        targetPlayerId: targetPlayerId,
-        ts: Date.now()
-    }));
+        targetPlayerId: String(targetPlayerId || '').trim(),
+        ts: Date.now(),
+        ...extraPayload
+    };
+    localStorage.setItem('yuelao_test_event', JSON.stringify(cmdObj));
+    if (typeof CloudSync !== 'undefined') {
+        CloudSync.putNode('yuelao_test_event', cmdObj);
+    }
     const targetDesc = targetPlayerId ? `（指定玩家 ID：${targetPlayerId}）` : '';
     appendLog(`<span class="text-sky-300">[連動前台指令]</span> 已發送 <strong>${type}</strong>${targetDesc}，前台視窗將即時同步更新！`);
 }

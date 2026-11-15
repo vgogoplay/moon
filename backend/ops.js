@@ -111,6 +111,10 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
         }
     }
 
+    if (typeof renderLinkedMockFriendsList === 'function') {
+        renderLinkedMockFriendsList();
+    }
+
     const bannedRulesBox = document.getElementById('bannedRulesList');
     if (bannedRulesBox) {
         const bannedRules = getBannedRules();

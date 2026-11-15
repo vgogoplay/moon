@@ -14,6 +14,8 @@ const AUTO_RUN_LOG_KEY = 'yuelao_auto_matched_sessions';
 const FRONTEND_STORAGE_KEY = 'yuelao_romance_app_v2';
 const TAB_PLAYER_ID_KEY = 'yuelao_tab_player_id';
 const PLAYER_STATE_PREFIX = 'yuelao_player_state_';
+const PENDING_USERS_SYNC_KEY = 'yuelao_pending_users_sync';
+const DELETED_USERS_SYNC_KEY = 'yuelao_deleted_users_sync';
 
 const FIREBASE_DB_URL = 'https://moon-8b627-default-rtdb.asia-southeast1.firebasedatabase.app';
 
@@ -29,13 +31,121 @@ const CloudSync = {
     inFlightWrites: 0,
     writeEpoch: 0,
     pendingUsers: {},
+    deletedUsers: {},
+
+    loadSharedPendingUsers() {
+        const now = Date.now();
+        const merged = { ...this.pendingUsers };
+        try {
+            const raw = JSON.parse(localStorage.getItem(PENDING_USERS_SYNC_KEY) || '{}');
+            if (raw && typeof raw === 'object') {
+                Object.keys(raw).forEach(pid => {
+                    const entry = raw[pid];
+                    if (entry && entry.record && now <= Number(entry.graceUntil || 0)) {
+                        if (!merged[pid] || Number(entry.graceUntil) >= Number(merged[pid].graceUntil || 0)) {
+                            merged[pid] = entry;
+                        }
+                    }
+                });
+            }
+        } catch (e) {}
+        let changed = false;
+        Object.keys(merged).forEach(pid => {
+            if (!merged[pid] || now > Number(merged[pid].graceUntil || 0)) {
+                delete merged[pid];
+                changed = true;
+            }
+        });
+        this.pendingUsers = merged;
+        if (changed) {
+            try { localStorage.setItem(PENDING_USERS_SYNC_KEY, JSON.stringify(merged)); } catch (e) {}
+        }
+        return merged;
+    },
+
+    setSharedPendingUser(pid, record, ttlMs = 15000) {
+        const key = String(pid || '').trim();
+        if (!key || !record) return;
+        this.clearSharedDeletedUser(key);
+        const map = this.loadSharedPendingUsers();
+        map[key] = { record, graceUntil: Date.now() + ttlMs };
+        this.pendingUsers = map;
+        try { localStorage.setItem(PENDING_USERS_SYNC_KEY, JSON.stringify(map)); } catch (e) {}
+    },
+
+    removeSharedPendingUser(pid) {
+        const key = String(pid || '').trim();
+        if (!key) return;
+        const map = this.loadSharedPendingUsers();
+        if (Object.prototype.hasOwnProperty.call(map, key)) {
+            delete map[key];
+            this.pendingUsers = map;
+            try { localStorage.setItem(PENDING_USERS_SYNC_KEY, JSON.stringify(map)); } catch (e) {}
+        }
+    },
+
+    loadSharedDeletedUsers() {
+        const now = Date.now();
+        const merged = { ...this.deletedUsers };
+        try {
+            const raw = JSON.parse(localStorage.getItem(DELETED_USERS_SYNC_KEY) || '{}');
+            if (raw && typeof raw === 'object') {
+                Object.keys(raw).forEach(pid => {
+                    const exp = Number(raw[pid] || 0);
+                    if (now <= exp) {
+                        merged[pid] = Math.max(Number(merged[pid] || 0), exp);
+                    }
+                });
+            }
+        } catch (e) {}
+        let changed = false;
+        Object.keys(merged).forEach(pid => {
+            if (now > Number(merged[pid] || 0)) {
+                delete merged[pid];
+                changed = true;
+            }
+        });
+        this.deletedUsers = merged;
+        if (changed) {
+            try { localStorage.setItem(DELETED_USERS_SYNC_KEY, JSON.stringify(merged)); } catch (e) {}
+        }
+        return merged;
+    },
+
+    markSharedDeletedUser(pid, ttlMs = 20000) {
+        const key = String(pid || '').trim();
+        if (!key) return;
+        this.removeSharedPendingUser(key);
+        delete this.lastPushedUsersJson[key];
+        const map = this.loadSharedDeletedUsers();
+        map[key] = Date.now() + ttlMs;
+        this.deletedUsers = map;
+        try { localStorage.setItem(DELETED_USERS_SYNC_KEY, JSON.stringify(map)); } catch (e) {}
+    },
+
+    clearSharedDeletedUser(pid) {
+        const key = String(pid || '').trim();
+        if (!key) return;
+        const map = this.loadSharedDeletedUsers();
+        if (Object.prototype.hasOwnProperty.call(map, key)) {
+            delete map[key];
+            this.deletedUsers = map;
+            try { localStorage.setItem(DELETED_USERS_SYNC_KEY, JSON.stringify(map)); } catch (e) {}
+        }
+    },
 
     isUserPending(pid) {
         const key = String(pid || '').trim();
-        if (!key || !this.pendingUsers[key]) return false;
-        if (Date.now() <= this.pendingUsers[key].graceUntil) return true;
-        delete this.pendingUsers[key];
-        return false;
+        if (!key) return false;
+        const map = this.loadSharedPendingUsers();
+        return Boolean(map[key] && Date.now() <= Number(map[key].graceUntil || 0));
+    },
+
+    isUserDeleted(pid) {
+        const key = String(pid || '').trim();
+        if (!key) return false;
+        const map = this.loadSharedDeletedUsers();
+        return Boolean(map[key] && Date.now() <= Number(map[key] || 0));
     },
 
     mapToArray(raw) {
@@ -63,14 +173,21 @@ const CloudSync = {
             t[USERS_KEY] = {};
         }
 
-        // 保留剛寫入或尚未完成雲端同步的玩家資料，避免舊快照覆蓋清空畫面
-        const now = Date.now();
-        Object.keys(this.pendingUsers).forEach(pid => {
-            const entry = this.pendingUsers[pid];
-            if (entry && now <= entry.graceUntil) {
+        // 1) 過濾剛被管理員徹底刪除的玩家（跨分頁墓碑保護，避免舊快照或殘留 SSE 事件復活已刪除帳號）
+        const deletedMap = this.loadSharedDeletedUsers();
+        Object.keys(deletedMap).forEach(pid => {
+            if (t[USERS_KEY] && Object.prototype.hasOwnProperty.call(t[USERS_KEY], pid)) {
+                delete t[USERS_KEY][pid];
+            }
+        });
+
+        // 2) 保留跨分頁剛寫入或尚未完成雲端同步的玩家資料，避免舊快照覆蓋造成資料一下出現一下消失
+        const sharedPending = this.loadSharedPendingUsers();
+        Object.keys(sharedPending).forEach(pid => {
+            if (deletedMap[pid]) return;
+            const entry = sharedPending[pid];
+            if (entry && entry.record) {
                 t[USERS_KEY][pid] = entry.record;
-            } else {
-                delete this.pendingUsers[pid];
             }
         });
 
@@ -142,6 +259,11 @@ const CloudSync = {
             localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(actsArr));
         } else {
             localStorage.setItem(CUSTOM_ACTIVITIES_KEY, '[]');
+        }
+
+        // 10. 互動流程測試指令（支援跨瀏覽器即時連動新增／刪除測試好友）
+        if (t['yuelao_test_event'] && typeof t['yuelao_test_event'] === 'object') {
+            localStorage.setItem('yuelao_test_event', JSON.stringify(t['yuelao_test_event']));
         }
     },
 
@@ -312,7 +434,7 @@ const CloudSync = {
         const pathParts = String(path || '').replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
         if (pathParts.length === 2 && pathParts[0] === USERS_KEY) {
             const pid = pathParts[1];
-            if (pid) delete this.pendingUsers[pid];
+            if (pid) this.markSharedDeletedUser(pid, 20000);
         }
         this.inFlightWrites++;
         this.writeEpoch++;
@@ -329,9 +451,20 @@ const CloudSync = {
         }
     },
 
+    async deleteUser(playerId) {
+        const pid = String(playerId || '').trim();
+        if (!pid) return;
+        this.markSharedDeletedUser(pid, 20000);
+        try {
+            localStorage.removeItem(PLAYER_STATE_PREFIX + pid);
+        } catch (e) {}
+        await this.deleteNode(`${USERS_KEY}/${pid}`);
+    },
+
     async upsertUser(record, forcePush = false) {
         if (!record || !record.id) return;
         const pid = String(record.id);
+        if (!forcePush && this.isUserDeleted(pid)) return;
         const cleanRecord = { ...record };
         delete cleanRecord.registeredSession;
         cleanRecord.registeredSessions = Array.isArray(cleanRecord.registeredSessions)
@@ -346,7 +479,7 @@ const CloudSync = {
         const serialized = JSON.stringify(cleanRecord);
         if (!forcePush && this.lastPushedUsersJson[pid] === serialized) return;
         this.lastPushedUsersJson[pid] = serialized;
-        this.pendingUsers[pid] = { record: cleanRecord, graceUntil: Date.now() + 12000 };
+        this.setSharedPendingUser(pid, cleanRecord, 15000);
 
         await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord);
         const cleanupTasks = [];
@@ -373,28 +506,30 @@ const CloudSync = {
         if (cleanupTasks.length > 0) {
             await Promise.all(cleanupTasks);
         }
-        if (this.pendingUsers[pid]) {
-            this.pendingUsers[pid].record = cleanRecord;
-            this.pendingUsers[pid].graceUntil = Date.now() + 6000;
+        if (!this.isUserDeleted(pid)) {
+            this.setSharedPendingUser(pid, cleanRecord, 8000);
         }
     },
 
     syncUsersArray(usersArr) {
         const list = Array.isArray(usersArr) ? usersArr : [];
-        const currentIds = new Set(list.filter(u => u && u.id).map(u => String(u.id)));
-        Object.keys(this.lastPushedUsersJson).forEach(oldId => {
-            if (!currentIds.has(oldId)) {
-                delete this.lastPushedUsersJson[oldId];
-                this.deleteNode(`${USERS_KEY}/${oldId}`);
+        // 僅同步更新名單內的玩家，絕不因舊快照暫時缺少某 ID 而誤發 DELETE 刪除雲端玩家（刪除僅由管理員明確刪除操作觸發）
+        list.forEach(u => {
+            if (u && u.id && !this.isUserDeleted(u.id)) {
+                this.upsertUser(u);
             }
         });
-        list.forEach(u => this.upsertUser(u));
     },
 
     async clearAll() {
         this.tree = {};
         this.lastPushedUsersJson = {};
         this.pendingUsers = {};
+        this.deletedUsers = {};
+        try {
+            localStorage.removeItem(PENDING_USERS_SYNC_KEY);
+            localStorage.removeItem(DELETED_USERS_SYNC_KEY);
+        } catch (e) {}
         try {
             await fetch(`${this.dbUrl}/.json`, { method: 'DELETE' });
         } catch (e) {}
@@ -760,6 +895,9 @@ const Store = {
         }
 
         if (state.playerId && state.profile) {
+            if (!forceCloudPush && typeof CloudSync !== 'undefined' && typeof CloudSync.isUserDeleted === 'function' && CloudSync.isUserDeleted(state.playerId)) {
+                return;
+            }
             const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
             const idx = users.findIndex(u => String(u.id) === String(state.playerId));
             const existingRecord = idx >= 0 ? users[idx] : {};

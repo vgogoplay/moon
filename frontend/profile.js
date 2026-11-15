@@ -1,5 +1,57 @@
 /* frontend/profile.js - 前台個人資料表單、隱私控制與 5 碼專屬通行碼備份還原 */
 
+let hasUnsavedProfileDraft = false;
+
+function syncProfileDomToDraft() {
+    const formEl = document.getElementById('profileForm');
+    if (!formEl) return;
+    const fd = new FormData(formEl);
+
+    FIELD_SECTIONS.forEach(sec => {
+        sec.fields.forEach(f => {
+            if (f.type === 'regionCity') {
+                const regEl = document.getElementById('profileRegionSelect');
+                const cityEl = document.getElementById('profileCitySelect');
+                const regVal = regEl ? regEl.value.trim() : (fd.get('region') ? String(fd.get('region')).trim() : '');
+                const cityVal = cityEl ? cityEl.value.trim() : (fd.get('city') ? String(fd.get('city')).trim() : '');
+                appState.profile.region = regVal;
+                appState.profile.city = cityVal;
+            } else if (f.type === 'mbtiTwoStep') {
+                const grpEl = document.getElementById('profileMbtiGroupSelect');
+                const selMbtiEl = document.getElementById('profileMbtiSelect');
+                const hidMbtiEl = document.getElementById('profileMbtiHidden');
+                const grpVal = grpEl ? grpEl.value.trim() : (fd.get('mbtiGroup') ? String(fd.get('mbtiGroup')).trim() : '');
+                const selMbtiVal = (selMbtiEl && selMbtiEl.value) ? selMbtiEl.value : (hidMbtiEl ? hidMbtiEl.value : '');
+                appState.profile.mbtiGroup = grpVal;
+                appState.profile.mbti = (grpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : String(selMbtiVal || '').trim();
+            } else if (f.type === 'multiselect') {
+                const menu = document.getElementById(`ms-menu-${f.key}`);
+                if (menu) {
+                    appState.profile[f.key] = Array.from(menu.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+                }
+                if (f.allowOther) {
+                    const otherEl = document.getElementById(`ms-other-${f.key}`);
+                    appState.profile[`${f.key}Other`] = otherEl ? otherEl.value : (fd.get(`${f.key}Other`) ? String(fd.get(`${f.key}Other`)) : '');
+                }
+            } else {
+                const el = formEl.querySelector(`[name="${f.key}"]`);
+                if (el && !el.disabled) {
+                    appState.profile[f.key] = el.value;
+                } else if (fd.has(f.key)) {
+                    appState.profile[f.key] = String(fd.get(f.key) || '');
+                }
+                if (f.allowOther) {
+                    const otherEl = document.getElementById(`select-other-${f.key}`);
+                    const curVal = appState.profile[f.key];
+                    appState.profile[`${f.key}Other`] = (curVal === '其他' && otherEl)
+                        ? otherEl.value
+                        : '';
+                }
+            }
+        });
+    });
+}
+
 // ==================== 個人資料表單（男女生人數限制、先選地區再選縣市、鎖定反灰、隱私可自由調整） ====================
 function getMissingRequiredFields() {
     const missing = [];
@@ -8,7 +60,8 @@ function getMissingRequiredFields() {
             if (!isFieldRequired(f)) continue;
             const cleanLabel = f.label.split('（')[0];
             if (f.type === 'regionCity') {
-                if (!String(appState.profile.region || '').trim()) {
+                const regVal = String(appState.profile.region || '').trim();
+                if (!regVal || !Object.prototype.hasOwnProperty.call(REGION_CITIES, regVal)) {
                     missing.push({ key: 'region', label: `${cleanLabel}（地區）` });
                 } else if (!String(appState.profile.city || '').trim()) {
                     missing.push({ key: 'city', label: `${cleanLabel}（縣市）` });
@@ -149,8 +202,13 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
     let extraGenderNoticeHtml = '';
 
     if (field.type === 'regionCity') {
-        const selectedRegion = appState.profile.region || inferRegionByCity(val) || '';
-        const selectedCity = val || '';
+        let selectedRegion = appState.profile.region || inferRegionByCity(val) || '';
+        if (selectedRegion && !Object.prototype.hasOwnProperty.call(REGION_CITIES, selectedRegion)) {
+            selectedRegion = '';
+            appState.profile.region = '';
+            appState.profile.city = '';
+        }
+        const selectedCity = selectedRegion ? (val || '') : '';
         const cityList = selectedRegion ? (REGION_CITIES[selectedRegion] || []) : [];
 
         inputHtml = `
@@ -504,9 +562,11 @@ window.onMultiSelectChange = function(key, allowOther) {
         }
     }
 
+    syncProfileDomToDraft();
+    hasUnsavedProfileDraft = true;
     const otherText = appState.profile[`${key}Other`] || '';
     document.getElementById(`ms-chips-${key}`).innerHTML = renderMultiSelectChipsHtml(key, checked, otherText, false);
-    Store.save(appState);
+    Store.save(appState, false, Boolean(appState.playerId));
 };
 
 window.onMultiSelectOtherInput = function(key) {
@@ -514,9 +574,11 @@ window.onMultiSelectOtherInput = function(key) {
     if (Store.getSystemConfig().profileLocked || (!appState.playerId && quota.bothFull)) return;
     const val = document.getElementById(`ms-other-${key}`).value;
     appState.profile[`${key}Other`] = val;
+    syncProfileDomToDraft();
+    hasUnsavedProfileDraft = true;
     const checked = appState.profile[key] || [];
     document.getElementById(`ms-chips-${key}`).innerHTML = renderMultiSelectChipsHtml(key, checked, val, false);
-    Store.save(appState);
+    Store.save(appState, false, Boolean(appState.playerId));
 };
 
 // 個人隱私開放或隱藏不受資料鎖定限制
@@ -530,8 +592,9 @@ window.setFieldPrivacy = function(key, mode) {
         });
     });
     if (isLockedPrivacy) return;
+    syncProfileDomToDraft();
     appState.privacy[key] = mode;
-    Store.save(appState);
+    Store.save(appState, false, Boolean(hasUnsavedProfileDraft && appState.playerId));
 
     const group = document.getElementById(`priv-group-${key}`);
     if (group) {
@@ -557,6 +620,18 @@ window.setAllFieldsPrivacy = function(mode) {
         });
     });
 };
+
+// 即時同步使用者在表單輸入或下拉選取的草稿至記憶體，避免任何畫面重繪遺失已填內容
+const profileFormEl = document.getElementById('profileForm');
+if (profileFormEl) {
+    const handleDraftEdit = (e) => {
+        if (!e.target || !e.target.closest('#dynamicProfileSections')) return;
+        syncProfileDomToDraft();
+        hasUnsavedProfileDraft = true;
+    };
+    profileFormEl.addEventListener('input', handleDraftEdit);
+    profileFormEl.addEventListener('change', handleDraftEdit);
+}
 
 // 點保存
 document.getElementById('profileForm').addEventListener('submit', function(e) {
@@ -716,6 +791,7 @@ document.getElementById('profileForm').addEventListener('submit', function(e) {
         appState.playerId = IdAllocator.allocate(appState.profile.gender);
     }
 
+    hasUnsavedProfileDraft = false;
     Store.save(appState, true);
     renderProfileForm();
     refreshAllUI();
@@ -939,6 +1015,7 @@ async function restoreFromBackupCode() {
     }
 
     appState = loadedState;
+    hasUnsavedProfileDraft = false;
     lastRenderedChatSignature = '';
     Store.save(appState);
     syncFromSharedStorage();
@@ -971,6 +1048,7 @@ function switchTestPlayerAccount() {
     if (!trimmed) {
         sessionStorage.removeItem(TAB_PLAYER_ID_KEY);
         appState = Store.getDefaultState();
+        hasUnsavedProfileDraft = false;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
         lastRenderedChatSignature = '';
         renderProfileForm();
@@ -987,6 +1065,7 @@ function switchTestPlayerAccount() {
     }
 
     appState = Store.loadByPlayerId(trimmed);
+    hasUnsavedProfileDraft = false;
     lastRenderedChatSignature = '';
     syncFromSharedStorage();
     renderProfileForm();

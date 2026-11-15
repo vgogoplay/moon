@@ -182,8 +182,8 @@ function openRegisterModal() {
     document.getElementById('exactMatchOptionsList').innerHTML = EXACT_MATCH_OPTIONS.map(item => {
         if (item.type === 'regionCity') {
             const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, 'region');
-            const selectedReg = savedCriteria.region || REGION_OPTIONS[0];
-            const selectedCity = savedCriteria.city || '';
+            const selectedReg = (savedCriteria.region && REGION_CITIES[savedCriteria.region]) ? savedCriteria.region : REGION_OPTIONS[0];
+            const selectedCity = (savedCriteria.region && REGION_CITIES[savedCriteria.region]) ? (savedCriteria.city || '') : '';
             const regCities = REGION_CITIES[selectedReg] || [];
             return `
                 <div class="sm:col-span-2 p-2.5 rounded-xl border border-pink-200 bg-pink-50/30 space-y-1.5">
@@ -579,8 +579,8 @@ function openCustomActivityModal(activityId) {
         document.getElementById('customActExactOptionsList').innerHTML = EXACT_MATCH_OPTIONS.map(item => {
             if (item.type === 'regionCity') {
                 const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, 'region');
-                const selectedReg = savedCriteria.region || REGION_OPTIONS[0];
-                const selectedCity = savedCriteria.city || '';
+                const selectedReg = (savedCriteria.region && REGION_CITIES[savedCriteria.region]) ? savedCriteria.region : REGION_OPTIONS[0];
+                const selectedCity = (savedCriteria.region && REGION_CITIES[savedCriteria.region]) ? (savedCriteria.city || '') : '';
                 const regCities = REGION_CITIES[selectedReg] || [];
                 return `
                     <div class="sm:col-span-2 p-2.5 rounded-xl border border-pink-200 bg-pink-50/30 space-y-1.5">

@@ -146,21 +146,29 @@ function renderFriendsSection() {
     listEl.innerHTML = appState.friends.map(friend => {
         const isActive = String(friend.id) === String(appState.activeFriendId);
         const remainDays = calcRemainingDays(friend.matchedAt, nowTs);
+        const isMockFriend = String(friend.id).startsWith('MOCK_FRIEND_');
         return `
             <div onclick="selectFriend('${friend.id}')" class="cursor-pointer p-4 rounded-2xl border transition-all ${isActive ? 'bg-pink-50/90 border-[#c96a7b] shadow-md' : 'bg-white/80 border-pink-100 hover:border-pink-300'}">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-3">
-                        <div class="w-11 h-11 rounded-full bg-gradient-to-br from-pink-200 to-rose-300 text-white font-bold flex items-center justify-center text-lg">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <div class="w-11 h-11 rounded-full bg-gradient-to-br from-pink-200 to-rose-300 text-white font-bold flex items-center justify-center text-lg shrink-0">
                             ${friend.nickname.slice(0, 1)}
                         </div>
-                        <div>
-                            <h4 class="font-bold text-[#8f4452] text-sm">${friend.nickname} <span class="text-[11px] font-normal text-[#c96a7b]">(${friend.profile.gender || '保密'})</span></h4>
-                            <p class="text-[11px] text-gray-500">${friend.sessionLabel || '七日緣分'} ・ ${friend.profile.region ? friend.profile.region + ' ' : ''}${friend.profile.city || '同城緣分'}</p>
+                        <div class="min-w-0">
+                            <h4 class="font-bold text-[#8f4452] text-sm truncate">${friend.nickname} <span class="text-[11px] font-normal text-[#c96a7b]">(${friend.profile.gender || '保密'})</span></h4>
+                            <p class="text-[11px] text-gray-500 truncate">${friend.sessionLabel || '七日緣分'} ・ ${friend.profile.region ? friend.profile.region + ' ' : ''}${friend.profile.city || '同城緣分'}</p>
                         </div>
                     </div>
-                    <span class="text-[11px] px-2.5 py-1 rounded-full ${remainDays === 0 ? 'bg-rose-100 text-rose-700 font-bold' : 'bg-white text-[#c96a7b] border border-pink-200'}">
-                        ${remainDays === 0 ? '⏳ 剩餘 0 天（禁止發話）' : `剩餘 ${remainDays} 天`}
-                    </span>
+                    <div class="flex flex-col items-end gap-1.5 shrink-0">
+                        <span class="text-[11px] px-2.5 py-1 rounded-full ${remainDays === 0 ? 'bg-rose-100 text-rose-700 font-bold' : 'bg-white text-[#c96a7b] border border-pink-200'}">
+                            ${remainDays === 0 ? '⏳ 剩餘 0 天（禁止發話）' : `剩餘 ${remainDays} 天`}
+                        </span>
+                        ${isMockFriend ? `
+                            <button type="button" onclick="event.stopPropagation(); removeMockTestFriend('${friend.id}')" title="刪除此測試好友" class="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-50 border border-rose-300 text-rose-600 font-bold hover:bg-rose-100 transition">
+                                🗑️ 刪除測試好友
+                            </button>
+                        ` : ''}
+                    </div>
                 </div>
             </div>
         `;
@@ -168,6 +176,22 @@ function renderFriendsSection() {
 
     workspace.classList.remove('hidden');
     renderActiveFriendWorkspace();
+}
+
+function removeMockTestFriend(friendId) {
+    const target = appState.friends.find(f => String(f.id) === String(friendId) && String(f.id).startsWith('MOCK_FRIEND_'));
+    if (!target) return;
+    appState.friends = appState.friends.filter(f => String(f.id) !== String(friendId));
+    if (String(appState.activeFriendId) === String(friendId)) {
+        appState.activeFriendId = appState.friends[0] ? String(appState.friends[0].id) : null;
+    }
+    if (appState.friends.length < 2) {
+        appState.multiFriendSince = null;
+        appState.confessionUnlockAt = null;
+    }
+    Store.save(appState);
+    refreshAllUI();
+    showMiniNotice('🍃 已刪除測試好友', `已將測試好友「${target.nickname}」從好友名單移除。`);
 }
 
 function selectFriend(friendId) {
