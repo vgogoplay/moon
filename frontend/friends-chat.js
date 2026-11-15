@@ -196,6 +196,7 @@ function removeMockTestFriend(friendId) {
 
 function selectFriend(friendId) {
     appState.activeFriendId = String(friendId);
+    shouldScrollChatToLatest = true;
     Store.save(appState);
     renderFriendsSection();
 
@@ -398,42 +399,53 @@ function renderActiveFriendWorkspace() {
     }
 
     const chatBox = document.getElementById('chatMessagesBox');
+    const friendsTabEl = document.getElementById('tab-friends');
+    const isFriendsTabVisible = Boolean(friendsTabEl && !friendsTabEl.classList.contains('hidden'));
     const currentSignature = `${appState.playerId || ''}_${friend.id}_${friend.messages.length}_${friend.messages[friend.messages.length - 1]?.id || friend.messages[friend.messages.length - 1]?.text || ''}`;
 
-    chatBox.innerHTML = friend.messages.map(m => {
-        if (m.senderId === 'system' || m.sender === 'system') {
+    if (currentSignature !== lastRenderedChatSignature) {
+        const prevScrollTop = chatBox.scrollTop;
+        lastRenderedChatSignature = currentSignature;
+        chatBox.innerHTML = friend.messages.map(m => {
+            if (m.senderId === 'system' || m.sender === 'system') {
+                return `
+                    <div class="text-center my-2">
+                        <span class="inline-block px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-[#8f4452] leading-relaxed">
+                            ${m.text}
+                        </span>
+                    </div>
+                `;
+            }
+            const isMe = m.senderId
+                ? (String(m.senderId) === String(appState.playerId))
+                : (m.sender === 'me');
             return `
-                <div class="text-center my-2">
-                    <span class="inline-block px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-[#8f4452] leading-relaxed">
+                <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'}">
+                    ${!isMe ? `<span class="text-[10px] text-[#c96a7b] font-semibold mb-0.5 px-1">${friend.nickname}</span>` : ''}
+                    <div class="max-w-[80%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-2xs ${isMe ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white rounded-br-xs' : 'bg-white border border-pink-100 text-gray-700 rounded-bl-xs'}">
                         ${m.text}
-                    </span>
+                    </div>
+                    <span class="text-[10px] text-gray-400 mt-1 px-1">${m.time || ''}</span>
                 </div>
             `;
-        }
-        const isMe = m.senderId
-            ? (String(m.senderId) === String(appState.playerId))
-            : (m.sender === 'me');
-        return `
-            <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'}">
-                ${!isMe ? `<span class="text-[10px] text-[#c96a7b] font-semibold mb-0.5 px-1">${friend.nickname}</span>` : ''}
-                <div class="max-w-[80%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-2xs ${isMe ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white rounded-br-xs' : 'bg-white border border-pink-100 text-gray-700 rounded-bl-xs'}">
-                    ${m.text}
-                </div>
-                <span class="text-[10px] text-gray-400 mt-1 px-1">${m.time || ''}</span>
-            </div>
-        `;
-    }).join('');
+        }).join('');
 
-    // Force scrolling to the latest message every time the workspace is rendered
-    // to ensure the user doesn't have to scroll down when opening a chat window.
-    if (currentSignature !== lastRenderedChatSignature) {
-        lastRenderedChatSignature = currentSignature;
+        if (!shouldScrollChatToLatest) {
+            chatBox.scrollTop = prevScrollTop;
+        }
     }
-    
-    // We use setTimeout to allow the browser to paint the new messages first
-    setTimeout(() => {
-        chatBox.scrollTop = chatBox.scrollHeight;
-    }, 10);
+
+    if (isFriendsTabVisible && shouldScrollChatToLatest) {
+        shouldScrollChatToLatest = false;
+        const scrollToLatest = () => {
+            chatBox.scrollTop = chatBox.scrollHeight;
+        };
+        scrollToLatest();
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(scrollToLatest);
+        }
+        setTimeout(scrollToLatest, 40);
+    }
 }
 
 function handleLockedChatClick() {
@@ -489,11 +501,13 @@ document.getElementById('chatSendForm').addEventListener('submit', function(e) {
         lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
         friend.messages = updatedMsgs;
         input.value = '';
+        shouldScrollChatToLatest = true;
         Store.save(appState);
         renderActiveFriendWorkspace();
     } else {
         friend.messages.push({ sender: 'me', text, time: nowStr });
         input.value = '';
+        shouldScrollChatToLatest = true;
         Store.save(appState);
         renderActiveFriendWorkspace();
 

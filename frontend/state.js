@@ -11,6 +11,7 @@ let lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
 let lastUsersStatsSnapshot = '';
 let lastActiveBatch = getCurrentBatchNumber();
 let lastRenderedChatSignature = '';
+let shouldScrollChatToLatest = true;
 
 function getCurrentBatchNumber() {
     return Store.getActiveBatchNumber();
@@ -631,6 +632,7 @@ function switchTab(tabName) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     if (tabName === 'friends') {
+        shouldScrollChatToLatest = true;
         renderFriendsSection();
         if (isEveningConfessionPending()) {
             openEveningConfessionModal();
