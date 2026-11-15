@@ -841,6 +841,40 @@ const Store = {
                 const state = this.normalizeParsedState(JSON.parse(perPlayerRaw));
                 state.playerId = pid;
                 sessionStorage.setItem(TAB_PLAYER_ID_KEY, pid);
+                try {
+                    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+                    const userRec = users.find(u => String(u.id) === pid);
+                    if (userRec) {
+                        if (!state.profile.city && userRec.city) state.profile.city = String(userRec.city).trim();
+                        if (!state.profile.region) {
+                            state.profile.region = String(userRec.region || inferRegionByCity(state.profile.city) || '').trim();
+                        }
+                        if (!state.profile.mbti && userRec.mbti) state.profile.mbti = String(userRec.mbti).trim();
+                        if (!state.profile.mbtiGroup) {
+                            state.profile.mbtiGroup = String(userRec.mbtiGroup || inferMbtiGroup(state.profile.mbti) || '').trim();
+                        }
+                        if (userRec.updatedAt && userRec.updatedAt !== state.lastSyncedCloudUpdatedAt) {
+                            const skipKeys = new Set([
+                                'id', 'privacy', 'backupCode', 'isWarned', 'warningReason',
+                                'isMatchBanned', 'isChatBanned', 'registeredSessions', 'registeredSession',
+                                'exactMatchCriteria', 'customActivityRegs', 'matchedHistory', 'matchedSession',
+                                'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt'
+                            ]);
+                            Object.entries(userRec).forEach(([k, v]) => {
+                                if (!skipKeys.has(k) && v !== undefined && v !== null) {
+                                    state.profile[k] = v;
+                                }
+                            });
+                            if (!state.profile.region && state.profile.city) {
+                                state.profile.region = inferRegionByCity(state.profile.city);
+                            }
+                            if (!state.profile.mbtiGroup && state.profile.mbti) {
+                                state.profile.mbtiGroup = inferMbtiGroup(state.profile.mbti);
+                            }
+                            state.lastSyncedCloudUpdatedAt = userRec.updatedAt;
+                        }
+                    }
+                } catch (err) {}
                 return state;
             }
         } catch (e) {}
@@ -927,7 +961,10 @@ const Store = {
             }
             const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
             const idx = users.findIndex(u => String(u.id) === String(state.playerId));
-            const existingRecord = idx >= 0 ? users[idx] : {};
+            const cloudTreeRec = (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][String(state.playerId)])
+                ? CloudSync.tree[USERS_KEY][String(state.playerId)]
+                : {};
+            const existingRecord = idx >= 0 ? { ...cloudTreeRec, ...users[idx] } : { ...cloudTreeRec };
 
             const resolvedCity = String(state.profile.city || existingRecord.city || '').trim();
             const resolvedRegion = String(state.profile.region || inferRegionByCity(resolvedCity) || existingRecord.region || '').trim();

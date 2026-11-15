@@ -144,8 +144,8 @@ function createCustomActivity() {
         : '';
     const typeLabelMap = {
         classic: '第1類：原本機制報名',
-        fortune_number: '第2類：月老籤詩 1~10 號',
-        two_choice: `第3類：二選一（${twoChoiceText}）`
+        fortune_number: '第2類：月老籤詩 1~5 號（僅限男女配對）',
+        two_choice: `第3類：二選一（${twoChoiceText}・僅限男女配對）`
     };
     appendLog(`<span class="text-amber-300">[新增第2種活動]</span> 已建立「<strong>${newAct.name}</strong>」（${typeLabelMap[activityType] || ''}${timeNote}，狀態：<strong>${isOpen ? '🟢 開啟中，前台已顯示報名按鈕' : '⚪ 已關閉，前台暫不顯示'}</strong>）。`);
 }
@@ -418,7 +418,7 @@ async function runCustomActivityMatch(activityId, isAuto = false) {
         if (res.pairCount > 0) {
             alert(`🎉【${res.actName}】自動配對完成！\n\n本次共成功配對 ${res.pairCount} 對${res.unmatchedCount > 0 ? `（${res.unmatchedCount} 人落單未配對）` : ''}，已即時同步至雙方前台好友名單！`);
         } else {
-            alert(`ℹ️【${res.actName}】目前尚無可配對的組合。\n\n（可能原因：同號碼／同選項待配對人數不足 2 人，或報名玩家的指定條件尚未遇到符合對象。）`);
+            alert(`ℹ️【${res.actName}】目前尚無可配對的組合。\n\n（可能原因：同號碼異性／同選項異性待配對人數不足，或報名玩家的指定條件尚未遇到符合對象。）`);
         }
     }
 }
@@ -434,9 +434,9 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
             customActsAdminBox.innerHTML = customActsList.map(act => {
                 const actType = act.activityType || 'classic';
                 const typeBadgeHtml = actType === 'fortune_number'
-                    ? `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">🎋 第2類：月老籤詩 1~10 號</span>`
+                    ? `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">🎋 第2類：月老籤詩 1~5 號（男女配對）</span>`
                     : (actType === 'two_choice'
-                        ? `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-bold">⚖️ 第3類：二選一（${act.optionA || ''} / ${act.optionB || ''}）</span>`
+                        ? `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-bold">⚖️ 第3類：二選一（${act.optionA || ''} / ${act.optionB || ''}・男女配對）</span>`
                         : `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 font-bold">🎯 第1類：原本機制報名</span>`);
 
                 const regUsers = users.filter(u => u && u.id && u.customActivityRegs && u.customActivityRegs[act.id]);

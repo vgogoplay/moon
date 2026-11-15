@@ -362,27 +362,30 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
         const buckets = {};
         eligiblePool.forEach(u => {
             const reg = u.customActivityRegs && u.customActivityRegs[act.id];
-            const num = reg && reg.fortuneNumber ? String(reg.fortuneNumber) : '';
-            if (!num) return;
-            if (!buckets[num]) buckets[num] = [];
-            buckets[num].push(u);
+            const num = reg && reg.fortuneNumber ? String(reg.fortuneNumber).trim() : '';
+            const numInt = parseInt(num, 10);
+            if (!num || isNaN(numInt) || numInt < 1 || numInt > 5) return;
+            const key = String(numInt);
+            if (!buckets[key]) buckets[key] = [];
+            buckets[key].push(u);
         });
 
         Object.keys(buckets).sort((a, b) => Number(a) - Number(b)).forEach(num => {
-            const group = sharedShuffleArray(buckets[num]);
-            for (let i = 0; i < group.length; i++) {
-                const A = group[i];
-                if (pairedThisRunIds.has(String(A.id))) continue;
-                for (let j = i + 1; j < group.length; j++) {
-                    const B = group[j];
-                    if (pairedThisRunIds.has(String(B.id))) continue;
-                    if (!areFriendsFn(A, B)) {
-                        pairedThisRunIds.add(String(A.id));
-                        pairedThisRunIds.add(String(B.id));
-                        sharedRecordCustomPairMatch(A, B, act.name, nowTs, act.id, `同抽中月老籤詩第 ${num} 首`);
+            const males = sharedShuffleArray(buckets[num].filter(u => u.gender === '男'));
+            const females = sharedShuffleArray(buckets[num].filter(u => u.gender === '女'));
+            for (let i = 0; i < males.length; i++) {
+                const M = males[i];
+                if (pairedThisRunIds.has(String(M.id))) continue;
+                for (let j = 0; j < females.length; j++) {
+                    const F = females[j];
+                    if (pairedThisRunIds.has(String(F.id))) continue;
+                    if (!areFriendsFn(M, F)) {
+                        pairedThisRunIds.add(String(M.id));
+                        pairedThisRunIds.add(String(F.id));
+                        sharedRecordCustomPairMatch(M, F, act.name, nowTs, act.id, `同抽中月老籤詩第 ${num} 首`);
                         pairCount++;
                         if (typeof appendLog === 'function') {
-                            appendLog(`<span class="text-emerald-400">[${act.name}・第${num}首 配對成功 #${pairCount}]</span> ID:${A.id}（${A.nickname}）⇄ ID:${B.id}（${B.nickname}）`);
+                            appendLog(`<span class="text-emerald-400">[${act.name}・第${num}首 男女配對成功 #${pairCount}]</span> ID:${M.id}（${M.nickname}・男）⇄ ID:${F.id}（${F.nickname}・女）`);
                         }
                         break;
                     }
@@ -400,20 +403,21 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
         });
 
         Object.keys(buckets).forEach(choice => {
-            const group = sharedShuffleArray(buckets[choice]);
-            for (let i = 0; i < group.length; i++) {
-                const A = group[i];
-                if (pairedThisRunIds.has(String(A.id))) continue;
-                for (let j = i + 1; j < group.length; j++) {
-                    const B = group[j];
-                    if (pairedThisRunIds.has(String(B.id))) continue;
-                    if (!areFriendsFn(A, B)) {
-                        pairedThisRunIds.add(String(A.id));
-                        pairedThisRunIds.add(String(B.id));
-                        sharedRecordCustomPairMatch(A, B, act.name, nowTs, act.id, `默契大考驗皆選「${choice}」`);
+            const males = sharedShuffleArray(buckets[choice].filter(u => u.gender === '男'));
+            const females = sharedShuffleArray(buckets[choice].filter(u => u.gender === '女'));
+            for (let i = 0; i < males.length; i++) {
+                const M = males[i];
+                if (pairedThisRunIds.has(String(M.id))) continue;
+                for (let j = 0; j < females.length; j++) {
+                    const F = females[j];
+                    if (pairedThisRunIds.has(String(F.id))) continue;
+                    if (!areFriendsFn(M, F)) {
+                        pairedThisRunIds.add(String(M.id));
+                        pairedThisRunIds.add(String(F.id));
+                        sharedRecordCustomPairMatch(M, F, act.name, nowTs, act.id, `默契大考驗皆選「${choice}」`);
                         pairCount++;
                         if (typeof appendLog === 'function') {
-                            appendLog(`<span class="text-emerald-400">[${act.name}・${choice} 配對成功 #${pairCount}]</span> ID:${A.id}（${A.nickname}）⇄ ID:${B.id}（${B.nickname}）`);
+                            appendLog(`<span class="text-emerald-400">[${act.name}・${choice} 男女配對成功 #${pairCount}]</span> ID:${M.id}（${M.nickname}・男）⇄ ID:${F.id}（${F.nickname}・女）`);
                         }
                         break;
                     }

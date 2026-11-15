@@ -212,10 +212,18 @@ function syncFromSharedStorage() {
             return;
         }
 
-        // 若管理員於後台編輯了此玩家的個人資料，自動同步更新至前台（玩家正在編輯或展開下拉選單時不覆蓋）
+        // 若管理員於後台編輯了此玩家的個人資料，或本地快取缺少居住地/MBTI，自動從雲端補齊（玩家正在編輯或展開下拉選單時不覆蓋）
         const isActivelyInteractingNow = (typeof isUserInteractingWithProfileForm === 'function' && isUserInteractingWithProfileForm());
         const isEditingProfileNow = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft) || isActivelyInteractingNow;
-        if (me && me.updatedAt && me.updatedAt !== appState.lastSyncedCloudUpdatedAt && !isEditingProfileNow) {
+        const isMissingCloudCoreFields = Boolean(
+            me && !isEditingProfileNow && (
+                (!appState.profile.city && me.city) ||
+                (!appState.profile.region && (me.region || inferRegionByCity(me.city))) ||
+                (!appState.profile.mbti && me.mbti) ||
+                (!appState.profile.mbtiGroup && (me.mbtiGroup || inferMbtiGroup(me.mbti)))
+            )
+        );
+        if (me && !isEditingProfileNow && ((me.updatedAt && me.updatedAt !== appState.lastSyncedCloudUpdatedAt) || isMissingCloudCoreFields)) {
             appState.lastSyncedCloudUpdatedAt = me.updatedAt;
             const prevRegion = appState.profile.region || '';
             const prevCity = appState.profile.city || '';
@@ -419,10 +427,10 @@ function syncFromSharedStorage() {
     updateMailboxBadge();
 
     if (stateChanged) {
-        if (typeof syncProfileDomToDraft === 'function') {
+        const isEditingDraft = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft);
+        if (isEditingDraft && typeof syncProfileDomToDraft === 'function') {
             syncProfileDomToDraft();
         }
-        const isEditingDraft = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft);
         const isActivelyInteracting = (typeof isUserInteractingWithProfileForm === 'function' && isUserInteractingWithProfileForm());
         Store.save(appState, false, true);
         const profileTabEl = document.getElementById('tab-profile');

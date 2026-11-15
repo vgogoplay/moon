@@ -788,3 +788,43 @@ function submitEveningConfession() {
         `已發送給「${chosenFriend ? chosenFriend.nickname : ''}」，其餘 ${notifiedOthersCount} 位好友的對話窗已同步收到好感通知提示！`
     );
 }
+
+// ==================== 月老籤詩號碼限制為 1~5 號 ====================
+(function enforceFortune1To5Frontend() {
+    function trimFortuneGridTo5() {
+        const grid = document.getElementById('customActFortuneGrid');
+        if (grid) {
+            while (grid.children.length > 5) {
+                grid.removeChild(grid.lastElementChild);
+            }
+        }
+        const selInput = document.getElementById('customActSelectedFortune');
+        if (selInput && Number(selInput.value) > 5) {
+            selInput.value = '';
+        }
+        const statusBox = document.getElementById('customActStatusBadgeBox');
+        if (statusBox && /1\s*[~～-]\s*10/.test(statusBox.innerHTML)) {
+            statusBox.innerHTML = statusBox.innerHTML.replace(/1\s*[~～-]\s*10/g, '1~5');
+        }
+    }
+
+    if (typeof window.openCustomActivityModal === 'function' && !window.openCustomActivityModal.__wrappedFortune5) {
+        const origOpen = window.openCustomActivityModal;
+        const wrapped = function(...args) {
+            const res = origOpen.apply(this, args);
+            trimFortuneGridTo5();
+            return res;
+        };
+        wrapped.__wrappedFortune5 = true;
+        window.openCustomActivityModal = wrapped;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const grid = document.getElementById('customActFortuneGrid');
+        if (grid && typeof MutationObserver !== 'undefined') {
+            const obs = new MutationObserver(() => trimFortuneGridTo5());
+            obs.observe(grid, { childList: true });
+        }
+        trimFortuneGridTo5();
+    });
+})();

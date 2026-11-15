@@ -40,22 +40,26 @@ function syncProfileDomToDraft() {
             if (f.type === 'regionCity') {
                 const regEl = document.getElementById('profileRegionSelect');
                 const cityEl = document.getElementById('profileCitySelect');
-                const cityVal = cityEl ? cityEl.value.trim() : (fd.get('city') ? String(fd.get('city')).trim() : '');
-                const regVal = (regEl && regEl.value.trim()) || (fd.get('region') ? String(fd.get('region')).trim() : '') || inferRegionByCity(cityVal);
-                appState.profile.region = regVal;
-                appState.profile.city = cityVal;
+                if (regEl || cityEl) {
+                    const cityVal = cityEl ? cityEl.value.trim() : '';
+                    const regVal = (regEl && regEl.value.trim()) || inferRegionByCity(cityVal);
+                    appState.profile.region = regVal;
+                    appState.profile.city = cityVal;
+                }
             } else if (f.type === 'mbtiTwoStep') {
                 const grpEl = document.getElementById('profileMbtiGroupSelect');
                 const selMbtiEl = document.getElementById('profileMbtiSelect');
                 const hidMbtiEl = document.getElementById('profileMbtiHidden');
-                const rawGrpVal = grpEl ? grpEl.value.trim() : (fd.get('mbtiGroup') ? String(fd.get('mbtiGroup')).trim() : '');
-                const rawMbtiVal = (selMbtiEl && !selMbtiEl.disabled && selMbtiEl.value)
-                    ? selMbtiEl.value.trim()
-                    : (hidMbtiEl ? hidMbtiEl.value.trim() : '');
-                const finalMbti = (rawGrpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : rawMbtiVal;
-                const finalGrp = rawGrpVal || inferMbtiGroup(finalMbti);
-                appState.profile.mbtiGroup = finalGrp;
-                appState.profile.mbti = finalMbti;
+                if (grpEl || selMbtiEl || hidMbtiEl) {
+                    const rawGrpVal = grpEl ? grpEl.value.trim() : '';
+                    const rawMbtiVal = (selMbtiEl && !selMbtiEl.disabled && selMbtiEl.value)
+                        ? selMbtiEl.value.trim()
+                        : (hidMbtiEl ? hidMbtiEl.value.trim() : '');
+                    const finalMbti = (rawGrpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : rawMbtiVal;
+                    const finalGrp = rawGrpVal || inferMbtiGroup(finalMbti);
+                    appState.profile.mbtiGroup = finalGrp;
+                    appState.profile.mbti = finalMbti;
+                }
             } else if (f.type === 'multiselect') {
                 const menu = document.getElementById(`ms-menu-${f.key}`);
                 if (menu) {

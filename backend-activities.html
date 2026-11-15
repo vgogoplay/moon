@@ -91,8 +91,8 @@
                     <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 活動類型 <span class="text-rose-500">*</span></label>
                     <select id="newCustomActivityType" onchange="onCustomActivityTypeChange(this.value)" class="w-full p-2.5 admin-input-box text-xs font-bold text-[#8f4452]">
                         <option value="classic">1. 原本機制報名（吻合條件）</option>
-                        <option value="fortune_number">2. 選號碼 1~10（月老籤詩）</option>
-                        <option value="two_choice">3. 二選一活動（手動輸入文字）</option>
+                        <option value="fortune_number">2. 選號碼 1~5（月老籤詩・僅限男女配對）</option>
+                        <option value="two_choice">3. 二選一活動（手動輸入文字・僅限男女配對）</option>
                     </select>
                 </div>
                 <div class="md:col-span-3 admin-field-box">
@@ -157,8 +157,8 @@
                         <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 活動類型 <span class="text-rose-500">*</span></label>
                         <select id="editActType" onchange="onEditCustomActivityTypeChange(this.value)" class="w-full p-2.5 admin-input-box text-sm font-bold text-[#8f4452]">
                             <option value="classic">1. 原本機制報名（吻合條件）</option>
-                            <option value="fortune_number">2. 選號碼 1~10（月老籤詩）</option>
-                            <option value="two_choice">3. 二選一活動（手動輸入文字）</option>
+                            <option value="fortune_number">2. 選號碼 1~5（月老籤詩・僅限男女配對）</option>
+                            <option value="two_choice">3. 二選一活動（手動輸入文字・僅限男女配對）</option>
                         </select>
                     </div>
                     <div class="admin-field-box">
@@ -195,14 +195,14 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261115s"></script>
+    <script src="shared/schedule.js?v=20261115y"></script>
     <script src="shared/schema.js?v=20261115k"></script>
-    <script src="shared/cloud-store.js?v=20261115s"></script>
+    <script src="shared/cloud-store.js?v=20261115w"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261115h"></script>
     <script src="backend/matching.js?v=20261115i"></script>
     <script src="backend/activity-stats.js?v=20261115h"></script>
-    <script src="backend/custom-activities.js?v=20261115s"></script>
+    <script src="backend/custom-activities.js?v=20261115y"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261115"></script>
 </body>

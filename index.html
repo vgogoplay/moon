@@ -500,7 +500,7 @@
         </div>
     </div>
 
-    <!-- 輕量化小視窗 1B：第 2 種活動（支援 3 種活動類型：原本條件機制 / 月老籤詩 1~10 / 默契大考驗二選一） -->
+    <!-- 輕量化小視窗 1B：第 2 種活動（支援 3 種活動類型：原本條件機制 / 月老籤詩 1~5 / 默契大考驗二選一） -->
     <div id="customActivityModal" class="hidden mini-window !max-w-lg max-h-[82vh] overflow-y-auto space-y-4">
         <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
             <div>
@@ -531,12 +531,11 @@
             <div id="customActExactOptionsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1"></div>
         </div>
 
-        <!-- 類型 2：月老籤詩請選擇 1~10 首號碼 -->
+        <!-- 類型 2：月老籤詩請選擇 1~5 首號碼 -->
         <div id="customActFortuneSection" class="hidden space-y-3 pt-2 border-t border-pink-100">
             <div class="space-y-1 text-center">
                 <span class="inline-block text-xs px-3 py-1 rounded-full bg-rose-100 text-[#8f4452] font-bold">🎋 專屬號碼配對</span>
-                <p class="text-sm font-bold font-serif-jp text-[#8f4452]">月老籤詩請選擇1~10首號碼</p>
-                <p class="text-[11px] text-gray-500">選中相同籤詩號碼的有緣人，將會在開獎時牽起紅線（單獨號碼則不配對）</p>
+                <p class="text-sm font-bold font-serif-jp text-[#8f4452]">月老籤詩請選擇1~5首號碼</p>
             </div>
             <div id="customActFortuneGrid" class="grid grid-cols-5 gap-2 pt-1"></div>
         </div>
@@ -546,7 +545,7 @@
             <div class="space-y-1 text-center">
                 <span class="inline-block text-xs px-3 py-1 rounded-full bg-amber-100 text-amber-900 font-bold">⚖️ 靈魂默契測試</span>
                 <p class="text-sm font-bold font-serif-jp text-[#8f4452]">默契大考驗二選一</p>
-                <p class="text-[11px] text-gray-500">請憑直覺二選一，系統將從選擇相同答案的玩家中為你隨機牽線！</p>
+                <p class="text-[11px] text-gray-500">請憑直覺二選一，系統將從選擇相同答案的異性玩家（男 ⇄ 女）中為你隨機牽線！（同性或單獨選項則不配對）</p>
             </div>
             <div id="customActTwoChoiceGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1"></div>
         </div>
@@ -676,13 +675,13 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261115s"></script>
+    <script src="shared/schedule.js?v=20261115y"></script>
     <script src="shared/schema.js?v=20261115k"></script>
-    <script src="shared/cloud-store.js?v=20261115s"></script>
+    <script src="shared/cloud-store.js?v=20261115w"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/state.js?v=20261115v"></script>
-    <script src="frontend/profile.js?v=20261115t"></script>
+    <script src="frontend/state.js?v=20261115w"></script>
+    <script src="frontend/profile.js?v=20261115w"></script>
     <script src="frontend/activities.js?v=20261115i"></script>
-    <script src="frontend/friends-chat.js?v=20261115v"></script>
+    <script src="frontend/friends-chat.js?v=20261115y"></script>
 </body>
 </html>
