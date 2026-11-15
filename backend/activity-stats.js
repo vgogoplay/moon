@@ -153,9 +153,10 @@ function renderActivityMatchStatsPanel(users, customActsList, currentBatch, maxD
     const sel = document.getElementById('activityStatsTargetSelect');
     if (!sel) return;
 
-    const defaultKey = `batch:${currentBatch}`;
-    const prevVal = sel.value || defaultKey;
-    const opts = [];
+    const prevVal = sel.value || '';
+    const opts = [
+        { value: '', label: '請選擇' }
+    ];
 
     for (let b = 1; b <= maxDisplayBatch; b++) {
         const info = getBatchScheduleInfo(b);
@@ -185,11 +186,11 @@ function renderActivityMatchStatsPanel(users, customActsList, currentBatch, maxD
     sel.innerHTML = opts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
     if (opts.some(o => o.value === prevVal)) {
         sel.value = prevVal;
-    } else if (opts.some(o => o.value === defaultKey)) {
-        sel.value = defaultKey;
+    } else {
+        sel.value = '';
     }
 
-    const activeStats = computeSingleActivityStats(sel.value, users, customActsList);
+    const activeStats = sel.value ? computeSingleActivityStats(sel.value, users, customActsList) : null;
     if (activeStats) {
         const regTotal = activeStats.regUsers.length;
         const regMale = activeStats.regUsers.filter(u => u.gender === '男').length;
@@ -217,6 +218,20 @@ function renderActivityMatchStatsPanel(users, customActsList, currentBatch, maxD
                 extraBox.classList.add('hidden');
                 extraBox.innerHTML = '';
             }
+        }
+    } else {
+        document.getElementById('selActStatRegCount').textContent = '0 人';
+        document.getElementById('selActStatRegGender').textContent = '請先選擇統計對象';
+        document.getElementById('selActStatMatchedPeople').textContent = '0 人';
+        document.getElementById('selActStatMatchedPairs').textContent = '共 0 對配對成功';
+        document.getElementById('selActStatUnmatchedCount').textContent = '0 人';
+        document.getElementById('selActStatMatchRate').textContent = '0%';
+        document.getElementById('selActStatRateBar').style.width = '0%';
+
+        const extraBox = document.getElementById('selActStatExtraBreakdown');
+        if (extraBox) {
+            extraBox.classList.add('hidden');
+            extraBox.innerHTML = '';
         }
     }
 

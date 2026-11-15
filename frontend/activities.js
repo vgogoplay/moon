@@ -359,6 +359,31 @@ function handleCustomActivityClick(activityId) {
         return;
     }
 
+    const schedState = getCustomActivityScheduleState(act);
+    if (schedState.status === 'upcoming') {
+        showMiniNotice('⏳ 活動尚未開始', `【${act.name}】將於 ${formatShortDateTime(schedState.startTs)} 開放報名，請稍候再來！`);
+        return;
+    }
+    if (schedState.status === 'waiting_match') {
+        const matchHint = schedState.matchText ? `將於 ${schedState.matchText} 準時進行配對` : '請等待管理員進行配對';
+        showMiniNotice('⌛ 報名已截止', `【${act.name}】已於 ${formatShortDateTime(schedState.endTs)} 截止報名，${matchHint}！`);
+        return;
+    }
+    if (schedState.status === 'matched') {
+        const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        const me = appState.playerId ? users.find(u => String(u.id) === String(appState.playerId)) : null;
+        const matchedHist = (me && Array.isArray(me.matchedHistory))
+            ? me.matchedHistory.find(h => String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name))
+            : null;
+        if (matchedHist) {
+            switchTab('friends');
+            showMiniNotice('💘 配對成功', `恭喜你在【${act.name}】與「${matchedHist.partnerName}」配對成功，已加入好友名單！`);
+        } else {
+            showMiniNotice('🍃 已完成開獎配對', `【${act.name}】已於 ${schedState.matchText || '配對時間'} 完成配對結算（只有配對成功的玩家才會加入好友名單）。`);
+        }
+        return;
+    }
+
     if (appState.isWarnedAccount) {
         showMiniNotice('⚠️ 無法報名', '目前警告帳號 不提供配對');
         return;
@@ -501,6 +526,13 @@ function openCustomActivityModal(activityId) {
     const act = Store.getOpenCustomActivities().find(a => String(a.id) === String(activityId));
     if (!act) return;
 
+    const schedState = getCustomActivityScheduleState(act);
+    if (!schedState.canRegister) {
+        closeCustomActivityModal();
+        refreshAllUI();
+        return;
+    }
+
     const actType = act.activityType || 'classic';
     const regs = (appState.customActivityRegs && typeof appState.customActivityRegs === 'object') ? appState.customActivityRegs : {};
     const existingReg = regs[act.id] || null;
@@ -513,10 +545,13 @@ function openCustomActivityModal(activityId) {
     document.getElementById('customActSelectedFortune').value = savedFortune;
     document.getElementById('customActSelectedTwoChoice').value = savedTwoChoice;
 
+    const modalTimeNote = schedState.hasSchedule
+        ? `⏰ 活動時間：${schedState.windowText || '不限'}${schedState.matchText ? ` ｜ 💘 配對時間：${schedState.matchText}` : ''}`
+        : '此為後台創建的獨立專屬活動，與週三／週六常規自動配對互不影響';
     document.getElementById('customActModalTitle').textContent = `🎪 報名專屬活動：【${act.name}】`;
     document.getElementById('customActModalSubtitle').textContent = act.description
-        ? `${act.description}（此為獨立活動，與週三／週六常規配對互不影響）`
-        : '此為後台創建的獨立專屬活動，與週三／週六常規自動配對互不影響';
+        ? `${act.description}（${modalTimeNote}）`
+        : modalTimeNote;
 
     const statusBox = document.getElementById('customActStatusBadgeBox');
     const cancelBtn = document.getElementById('cancelCustomActRegBtn');
@@ -657,6 +692,17 @@ async function confirmCustomActivityRegistration() {
         return;
     }
 
+    const schedState = getCustomActivityScheduleState(act);
+    if (!schedState.canRegister) {
+        closeCustomActivityModal();
+        refreshAllUI();
+        const reasonMsg = schedState.status === 'upcoming'
+            ? `【${act.name}】將於 ${formatShortDateTime(schedState.startTs)} 才開放報名！`
+            : `【${act.name}】已於 ${formatShortDateTime(schedState.endTs || schedState.matchTs)} 截止報名，無法再送出或修改！`;
+        showMiniNotice('⏰ 無法報名', reasonMsg);
+        return;
+    }
+
     const actType = act.activityType || 'classic';
     if (!appState.customActivityRegs || typeof appState.customActivityRegs !== 'object') {
         appState.customActivityRegs = {};
@@ -772,6 +818,16 @@ async function cancelCustomActivityRegistration() {
     const actId = String(document.getElementById('customActModalId').value || '').trim();
     const act = Store.getCustomActivities().find(a => String(a.id) === actId);
     const actName = act ? act.name : '此專屬活動';
+
+    if (act) {
+        const schedState = getCustomActivityScheduleState(act);
+        if (!schedState.canCancel) {
+            closeCustomActivityModal();
+            refreshAllUI();
+            showMiniNotice('⏰ 已過截止時間', `【${actName}】報名時間已截止，無法再取消報名。`);
+            return;
+        }
+    }
 
     customActivitySyncSuppressUntil = Date.now() + 6000;
     if (!appState.customActivityRegs || typeof appState.customActivityRegs !== 'object') {
@@ -898,9 +954,17 @@ function refreshAllUI() {
             customAlertBox.innerHTML = '';
         } else {
             if (customSectionBox) customSectionBox.classList.remove('hidden');
+            const allUsersForActCheck = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            const meUserRec = appState.playerId ? allUsersForActCheck.find(u => String(u.id) === String(appState.playerId)) : null;
+
             customBtnBox.classList.remove('hidden');
             customBtnBox.innerHTML = openCustomActs.map(act => {
                 const isReg = Boolean(myCustomRegs[act.id]);
+                const schedState = getCustomActivityScheduleState(act);
+                const matchedItem = (meUserRec && Array.isArray(meUserRec.matchedHistory))
+                    ? meUserRec.matchedHistory.find(h => String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name))
+                    : null;
+
                 if (appState.isWarnedAccount) {
                     return `
                         <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-200 text-gray-400 cursor-not-allowed">
@@ -908,6 +972,49 @@ function refreshAllUI() {
                         </button>
                     `;
                 }
+                if (schedState.status === 'upcoming') {
+                    return `
+                        <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-100 border border-gray-300 text-gray-500 cursor-not-allowed">
+                            ⏳ 尚未開始【${act.name}】（${formatShortDateTime(schedState.startTs)} 開放）
+                        </button>
+                    `;
+                }
+                if (schedState.status === 'waiting_match') {
+                    if (isReg) {
+                        return `
+                            <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-amber-100 border border-amber-300 text-amber-900 cursor-not-allowed">
+                                ⌛ 已報名【${act.name}】（等待 ${schedState.matchText || '配對時間'} 開獎）
+                            </button>
+                        `;
+                    }
+                    return `
+                        <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed">
+                            🔒【${act.name}】報名已截止（${schedState.matchText || ''} 配對）
+                        </button>
+                    `;
+                }
+                if (schedState.status === 'matched') {
+                    if (matchedItem) {
+                        return `
+                            <button type="button" onclick="handleCustomActivityClick('${act.id}')" class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg shadow-lg tracking-wider bg-gradient-to-r from-pink-500 to-rose-500 text-white hover:opacity-95 transition">
+                                💘【${act.name}】配對成功！前往好友聊天
+                            </button>
+                        `;
+                    }
+                    if (isReg) {
+                        return `
+                            <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-100 border border-gray-300 text-gray-500 cursor-not-allowed">
+                                🍃【${act.name}】已開獎（本次未配對成功）
+                            </button>
+                        `;
+                    }
+                    return `
+                        <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed">
+                            ⏰【${act.name}】活動已結束
+                        </button>
+                    `;
+                }
+
                 if (isReg) {
                     return `
                         <button type="button" onclick="handleCustomActivityClick('${act.id}')" class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg shadow-lg tracking-wider bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:opacity-95 transition">
@@ -925,22 +1032,53 @@ function refreshAllUI() {
             const statusLines = openCustomActs.map(act => {
                 const actType = act.activityType || 'classic';
                 const reg = myCustomRegs[act.id];
+                const schedState = getCustomActivityScheduleState(act);
+                const matchedItem = (meUserRec && Array.isArray(meUserRec.matchedHistory))
+                    ? meUserRec.matchedHistory.find(h => String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name))
+                    : null;
+
+                const timeTag = schedState.hasSchedule
+                    ? `<br><span class="text-[11px] text-[#8f4452] font-semibold">⏰ 活動時間：${schedState.windowText || '不限'}${schedState.matchText ? ` ｜ 💘 配對時間：${schedState.matchText}` : ''}</span>`
+                    : '';
+
+                if (schedState.status === 'matched') {
+                    if (matchedItem) {
+                        return `💘 專屬活動 <strong>【${act.name}】</strong> 配對成功！你已與 <strong>${matchedItem.partnerName}</strong> 成為好友，請至「好友名單」開啟對話！${timeTag}`;
+                    }
+                    if (reg) {
+                        return `🍃 專屬活動 <strong>【${act.name}】</strong> 已完成配對結算（本次未配對成功，未加入好友名單）。${timeTag}`;
+                    }
+                    return `⏰ 專屬活動 <strong>【${act.name}】</strong> 報名已截止並完成配對結算。${timeTag}`;
+                }
+
+                if (schedState.status === 'waiting_match') {
+                    if (reg) {
+                        return `⌛ 已報名專屬活動 <strong>【${act.name}】</strong>（報名已於 ${formatShortDateTime(schedState.endTs)} 截止，將於 <strong>${schedState.matchText}</strong> 準時配對，配對成功才會加入好友）。${timeTag}`;
+                    }
+                    return `🔒 專屬活動 <strong>【${act.name}】</strong> 已於 ${formatShortDateTime(schedState.endTs)} 截止報名，將於 <strong>${schedState.matchText}</strong> 進行配對。${timeTag}`;
+                }
+
+                if (schedState.status === 'upcoming') {
+                    const descTxt = act.description ? ` — ${act.description}` : '';
+                    return `⏳ 專屬活動 <strong>【${act.name}】</strong> 即將於 <strong>${formatShortDateTime(schedState.startTs)}</strong> 開放報名${descTxt}${timeTag}`;
+                }
+
                 if (reg) {
                     if (actType === 'fortune_number' && reg.fortuneNumber) {
-                        return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（月老籤詩已選：<strong>第 ${reg.fortuneNumber} 首</strong>，同號碼配對）`;
+                        return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（月老籤詩已選：<strong>第 ${reg.fortuneNumber} 首</strong>，同號碼配對）${timeTag}`;
                     }
                     if (actType === 'two_choice' && reg.twoChoiceValue) {
-                        return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（默契大考驗二選一已選：<strong>「${reg.twoChoiceValue}」</strong>）`;
+                        return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（默契大考驗二選一已選：<strong>「${reg.twoChoiceValue}」</strong>）${timeTag}`;
                     }
                     const cList = formatCriteriaDisplayList(reg.exactMatchCriteria || {});
                     const cSummary = cList.length > 0 ? cList.join(' 或 ') : '不限制（隨機配對）';
-                    return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（配對條件：<strong>${cSummary}</strong>）`;
+                    return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（配對條件：<strong>${cSummary}</strong>）${timeTag}`;
                 }
                 const typeHint = actType === 'fortune_number'
                     ? '（月老籤詩請選擇1~10首號碼）'
                     : (actType === 'two_choice' ? `（默契大考驗二選一：${act.optionA || ''} / ${act.optionB || ''}）` : '');
                 const descTxt = act.description ? ` — ${act.description}` : '';
-                return `🎪 專屬活動 <strong>【${act.name}】</strong> 開放報名中${typeHint}${descTxt}`;
+                return `🎪 專屬活動 <strong>【${act.name}】</strong> 開放報名中${typeHint}${descTxt}${timeTag}`;
             });
 
             customAlertBox.classList.remove('hidden');

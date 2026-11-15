@@ -49,15 +49,36 @@ function createCustomActivity() {
     const twoChoiceInput = document.getElementById('newCustomTwoChoiceText');
     const descInput = document.getElementById('newCustomActivityDesc');
     const openSelect = document.getElementById('newCustomActivityInitialOpen');
+    const startInput = document.getElementById('newCustomActStartTime');
+    const endInput = document.getElementById('newCustomActEndTime');
+    const matchInput = document.getElementById('newCustomActMatchTime');
 
     const activityType = typeSelect ? typeSelect.value : 'classic';
     const name = nameInput.value.trim();
     const description = descInput.value.trim();
     const isOpen = openSelect.value === 'true';
+    const startTime = startInput ? startInput.value.trim() : '';
+    const endTime = endInput ? endInput.value.trim() : '';
+    const matchTime = matchInput ? matchInput.value.trim() : '';
 
     if (!name) {
         alert('請輸入自定義活動名稱！');
         nameInput.focus();
+        return;
+    }
+
+    const startTimeTs = parseLocalDateTimeTs(startTime);
+    const endTimeTs = parseLocalDateTimeTs(endTime);
+    const matchTimeTs = parseLocalDateTimeTs(matchTime);
+
+    if (startTimeTs && endTimeTs && endTimeTs <= startTimeTs) {
+        alert('「報名結束時間」必須晚於「活動開始時間」！');
+        if (endInput) endInput.focus();
+        return;
+    }
+    if (endTimeTs && matchTimeTs && matchTimeTs < endTimeTs) {
+        alert('「自動配對時間」不能早於「報名結束時間」（需等報名截止後才能進行配對）！');
+        if (matchInput) matchInput.focus();
         return;
     }
 
@@ -92,6 +113,13 @@ function createCustomActivity() {
         optionA: optionA,
         optionB: optionB,
         description: description,
+        startTime: startTime,
+        endTime: endTime,
+        matchTime: matchTime,
+        startTimeTs: startTimeTs,
+        endTimeTs: endTimeTs,
+        matchTimeTs: matchTimeTs,
+        autoMatchedDone: false,
         isOpen: isOpen,
         matchCount: 0,
         lastMatchedAt: '',
@@ -106,13 +134,20 @@ function createCustomActivity() {
     nameInput.value = '';
     descInput.value = '';
     if (twoChoiceInput) twoChoiceInput.value = '';
+    if (startInput) startInput.value = '';
+    if (endInput) endInput.value = '';
+    if (matchInput) matchInput.value = '';
 
+    const schedSummary = formatCustomActivityTimeSummary(newAct);
+    const timeNote = schedSummary.hasSchedule
+        ? `，時間：${schedSummary.windowText || '不限'}${schedSummary.matchText ? `、配對：${schedSummary.matchText}` : ''}`
+        : '';
     const typeLabelMap = {
         classic: '第1類：原本機制報名',
         fortune_number: '第2類：月老籤詩 1~10 號',
         two_choice: `第3類：二選一（${twoChoiceText}）`
     };
-    appendLog(`<span class="text-amber-300">[新增第2種活動]</span> 已建立「<strong>${newAct.name}</strong>」（${typeLabelMap[activityType] || ''}，狀態：<strong>${isOpen ? '🟢 開啟中，前台已顯示報名按鈕' : '⚪ 已關閉，前台暫不顯示'}</strong>）。`);
+    appendLog(`<span class="text-amber-300">[新增第2種活動]</span> 已建立「<strong>${newAct.name}</strong>」（${typeLabelMap[activityType] || ''}${timeNote}，狀態：<strong>${isOpen ? '🟢 開啟中，前台已顯示報名按鈕' : '⚪ 已關閉，前台暫不顯示'}</strong>）。`);
 }
 
 function openEditCustomActivityModal(activityId) {
@@ -125,6 +160,12 @@ function openEditCustomActivityModal(activityId) {
     document.getElementById('editActName').value = act.name || '';
     document.getElementById('editActTwoChoiceText').value = act.twoChoiceText || '';
     document.getElementById('editActDesc').value = act.description || '';
+    const editStartEl = document.getElementById('editActStartTime');
+    const editEndEl = document.getElementById('editActEndTime');
+    const editMatchEl = document.getElementById('editActMatchTime');
+    if (editStartEl) editStartEl.value = act.startTime || '';
+    if (editEndEl) editEndEl.value = act.endTime || '';
+    if (editMatchEl) editMatchEl.value = act.matchTime || '';
 
     onEditCustomActivityTypeChange(act.activityType || 'classic');
     document.getElementById('editCustomActivityModal').classList.remove('hidden');
@@ -152,9 +193,27 @@ function saveEditedCustomActivity(e) {
     const actName = document.getElementById('editActName').value.trim();
     const actTwoChoiceText = document.getElementById('editActTwoChoiceText').value.trim();
     const actDesc = document.getElementById('editActDesc').value.trim();
+    const actStartTime = document.getElementById('editActStartTime')?.value.trim() || '';
+    const actEndTime = document.getElementById('editActEndTime')?.value.trim() || '';
+    const actMatchTime = document.getElementById('editActMatchTime')?.value.trim() || '';
 
     if (!actName) {
         alert('請輸入活動名稱！');
+        return;
+    }
+
+    const startTimeTs = parseLocalDateTimeTs(actStartTime);
+    const endTimeTs = parseLocalDateTimeTs(actEndTime);
+    const matchTimeTs = parseLocalDateTimeTs(actMatchTime);
+
+    if (startTimeTs && endTimeTs && endTimeTs <= startTimeTs) {
+        alert('「報名結束時間」必須晚於「活動開始時間」！');
+        document.getElementById('editActEndTime')?.focus();
+        return;
+    }
+    if (endTimeTs && matchTimeTs && matchTimeTs < endTimeTs) {
+        alert('「自動配對時間」不能早於「報名結束時間」！');
+        document.getElementById('editActMatchTime')?.focus();
         return;
     }
 
@@ -184,14 +243,24 @@ function saveEditedCustomActivity(e) {
         return;
     }
 
+    const prevAct = list[actIdx];
+    const isFutureMatchReset = matchTimeTs > Date.now() && Number(prevAct.matchTimeTs || 0) !== matchTimeTs;
+
     const updatedAct = {
-        ...list[actIdx],
+        ...prevAct,
         name: actName,
         activityType: actType,
         twoChoiceText: twoChoiceText,
         optionA: optionA,
         optionB: optionB,
-        description: actDesc
+        description: actDesc,
+        startTime: actStartTime,
+        endTime: actEndTime,
+        matchTime: actMatchTime,
+        startTimeTs: startTimeTs,
+        endTimeTs: endTimeTs,
+        matchTimeTs: matchTimeTs,
+        autoMatchedDone: isFutureMatchReset ? false : Boolean(prevAct.autoMatchedDone)
     };
 
     list[actIdx] = updatedAct;
@@ -322,129 +391,16 @@ function canPairInCustomActivity(A, B, activityId) {
            acceptsCandidateForCustomActivity(B, A, activityId);
 }
 
-function runCustomActivityMatch(activityId) {
-    const acts = getCustomActivities();
-    const act = acts.find(a => String(a.id) === String(activityId));
-    if (!act) return;
+function runCustomActivityMatch(activityId, isAuto = false) {
+    const res = executeCustomActivityMatchCore(activityId, { isAuto, markScheduledDone: isAuto });
+    if (!res || !res.executed) return;
 
-    const actType = act.activityType || 'classic';
-    const users = getUsers();
-    const eligiblePool = shuffle(users.filter(u => {
-        if (u.isWarned || u.isMatchBanned) return false;
-        const hasReg = Boolean(u.customActivityRegs && u.customActivityRegs[act.id]);
-        if (!hasReg) return false;
-        const alreadyMatchedThisAct = (u.matchedHistory || []).some(h =>
-            String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name)
-        );
-        return !alreadyMatchedThisAct;
-    }));
-
-    const pairedThisRunIds = new Set();
-    let pairCount = 0;
-    const nowTs = Date.now();
-
-    appendLog(`<span class="text-amber-300">[第2種活動配對執行]</span> 開始執行專屬活動「<strong>${act.name}</strong>」自動配對（符合資格待配對人數：${eligiblePool.length} 人）...`);
-
-    if (actType === 'fortune_number') {
-        // 第 2 類：月老籤詩 1~10 號，相同號碼才配對，單獨號碼未配對
-        const buckets = {};
-        eligiblePool.forEach(u => {
-            const reg = u.customActivityRegs && u.customActivityRegs[act.id];
-            const num = reg && reg.fortuneNumber ? String(reg.fortuneNumber) : '';
-            if (!num) return;
-            if (!buckets[num]) buckets[num] = [];
-            buckets[num].push(u);
-        });
-
-        Object.keys(buckets).sort((a, b) => Number(a) - Number(b)).forEach(num => {
-            const group = shuffle(buckets[num]);
-            for (let i = 0; i < group.length; i++) {
-                const A = group[i];
-                if (pairedThisRunIds.has(String(A.id))) continue;
-                for (let j = i + 1; j < group.length; j++) {
-                    const B = group[j];
-                    if (pairedThisRunIds.has(String(B.id))) continue;
-                    if (!areAlreadyFriends(A, B)) {
-                        pairedThisRunIds.add(String(A.id));
-                        pairedThisRunIds.add(String(B.id));
-                        recordPairMatch(A, B, act.name, nowTs, act.id, `同抽中月老籤詩第 ${num} 首`);
-                        pairCount++;
-                        appendLog(`<span class="text-emerald-400">[${act.name}・第${num}首 配對成功 #${pairCount}]</span> ID:${A.id}（${A.nickname}）⇄ ID:${B.id}（${B.nickname}）`);
-                        break;
-                    }
-                }
-            }
-        });
-    } else if (actType === 'two_choice') {
-        // 第 3 類：默契大考驗二選一，選相同選項的玩家隨機配對，落單者未配對
-        const buckets = {};
-        eligiblePool.forEach(u => {
-            const reg = u.customActivityRegs && u.customActivityRegs[act.id];
-            const choice = reg && reg.twoChoiceValue ? String(reg.twoChoiceValue).trim() : '';
-            if (!choice) return;
-            if (!buckets[choice]) buckets[choice] = [];
-            buckets[choice].push(u);
-        });
-
-        Object.keys(buckets).forEach(choice => {
-            const group = shuffle(buckets[choice]);
-            for (let i = 0; i < group.length; i++) {
-                const A = group[i];
-                if (pairedThisRunIds.has(String(A.id))) continue;
-                for (let j = i + 1; j < group.length; j++) {
-                    const B = group[j];
-                    if (pairedThisRunIds.has(String(B.id))) continue;
-                    if (!areAlreadyFriends(A, B)) {
-                        pairedThisRunIds.add(String(A.id));
-                        pairedThisRunIds.add(String(B.id));
-                        recordPairMatch(A, B, act.name, nowTs, act.id, `默契大考驗皆選「${choice}」`);
-                        pairCount++;
-                        appendLog(`<span class="text-emerald-400">[${act.name}・${choice} 配對成功 #${pairCount}]</span> ID:${A.id}（${A.nickname}）⇄ ID:${B.id}（${B.nickname}）`);
-                        break;
-                    }
-                }
-            }
-        });
-    } else {
-        // 第 1 類：原本機制報名（完全吻合條件）
-        for (let i = 0; i < eligiblePool.length; i++) {
-            const A = eligiblePool[i];
-            if (pairedThisRunIds.has(String(A.id))) continue;
-
-            const candidates = [];
-            for (let j = i + 1; j < eligiblePool.length; j++) {
-                const B = eligiblePool[j];
-                if (pairedThisRunIds.has(String(B.id))) continue;
-                if (canPairInCustomActivity(A, B, act.id)) {
-                    candidates.push(B);
-                }
-            }
-
-            if (candidates.length > 0) {
-                const B = candidates[Math.floor(Math.random() * candidates.length)];
-                pairedThisRunIds.add(String(A.id));
-                pairedThisRunIds.add(String(B.id));
-                recordPairMatch(A, B, act.name, nowTs, act.id);
-                pairCount++;
-
-                appendLog(`<span class="text-emerald-400">[${act.name} 配對成功 #${pairCount}]</span> ID:${A.id}（${A.nickname}）⇄ ID:${B.id}（${B.nickname}）`);
-            }
+    if (!isAuto) {
+        if (res.pairCount > 0) {
+            alert(`🎉【${res.actName}】自動配對完成！\n\n本次共成功配對 ${res.pairCount} 對${res.unmatchedCount > 0 ? `（${res.unmatchedCount} 人落單未配對）` : ''}，已即時同步至雙方前台好友名單！`);
+        } else {
+            alert(`ℹ️【${res.actName}】目前尚無可配對的組合。\n\n（可能原因：同號碼／同選項待配對人數不足 2 人，或報名玩家的指定條件尚未遇到符合對象。）`);
         }
-    }
-
-    const unmatchedCount = Math.max(0, eligiblePool.length - pairedThisRunIds.size);
-    act.matchCount = Number(act.matchCount || 0) + pairCount;
-    act.lastMatchedAt = new Date().toLocaleString('zh-TW');
-    saveCustomActivities(acts);
-    CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, act);
-
-    appendLog(`<span class="text-pink-300">[${act.name} 結算完成]</span> 本次共配對成功 <strong>${pairCount} 對</strong>${unmatchedCount > 0 ? `（另有 ${unmatchedCount} 人因號碼／選項落單暫未配對）` : ''}。`);
-    saveUsers(users);
-
-    if (pairCount > 0) {
-        alert(`🎉【${act.name}】自動配對完成！\n\n本次共成功配對 ${pairCount} 對${unmatchedCount > 0 ? `（${unmatchedCount} 人落單未配對）` : ''}，已即時同步至雙方前台好友名單！`);
-    } else {
-        alert(`ℹ️【${act.name}】目前尚無可配對的組合。\n\n（可能原因：同號碼／同選項待配對人數不足 2 人，或報名玩家的指定條件尚未遇到符合對象。）`);
     }
 }
 
@@ -481,12 +437,31 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                     }).join(' ')
                     : '<span class="text-gray-400">尚無玩家報名</span>';
 
+                const schedState = getCustomActivityScheduleState(act);
+                let scheduleBadgeHtml = '';
+                if (schedState.hasSchedule) {
+                    const phaseBadgeColor = schedState.status === 'matched'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                        : (schedState.status === 'waiting_match'
+                            ? 'bg-amber-50 border-amber-300 text-amber-900'
+                            : (schedState.status === 'upcoming'
+                                ? 'bg-sky-50 border-sky-300 text-sky-800'
+                                : 'bg-rose-50 border-rose-200 text-[#8f4452]'));
+                    scheduleBadgeHtml = `
+                        <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+                            ${schedState.windowText ? `<span class="px-2.5 py-0.5 rounded-lg bg-white border border-pink-200 text-[#8f4452] font-semibold">⏰ 活動時間：${schedState.windowText}</span>` : ''}
+                            ${schedState.matchText ? `<span class="px-2.5 py-0.5 rounded-lg bg-white border border-amber-300 text-amber-900 font-semibold">💘 配對時間：${schedState.matchText}</span>` : ''}
+                            ${act.isOpen ? `<span class="px-2.5 py-0.5 rounded-lg border font-bold ${phaseBadgeColor}">${schedState.label}</span>` : ''}
+                        </div>
+                    `;
+                }
+
                 return `
                     <div class="p-4 rounded-2xl bg-white border-2 ${act.isOpen ? 'border-emerald-300 shadow-sm' : 'border-pink-200'} flex flex-col lg:flex-row lg:items-stretch justify-between gap-3">
                         <div class="space-y-2 min-w-0 flex-1 p-3 rounded-xl bg-pink-50/30 border border-pink-200">
                             <div class="flex flex-wrap items-center gap-2">
                                 <span class="text-xs px-2.5 py-0.5 rounded-full font-bold ${act.isOpen ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600 border border-gray-300'}">
-                                    ${act.isOpen ? '🟢 開啟中（前台顯示第2活動按鈕）' : '⚪ 已關閉（前台隱藏）'}
+                                    ${act.isOpen ? '🟢 開啟中（前台顯示第2活動）' : '⚪ 已關閉（前台隱藏）'}
                                 </span>
                                 ${typeBadgeHtml}
                                 <h3 class="text-sm font-bold text-[#8f4452]">🎪 ${act.name}</h3>
@@ -494,6 +469,7 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                                     累計配對 ${act.matchCount || 0} 對
                                 </span>
                             </div>
+                            ${scheduleBadgeHtml}
                             ${act.description ? `<p class="text-xs text-gray-600 bg-white px-2.5 py-1 rounded-lg border border-pink-100">${act.description}</p>` : ''}
                             <div class="text-xs text-gray-600 flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-white border border-pink-200">
                                 <span class="font-bold text-[#5e464a]">已報名（${regUsers.length} 人）：</span>

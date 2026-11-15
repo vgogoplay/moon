@@ -15,13 +15,17 @@
             <div class="p-5 border-b border-pink-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                     <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">📋 玩家完整資料庫與管理操作</h2>
-                    <p class="text-xs text-gray-500">預設每頁顯示 10 位玩家（可切換 10 人、50 人或全部）；可依場次、性別男／性別女、專屬活動或帳號狀態篩選管理</p>
+                    <p class="text-xs text-gray-500">預設每頁顯示 5 位玩家（可切換 5 人、10 人、50 人或全部）；可依場次、性別男／性別女、專屬活動或帳號狀態篩選管理</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2.5 text-xs">
+                    <button onclick="openAddNewPlayerModal()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold hover:opacity-95 transition shadow-sm flex items-center gap-1">
+                        <span>➕</span><span>新增會員</span>
+                    </button>
                     <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2">
                         <span class="font-bold text-[#8f4452]">每頁顯示：</span>
                         <select id="rosterPageSizeSelect" onchange="onRosterPageSizeChange(this.value)" class="p-2 admin-input-box font-bold text-[#8f4452]">
-                            <option value="10" selected>10 人（預設）</option>
+                            <option value="5" selected>5 人（預設）</option>
+                            <option value="10">10 人</option>
                             <option value="50">50 人</option>
                             <option value="all">全部</option>
                         </select>
@@ -53,7 +57,7 @@
                     <tbody id="playersTableBody"></tbody>
                 </table>
             </div>
-            <!-- 分頁控制列（每頁 10 人） -->
+            <!-- 分頁控制列（每頁 5 人） -->
             <div id="rosterPaginationBar" class="p-4 border-t border-pink-200 bg-pink-50/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
@@ -194,14 +198,47 @@
         </div>
     </div>
 
+        <!-- ➕ 管理員新增空白會員 Modal -->
+    <div id="addNewPlayerModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl border-2 border-emerald-200 space-y-5">
+            <div class="flex items-center justify-between border-b border-emerald-100 pb-3">
+                <div>
+                    <h3 class="text-lg md:text-xl font-bold font-serif-jp text-emerald-800">➕ 新增會員帳號</h3>
+                    <p class="text-xs text-gray-500 mt-1">建立空白會員並產生通行碼，其餘資料由玩家自行填寫（不受人數上限限制）</p>
+                </div>
+                <button type="button" onclick="closeAddNewPlayerModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+
+            <form id="adminAddNewPlayerForm" onsubmit="submitAddNewPlayer(event)" class="space-y-4">
+                <div class="admin-field-box !bg-emerald-50/30 !border-emerald-200">
+                    <label class="block text-xs font-bold text-emerald-800 mb-1.5">選擇性別 <span class="text-rose-500">*</span></label>
+                    <select id="newPlayerGenderSelect" class="w-full p-2.5 admin-input-box text-sm font-bold text-[#8f4452]" required>
+                        <option value="">請選擇性別...</option>
+                        <option value="男">男</option>
+                        <option value="女">女</option>
+                    </select>
+                </div>
+                
+                <div class="flex flex-wrap justify-end gap-2.5 pt-2 border-t border-emerald-100">
+                    <button type="button" onclick="closeAddNewPlayerModal()" class="px-5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs md:text-sm font-bold shadow-md hover:opacity-95 transition">
+                        ✨ 確認新增並產生通行碼
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js"></script>
+    <script src="shared/schedule.js?v=20261115i"></script>
     <script src="shared/schema.js?v=20261115d"></script>
     <script src="shared/cloud-store.js?v=20261115g"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261115"></script>
-    <script src="backend/matching.js?v=20261115"></script>
-    <script src="backend/roster.js?v=20261115g"></script>
+    <script src="backend/state.js?v=20261115h"></script>
+    <script src="backend/matching.js?v=20261115i"></script>
+    <script src="backend/roster.js?v=20261115j"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261115"></script>
 </body>

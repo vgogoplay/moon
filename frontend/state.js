@@ -5,6 +5,7 @@
 let appState = Store.load();
 let lastControlsSnapshot = JSON.stringify(Store.getSystemConfig());
 let lastCustomActivitiesSnapshot = localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]';
+let lastCustomActivityPhaseSnapshot = '';
 let lastGenderQuotaSnapshot = JSON.stringify(Store.getGenderQuotaStatus());
 let lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
 let lastUsersStatsSnapshot = '';
@@ -114,13 +115,29 @@ function syncFromSharedStorage() {
         }
     }
 
+    if (typeof checkScheduledCustomActivities === 'function') {
+        const autoMatchedNow = checkScheduledCustomActivities(true);
+        if (autoMatchedNow) {
+            users.splice(0, users.length, ...JSON.parse(localStorage.getItem(USERS_KEY) || '[]'));
+            stateChanged = true;
+        }
+    }
+
     const currentCustomActsRaw = localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]';
-    if (currentCustomActsRaw !== lastCustomActivitiesSnapshot) {
+    const openActsNow = (typeof Store.getOpenCustomActivities === 'function') ? Store.getOpenCustomActivities() : [];
+    const currentPhaseSnap = (typeof getCustomActivityScheduleState === 'function')
+        ? openActsNow.map(a => `${a.id}:${getCustomActivityScheduleState(a).status}`).join('|')
+        : '';
+    if (currentCustomActsRaw !== lastCustomActivitiesSnapshot || currentPhaseSnap !== lastCustomActivityPhaseSnapshot) {
         lastCustomActivitiesSnapshot = currentCustomActsRaw;
+        lastCustomActivityPhaseSnapshot = currentPhaseSnap;
         stateChanged = true;
         const openModalActId = document.getElementById('customActModalId')?.value;
-        if (openModalActId && !Store.getOpenCustomActivities().some(a => String(a.id) === String(openModalActId))) {
-            closeCustomActivityModal();
+        if (openModalActId) {
+            const targetOpenAct = openActsNow.find(a => String(a.id) === String(openModalActId));
+            if (!targetOpenAct || (typeof getCustomActivityScheduleState === 'function' && !getCustomActivityScheduleState(targetOpenAct).canRegister)) {
+                closeCustomActivityModal();
+            }
         }
     }
 

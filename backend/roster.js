@@ -598,7 +598,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
 
     const totalFiltered = filteredUsers.length;
     const isShowAll = (rosterPageSize === 'all');
-    const numericPageSize = isShowAll ? Math.max(1, totalFiltered) : Math.max(1, parseInt(rosterPageSize, 10) || 10);
+    const numericPageSize = isShowAll ? Math.max(1, totalFiltered) : Math.max(1, parseInt(rosterPageSize, 10) || 5);
     const totalRosterPages = isShowAll ? 1 : Math.max(1, Math.ceil(totalFiltered / numericPageSize));
     if (currentRosterPage > totalRosterPages) currentRosterPage = totalRosterPages;
     if (currentRosterPage < 1) currentRosterPage = 1;
@@ -608,6 +608,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
     const paginationBar = document.getElementById('rosterPaginationBar');
     if (paginationBar) {
         const sizeQuickBtnsHtml = [
+            { val: '5', label: '5 人' },
             { val: '10', label: '10 人' },
             { val: '50', label: '50 人' },
             { val: 'all', label: '全部' }
@@ -755,4 +756,58 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
             `;
         }).join('');
     }
+}
+
+// ==================== 後台手動新增空白會員 ====================
+function openAddNewPlayerModal() {
+    document.getElementById('newPlayerGenderSelect').value = '';
+    document.getElementById('addNewPlayerModal').classList.remove('hidden');
+}
+
+function closeAddNewPlayerModal() {
+    document.getElementById('addNewPlayerModal').classList.add('hidden');
+}
+
+function submitAddNewPlayer(e) {
+    e.preventDefault();
+    const gender = document.getElementById('newPlayerGenderSelect').value;
+    if (!gender) {
+        alert('請選擇性別！');
+        return;
+    }
+    
+    const newId = IdAllocator.allocate(gender);
+    const newBackupCode = deriveFixedBackupCode(newId);
+    const freshBase = Store.getDefaultState();
+    
+    const newUser = {
+        id: newId,
+        gender: gender,
+        nickname: `未命名玩家_${newId}`,
+        backupCode: newBackupCode,
+        isWarned: false,
+        warningReason: '',
+        isMatchBanned: false,
+        isChatBanned: false,
+        registeredSessions: [],
+        exactMatchCriteria: {},
+        customActivityRegs: {},
+        matchedHistory: [],
+        matchedSession: null,
+        matchedWithId: null,
+        matchedWithName: null,
+        updatedAt: new Date().toLocaleString('zh-TW'),
+        privacy: { ...freshBase.privacy, gender: 'open', ig: 'closed' }
+    };
+    
+    const users = getUsers();
+    users.unshift(newUser);
+    saveUsers(users);
+    
+    closeAddNewPlayerModal();
+    appendLog(`<span class="text-emerald-400">[新增會員]</span> 已為前台新增空白帳號 <strong>ID:${newId}</strong>（性別：${gender}）。通行碼為 <strong>${newBackupCode}</strong>，請交由玩家登入填寫其餘資料。`);
+    
+    setTimeout(() => {
+        alert(`✅ 新增會員成功！\n\n唯一玩家 ID：${newId}\n性別：${gender}\n🔑 通行碼：${newBackupCode}\n\n請將此 5 碼通行碼交給玩家，請對方前往前台「個人與隱私 -> 備份/還原碼」輸入並讀取，即可自行完成後續資料填寫。`);
+    }, 100);
 }

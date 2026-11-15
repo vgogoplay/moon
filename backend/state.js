@@ -12,15 +12,12 @@ const BAN_FIELD_NAMES = {
 let lastUsersSnapshot = '';
 let lastReportsSnapshot = '';
 let lastSystemSnapshot = '';
-const ROSTER_PAGE_SIZE_STORAGE_KEY = 'yuelao_admin_roster_page_size';
-let rosterPageSize = sessionStorage.getItem(ROSTER_PAGE_SIZE_STORAGE_KEY) || '10';
-if (!['10', '50', 'all'].includes(rosterPageSize)) rosterPageSize = '10';
+let rosterPageSize = '5';
 let currentRosterPage = 1;
 
 function onRosterPageSizeChange(newSize) {
-    const val = ['10', '50', 'all'].includes(String(newSize)) ? String(newSize) : '10';
+    const val = ['5', '10', '50', 'all'].includes(String(newSize)) ? String(newSize) : '5';
     rosterPageSize = val;
-    sessionStorage.setItem(ROSTER_PAGE_SIZE_STORAGE_KEY, val);
     currentRosterPage = 1;
     renderAdminAll();
 }

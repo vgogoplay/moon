@@ -327,6 +327,10 @@ function checkAutoSchedule2000() {
             runSessionMatch(true);
         }
     }
+
+    if (typeof checkScheduledCustomActivities === 'function') {
+        checkScheduledCustomActivities(false);
+    }
 }
 
 function unmatchPlayerPair(userId, specificPartnerId = null) {
