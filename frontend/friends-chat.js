@@ -204,6 +204,48 @@ function selectFriend(friendId) {
     }
 }
 
+let lastRenderedUnlockedSignature = '';
+
+function deterministicSortPartnerFields(items, seedStr) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < seedStr.length; i++) {
+        h ^= seedStr.charCodeAt(i);
+        h = Math.imul(h, 16777619) >>> 0;
+    }
+    const nextRand = () => {
+        h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
+        return h / 4294967296;
+    };
+    const arr = [...items];
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(nextRand() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+function getProgressiveUnlockCounts(totalCount, remainDays, isIgUnlocked) {
+    if (totalCount <= 0) return { dayNum: 1, unlockedCount: 0, lockedCount: 0 };
+    const dayNum = isIgUnlocked ? 3 : Math.max(1, 8 - Number(remainDays ?? 7));
+    const day1Count = Math.ceil(totalCount / 2);
+    const day2Count = day1Count + Math.ceil((totalCount - day1Count) / 2);
+
+    let unlockedCount = totalCount;
+    if (dayNum <= 1) {
+        unlockedCount = day1Count;
+    } else if (dayNum === 2) {
+        unlockedCount = day2Count;
+    } else {
+        unlockedCount = totalCount;
+    }
+    unlockedCount = Math.min(totalCount, Math.max(0, unlockedCount));
+    return {
+        dayNum,
+        unlockedCount,
+        lockedCount: Math.max(0, totalCount - unlockedCount)
+    };
+}
+
 function renderActiveFriendWorkspace() {
     const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
     if (!friend) return;
@@ -217,7 +259,7 @@ function renderActiveFriendWorkspace() {
         : `⏳ 剩餘 ${remainDays} 天（每天 20:00 自動 -1 天）`;
 
     const unlockedBox = document.getElementById('partnerUnlockedFields');
-    let unlockedHtml = '';
+    const openFieldItems = [];
     FIELD_SECTIONS.forEach(sec => {
         sec.fields.forEach(f => {
             if (f.key === 'nickname') return;
@@ -233,21 +275,63 @@ function renderActiveFriendWorkspace() {
                 } else if (f.allowOther && val === '其他' && friend.profile[`${f.key}Other`]) {
                     displayVal = `其他（${friend.profile[`${f.key}Other`]}）`;
                 }
-                unlockedHtml += `
-                    <div class="p-2.5 rounded-xl bg-white border border-pink-100">
-                        <span class="text-[11px] text-[#c96a7b] block">${f.label.split('（')[0]}</span>
-                        <span class="font-medium text-gray-700">${displayVal}</span>
-                    </div>
-                `;
+                openFieldItems.push({
+                    key: f.key,
+                    label: f.label.split('（')[0],
+                    required: Boolean(f.required),
+                    displayVal: String(displayVal)
+                });
             }
         });
     });
 
-    unlockedBox.innerHTML = unlockedHtml || `
-        <div class="text-center py-6 text-gray-400">
-            對方目前尚未開啟其他進階資料欄位，<br>先從聊天室打聲招呼吧！
-        </div>
-    `;
+    const pairSeed = [String(appState.playerId || 'guest'), String(friend.id)].sort().join('_');
+    const orderedItems = deterministicSortPartnerFields(openFieldItems, pairSeed);
+    const totalOpen = orderedItems.length;
+    const { dayNum, unlockedCount, lockedCount } = getProgressiveUnlockCounts(totalOpen, remainDays, Boolean(friend.igUnlocked));
+
+    let unlockedHtml = '';
+    if (totalOpen > 0) {
+        const displayDayLabel = dayNum >= 3 ? '第 3 天以上（已全部解鎖）' : `第 ${dayNum} 天`;
+        const progressBadgeHtml = lockedCount > 0
+            ? `<div class="p-2.5 rounded-xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-200 flex items-center justify-between text-[11px]">
+                    <span class="font-bold text-[#8f4452]">📅 ${displayDayLabel}・逐步解鎖中</span>
+                    <span class="font-semibold text-[#c96a7b]">已顯示 ${unlockedCount} / ${totalOpen} 個欄位（${lockedCount} 個待明日顯示）</span>
+               </div>`
+            : `<div class="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 flex items-center justify-between text-[11px]">
+                    <span class="font-bold text-emerald-800">✨ ${displayDayLabel}</span>
+                    <span class="font-semibold text-emerald-700">已顯示全部 ${totalOpen} 個開放欄位</span>
+               </div>`;
+
+        const revealedCardsHtml = orderedItems.slice(0, unlockedCount).map(item => `
+            <div class="p-2.5 rounded-xl bg-white border border-pink-100">
+                <span class="text-[11px] text-[#c96a7b] block">${item.label}${item.required ? ' <span class="text-rose-500">*</span>' : ''}</span>
+                <span class="font-medium text-gray-700">${item.displayVal}</span>
+            </div>
+        `).join('');
+
+        const pendingCardsHtml = orderedItems.slice(unlockedCount).map(item => `
+            <div class="p-2.5 rounded-xl bg-pink-50/45 border border-dashed border-pink-200 space-y-1">
+                <span class="text-[11px] text-[#c96a7b] font-medium block">${item.label}${item.required ? ' <span class="text-rose-500">*</span>' : ''}</span>
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs text-gray-400 font-medium">內容：待明日顯示</span>
+                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-white text-[#c96a7b] border border-pink-200 font-semibold shrink-0">🔒 明日解鎖</span>
+                </div>
+            </div>
+        `).join('');
+
+        unlockedHtml = progressBadgeHtml + revealedCardsHtml + pendingCardsHtml;
+    }
+
+    const nextUnlockedSig = `${friend.id}_${remainDays}_${friend.igUnlocked ? 1 : 0}_${unlockedHtml}`;
+    if (nextUnlockedSig !== lastRenderedUnlockedSignature) {
+        lastRenderedUnlockedSignature = nextUnlockedSig;
+        unlockedBox.innerHTML = unlockedHtml || `
+            <div class="text-center py-6 text-gray-400">
+                對方目前尚未開啟其他進階資料欄位，<br>先從聊天室打聲招呼吧！
+            </div>
+        `;
+    }
 
     const isChatBanned = Boolean(appState.isChatBanned);
     const pendingChoice = isEveningConfessionPending();
