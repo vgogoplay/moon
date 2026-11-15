@@ -263,6 +263,16 @@ function saveEditedCustomActivity(e) {
         autoMatchedDone: isFutureMatchReset ? false : Boolean(prevAct.autoMatchedDone)
     };
 
+    if (isFutureMatchReset && prevAct.matchTimeTs) {
+        const oldLockNodeKey = `${actId}_${Number(prevAct.matchTimeTs)}`;
+        try {
+            localStorage.removeItem(`yuelao_custom_act_lock_${oldLockNodeKey}`);
+        } catch (e) {}
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.deleteNode(`yuelao_custom_act_locks/${oldLockNodeKey}`);
+        }
+    }
+
     list[actIdx] = updatedAct;
     saveCustomActivities(list);
     CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${actId}`, updatedAct);
@@ -366,6 +376,15 @@ function deleteCustomActivity(activityId) {
         return;
     }
 
+    if (act.matchTimeTs) {
+        const oldLockNodeKey = `${activityId}_${Number(act.matchTimeTs)}`;
+        try {
+            localStorage.removeItem(`yuelao_custom_act_lock_${oldLockNodeKey}`);
+        } catch (e) {}
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.deleteNode(`yuelao_custom_act_locks/${oldLockNodeKey}`);
+        }
+    }
     const remaining = list.filter(a => String(a.id) !== String(activityId));
     saveCustomActivities(remaining);
     CloudSync.deleteNode(`${CUSTOM_ACTIVITIES_KEY}/${activityId}`);
@@ -391,8 +410,8 @@ function canPairInCustomActivity(A, B, activityId) {
            acceptsCandidateForCustomActivity(B, A, activityId);
 }
 
-function runCustomActivityMatch(activityId, isAuto = false) {
-    const res = executeCustomActivityMatchCore(activityId, { isAuto, markScheduledDone: isAuto });
+async function runCustomActivityMatch(activityId, isAuto = false) {
+    const res = await executeCustomActivityMatchCore(activityId, { isAuto, markScheduledDone: isAuto });
     if (!res || !res.executed) return;
 
     if (!isAuto) {

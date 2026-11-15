@@ -87,7 +87,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.multiselect-wrapper')) {
+            const hadOpenMenu = Array.from(document.querySelectorAll('.multiselect-menu'))
+                .some(m => !m.classList.contains('hidden'));
             document.querySelectorAll('.multiselect-menu').forEach(m => m.classList.add('hidden'));
+            if (hadOpenMenu && typeof flushPendingProfileFormRerender === 'function' && !hasUnsavedProfileDraft) {
+                flushPendingProfileFormRerender();
+            }
         }
     });
 
@@ -99,6 +104,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 function syncFromSharedStorage() {
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
     let stateChanged = false;
+    let formLockStateChanged = false;
 
     const sysCfgNow = Store.getSystemConfig();
     const prevSysCfg = (() => { try { return JSON.parse(lastControlsSnapshot || '{}'); } catch (e) { return {}; } })();
@@ -142,6 +148,7 @@ function syncFromSharedStorage() {
     }
 
     const quotaObjNow = Store.getGenderQuotaStatus();
+    const prevQuotaObj = (() => { try { return JSON.parse(lastGenderQuotaSnapshot || '{}'); } catch (e) { return {}; } })();
     const effectiveQuotaSnapshot = JSON.stringify({
         enabled: quotaObjNow.enabled,
         limit: quotaObjNow.limit,
@@ -151,11 +158,18 @@ function syncFromSharedStorage() {
         maleCount: quotaObjNow.enabled ? quotaObjNow.maleCount : 0,
         femaleCount: quotaObjNow.enabled ? quotaObjNow.femaleCount : 0
     });
-    let formLockStateChanged = false;
     if (effectiveQuotaSnapshot !== lastGenderQuotaSnapshot) {
+        const lockBooleansChanged = (
+            Boolean(prevQuotaObj.enabled) !== Boolean(quotaObjNow.enabled) ||
+            Boolean(prevQuotaObj.maleFull) !== Boolean(quotaObjNow.maleFull) ||
+            Boolean(prevQuotaObj.femaleFull) !== Boolean(quotaObjNow.femaleFull) ||
+            Boolean(prevQuotaObj.bothFull) !== Boolean(quotaObjNow.bothFull)
+        );
         lastGenderQuotaSnapshot = effectiveQuotaSnapshot;
         stateChanged = true;
-        formLockStateChanged = true;
+        if (lockBooleansChanged) {
+            formLockStateChanged = true;
+        }
     }
 
     let chatsChanged = false;
@@ -197,8 +211,9 @@ function syncFromSharedStorage() {
             return;
         }
 
-        // 若管理員於後台編輯了此玩家的個人資料，自動同步更新至前台（玩家正在編輯尚未保存草稿時不覆蓋）
-        const isEditingProfileNow = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft);
+        // 若管理員於後台編輯了此玩家的個人資料，自動同步更新至前台（玩家正在編輯或展開下拉選單時不覆蓋）
+        const isActivelyInteractingNow = (typeof isUserInteractingWithProfileForm === 'function' && isUserInteractingWithProfileForm());
+        const isEditingProfileNow = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft) || isActivelyInteractingNow;
         if (me && me.updatedAt && me.updatedAt !== appState.lastSyncedCloudUpdatedAt && !isEditingProfileNow) {
             appState.lastSyncedCloudUpdatedAt = me.updatedAt;
             const prevRegion = appState.profile.region || '';
@@ -407,10 +422,19 @@ function syncFromSharedStorage() {
             syncProfileDomToDraft();
         }
         const isEditingDraft = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft);
+        const isActivelyInteracting = (typeof isUserInteractingWithProfileForm === 'function' && isUserInteractingWithProfileForm());
         Store.save(appState, false, true);
         const profileTabEl = document.getElementById('tab-profile');
         const isOnProfileTab = profileTabEl && !profileTabEl.classList.contains('hidden');
-        if (!isOnProfileTab || formLockStateChanged || !isEditingDraft) {
+        if (!isOnProfileTab) {
+            renderProfileForm();
+        } else if (isActivelyInteracting) {
+            if (formLockStateChanged || !isEditingDraft) {
+                if (typeof pendingProfileFormRerender !== 'undefined') {
+                    pendingProfileFormRerender = true;
+                }
+            }
+        } else if (formLockStateChanged || !isEditingDraft) {
             renderProfileForm();
         }
         refreshAllUI();

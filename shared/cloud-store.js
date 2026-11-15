@@ -269,6 +269,18 @@ const CloudSync = {
         if (t['yuelao_test_event'] && typeof t['yuelao_test_event'] === 'object') {
             localStorage.setItem('yuelao_test_event', JSON.stringify(t['yuelao_test_event']));
         }
+
+        // 11. 第 2 種活動雲端單次執行鎖定同步（防止其他分頁或裝置重複觸發第二次配對）
+        if (t['yuelao_custom_act_locks'] && typeof t['yuelao_custom_act_locks'] === 'object') {
+            Object.keys(t['yuelao_custom_act_locks']).forEach(lockNodeKey => {
+                const lockObj = t['yuelao_custom_act_locks'][lockNodeKey];
+                if (lockObj && lockObj.claimedBy) {
+                    try {
+                        localStorage.setItem(`yuelao_custom_act_lock_${lockNodeKey}`, String(lockObj.claimedAt || Date.now()));
+                    } catch (e) {}
+                }
+            });
+        }
     },
 
     applyStreamPatch(path, data) {
@@ -537,6 +549,11 @@ const CloudSync = {
         try {
             localStorage.removeItem(PENDING_USERS_SYNC_KEY);
             localStorage.removeItem(DELETED_USERS_SYNC_KEY);
+            Object.keys(localStorage).forEach(k => {
+                if (k.startsWith('yuelao_custom_act_lock_')) {
+                    localStorage.removeItem(k);
+                }
+            });
         } catch (e) {}
         try {
             await fetch(`${this.dbUrl}/.json`, { method: 'DELETE' });

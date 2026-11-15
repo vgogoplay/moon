@@ -1,6 +1,34 @@
 /* frontend/profile.js - 前台個人資料表單、隱私控制與 5 碼專屬通行碼備份還原 */
 
 let hasUnsavedProfileDraft = false;
+let pendingProfileFormRerender = false;
+
+function isUserInteractingWithProfileForm() {
+    const profileTabEl = document.getElementById('tab-profile');
+    if (!profileTabEl || profileTabEl.classList.contains('hidden')) return false;
+    const dynamicBox = document.getElementById('dynamicProfileSections');
+    if (!dynamicBox) return false;
+
+    const hasOpenMultiSelect = Array.from(dynamicBox.querySelectorAll('.multiselect-menu'))
+        .some(m => !m.classList.contains('hidden'));
+    if (hasOpenMultiSelect) return true;
+
+    const activeEl = document.activeElement;
+    if (activeEl && dynamicBox.contains(activeEl)) {
+        const tag = String(activeEl.tagName || '').toUpperCase();
+        if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') {
+            return true;
+        }
+    }
+    return false;
+}
+
+function flushPendingProfileFormRerender() {
+    if (!pendingProfileFormRerender) return;
+    if (isUserInteractingWithProfileForm()) return;
+    pendingProfileFormRerender = false;
+    renderProfileForm();
+}
 
 function syncProfileDomToDraft() {
     const formEl = document.getElementById('profileForm');
@@ -631,6 +659,13 @@ if (profileFormEl) {
     };
     profileFormEl.addEventListener('input', handleDraftEdit);
     profileFormEl.addEventListener('change', handleDraftEdit);
+    profileFormEl.addEventListener('focusout', () => {
+        setTimeout(() => {
+            if (!hasUnsavedProfileDraft) {
+                flushPendingProfileFormRerender();
+            }
+        }, 120);
+    });
 }
 
 // 點保存

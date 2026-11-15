@@ -288,7 +288,15 @@ function sharedRecordCustomPairMatch(userA, userB, targetSession, nowTs, activit
     userB.matchedAt = nowTs;
 }
 
-function executeCustomActivityMatchCore(activityId, options = {}) {
+const CUSTOM_ACT_LOCK_PREFIX = 'yuelao_custom_act_lock_';
+const CUSTOM_ACT_CLOUD_LOCKS_NODE = 'yuelao_custom_act_locks';
+const customActivityAutoLockInFlight = new Set();
+
+function makeCustomActLockNodeKey(activityId, matchTs) {
+    return `${String(activityId || '').trim()}_${Number(matchTs || 0)}`;
+}
+
+async function executeCustomActivityMatchCore(activityId, options = {}) {
     const { isAuto = false, markScheduledDone = false } = options;
     let acts = [];
     try {
@@ -298,6 +306,16 @@ function executeCustomActivityMatchCore(activityId, options = {}) {
     }
     const act = Array.isArray(acts) ? acts.find(a => String(a.id) === String(activityId)) : null;
     if (!act) return { executed: false, pairCount: 0, unmatchedCount: 0 };
+
+    // 單次執行保護：若為到點自動配對且已標記完成，絕不重複執行第二次
+    if (isAuto && act.autoMatchedDone) {
+        return { executed: false, pairCount: 0, unmatchedCount: 0 };
+    }
+
+    if (markScheduledDone) {
+        act.autoMatchedDone = true;
+        localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(acts));
+    }
 
     const actType = act.activityType || 'classic';
     let users = [];
@@ -438,19 +456,29 @@ function executeCustomActivityMatchCore(activityId, options = {}) {
 
     localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(acts));
     if (typeof CloudSync !== 'undefined') {
-        CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, act);
+        await CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, act);
     }
 
     if (typeof appendLog === 'function') {
         appendLog(`<span class="text-pink-300">[${act.name} 結算完成]</span> 本次共配對成功 <strong>${pairCount} 對</strong>${unmatchedCount > 0 ? `（另有 ${unmatchedCount} 人因號碼／選項落單暫未配對）` : ''}。`);
     }
 
-    if (typeof saveUsers === 'function') {
-        saveUsers(users);
-    } else if (typeof Store !== 'undefined' && typeof Store.saveSharedUsers === 'function') {
-        Store.saveSharedUsers(users);
-    } else {
-        localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    // 僅更新本次配對成功的那幾位玩家資料，避免全庫整批重寫互相覆蓋
+    const matchedUsersToPush = [];
+    users.forEach(u => {
+        if (u && u.id) {
+            if (typeof generatePlayerBackupCode === 'function') {
+                u.backupCode = generatePlayerBackupCode(u, users);
+            }
+            if (pairedThisRunIds.has(String(u.id))) {
+                matchedUsersToPush.push(u);
+            }
+        }
+    });
+
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    if (matchedUsersToPush.length > 0 && typeof CloudSync !== 'undefined') {
+        await Promise.all(matchedUsersToPush.map(u => CloudSync.upsertUser(u, true)));
     }
 
     if (typeof renderAdminAll === 'function') {
@@ -458,6 +486,88 @@ function executeCustomActivityMatchCore(activityId, options = {}) {
     }
 
     return { executed: true, actName: act.name, pairCount, unmatchedCount };
+}
+
+async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, isFrontendCaller = false) {
+    const lockNodeKey = makeCustomActLockNodeKey(activityId, matchTs);
+    try {
+        // 前台稍微錯開 450~1250ms，讓同時在線的多支手機不會在同一毫秒搶寫
+        const jitterMs = isFrontendCaller ? (450 + Math.floor(Math.random() * 800)) : 0;
+        if (jitterMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, jitterMs));
+        }
+
+        if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl) {
+            const encodedActPath = CloudSync.encodePath(`${CUSTOM_ACTIVITIES_KEY}/${activityId}`);
+            const encodedLockPath = CloudSync.encodePath(`${CUSTOM_ACT_CLOUD_LOCKS_NODE}/${lockNodeKey}`);
+
+            const [actRes, lockRes] = await Promise.all([
+                fetch(`${CloudSync.dbUrl}/${encodedActPath}.json`, { method: 'GET', cache: 'no-store' }),
+                fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json`, { method: 'GET', cache: 'no-store' })
+            ]);
+
+            if (actRes.ok && lockRes.ok) {
+                const remoteAct = await actRes.json();
+                const remoteLock = await lockRes.json();
+
+                // 若雲端活動已關閉、已標記 autoMatchedDone，或已有其他裝置搶先寫入雲端鎖，立即停止不再執行第二次
+                if (!remoteAct || !remoteAct.isOpen || remoteAct.autoMatchedDone || (remoteLock && remoteLock.claimedBy)) {
+                    if (remoteAct && typeof remoteAct === 'object') {
+                        try {
+                            const localActs = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
+                            const idx = localActs.findIndex(a => String(a.id) === String(activityId));
+                            if (idx >= 0) {
+                                localActs[idx] = { ...localActs[idx], ...remoteAct };
+                                localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(localActs));
+                            }
+                        } catch (e) {}
+                    }
+                    if (typeof CloudSync.fetchFullTree === 'function') {
+                        await CloudSync.fetchFullTree();
+                    }
+                    if (typeof renderAdminAll === 'function') renderAdminAll();
+                    if (typeof refreshAllUI === 'function') refreshAllUI();
+                    return;
+                }
+
+                // 寫入雲端單次搶占鎖並二次驗證是否為唯一勝出者
+                const claimToken = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+                await CloudSync.putNode(`${CUSTOM_ACT_CLOUD_LOCKS_NODE}/${lockNodeKey}`, {
+                    activityId: String(activityId),
+                    matchTs: Number(matchTs),
+                    claimedBy: claimToken,
+                    claimedAt: Date.now()
+                });
+
+                await new Promise(resolve => setTimeout(resolve, 180));
+
+                const verifyRes = await fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json`, { method: 'GET', cache: 'no-store' });
+                if (verifyRes.ok) {
+                    const verifyLock = await verifyRes.json();
+                    if (!verifyLock || verifyLock.claimedBy !== claimToken) {
+                        if (typeof CloudSync.fetchFullTree === 'function') {
+                            await CloudSync.fetchFullTree();
+                        }
+                        if (typeof renderAdminAll === 'function') renderAdminAll();
+                        if (typeof refreshAllUI === 'function') refreshAllUI();
+                        return;
+                    }
+                }
+
+                // 確認取得唯一執行權後，先拉取最新完整玩家資料再進行配對
+                if (typeof CloudSync.fetchFullTree === 'function') {
+                    await CloudSync.fetchFullTree();
+                }
+            }
+        }
+
+        await executeCustomActivityMatchCore(activityId, { isAuto: true, markScheduledDone: true });
+    } catch (e) {
+        console.warn('claimAndRunScheduledCustomActivity 異常', e);
+        await executeCustomActivityMatchCore(activityId, { isAuto: true, markScheduledDone: true });
+    } finally {
+        customActivityAutoLockInFlight.delete(lockKey);
+    }
 }
 
 function checkScheduledCustomActivities(isFrontendCaller = false) {
@@ -480,11 +590,13 @@ function checkScheduledCustomActivities(isFrontendCaller = false) {
         const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
         if (!matchTs || nowTs < matchTs) return;
 
-        const lockKey = `yuelao_custom_act_lock_${act.id}_${matchTs}`;
-        if (localStorage.getItem(lockKey)) return;
-        localStorage.setItem(lockKey, String(nowTs));
+        const lockNodeKey = makeCustomActLockNodeKey(act.id, matchTs);
+        const lockKey = `${CUSTOM_ACT_LOCK_PREFIX}${lockNodeKey}`;
+        if (customActivityAutoLockInFlight.has(lockKey) || localStorage.getItem(lockKey)) return;
 
-        executeCustomActivityMatchCore(act.id, { isAuto: true, markScheduledDone: true });
+        customActivityAutoLockInFlight.add(lockKey);
+        localStorage.setItem(lockKey, String(nowTs));
+        claimAndRunScheduledCustomActivity(act.id, matchTs, lockKey, isFrontendCaller);
         triggeredAny = true;
     });
 
