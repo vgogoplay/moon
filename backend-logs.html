@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安全與登入日誌 🛡️ 月老神社後台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20261115">
+</head>
+<body data-admin-page="logs">
+    <div id="adminLayoutMount" class="space-y-6">
+        <!-- 登入失敗日誌清單 -->
+        <div class="card-jp rounded-2xl overflow-hidden border-2 border-rose-200">
+            <div class="p-5 border-b border-rose-200 flex flex-wrap items-center justify-between bg-rose-50/40 gap-3">
+                <div>
+                    <h2 class="text-lg font-bold font-serif-jp text-rose-800">🛡️ 後台登入失敗防護日誌</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">系統自動記錄嘗試登入後台但密碼錯誤的來源 IP 與裝置資訊，保留最近 10 筆紀錄</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="clearAdminLoginLogs()" class="text-xs px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-50 transition shadow-sm">
+                        🗑️ 清空所有紀錄
+                    </button>
+                    <button onclick="renderAdminAll()" class="text-xs px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
+                        ↻ 重新整理
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-x-auto p-3 bg-white">
+                <table class="admin-grid-table text-left text-xs md:text-sm">
+                    <thead>
+                        <tr class="text-xs">
+                            <th class="p-3.5">發生時間</th>
+                            <th class="p-3.5">嘗試登入帳號</th>
+                            <th class="p-3.5">來源 IP 位址</th>
+                            <th class="p-3.5">來源裝置與瀏覽器 (User Agent)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="loginLogsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 前後台共用核心層 -->
+    <script src="shared/schedule.js?v=20261116c"></script>
+    <script src="shared/schema.js?v=20261115l"></script>
+    <script src="shared/cloud-store.js?v=20261116e"></script>
+    <!-- 後台共用狀態與頁面模組 -->
+    <script src="backend/state.js?v=20261116a"></script>
+    <script src="backend/matching.js?v=20261116b"></script>
+    <script src="backend/logs.js?v=20261116a"></script>
+    <!-- 渲染左側選單與登入驗證 -->
+    <script src="backend/layout.js?v=20261116c"></script>
+</body>
+</html>

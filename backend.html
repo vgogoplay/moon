@@ -12,30 +12,33 @@
     <div id="adminLayoutMount" class="space-y-6">
         <!-- ==================== 各屆報名名單 & 禁止配對 / 禁止發話 / 解除配對 / 刪除資料 ==================== -->
         <div class="card-jp rounded-2xl overflow-hidden border-2 border-pink-200">
-            <div class="p-5 border-b border-pink-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                    <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">📋 玩家完整資料庫與管理操作</h2>
-                    <p class="text-xs text-gray-500">預設每頁顯示 5 位玩家（可切換 5 人、10 人、50 人或全部）；可依場次、性別男／性別女、專屬活動或帳號狀態篩選管理</p>
-                </div>
+            <div class="p-5 border-b border-pink-200 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                <h2 class="text-lg font-bold font-serif-jp text-[#8f4452] shrink-0 whitespace-nowrap">📋 玩家完整資料庫與管理操作</h2>
                 <div class="flex flex-wrap items-center gap-2.5 text-xs">
-                    <button onclick="openAddNewPlayerModal()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold hover:opacity-95 transition shadow-sm flex items-center gap-1">
+                    <button type="button" onclick="openAddNewPlayerModal()" class="h-[46px] px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold hover:opacity-95 transition shadow-sm inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
                         <span>➕</span><span>新增會員</span>
                     </button>
-                    <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2">
-                        <span class="font-bold text-[#8f4452]">每頁顯示：</span>
-                        <select id="rosterPageSizeSelect" onchange="onRosterPageSizeChange(this.value)" class="p-2 admin-input-box font-bold text-[#8f4452]">
+                    <button type="button" onclick="openInstantMatchModal()" class="h-[46px] px-4 rounded-2xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white font-bold hover:opacity-95 transition shadow-sm inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
+                        <span>⚡</span><span>新增配對</span>
+                    </button>
+                    <div class="admin-field-box h-[46px] !py-1.5 !px-3.5 inline-flex items-center gap-2 shrink-0">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">每頁顯示：</span>
+                        <select id="rosterPageSizeSelect" onchange="onRosterPageSizeChange(this.value)" class="h-8 px-2.5 admin-input-box font-bold text-[#8f4452]">
                             <option value="5" selected>5 人（預設）</option>
                             <option value="10">10 人</option>
                             <option value="50">50 人</option>
                             <option value="all">全部</option>
                         </select>
                     </div>
-                    <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2">
-                        <span class="font-bold text-[#8f4452]">篩選選項：</span>
-                        <select id="filterBatchRoster" onchange="onRosterFilterChange()" class="p-2 admin-input-box font-semibold text-[#8f4452]">
-                            <option value="all">顯示全部玩家</option>
+                    <div class="admin-field-box h-[46px] !py-1.5 !px-3.5 inline-flex items-center gap-2 shrink-0">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">篩選選項：</span>
+                        <select id="filterBatchRoster" onchange="onRosterFilterChange()" class="h-8 px-2.5 admin-input-box font-semibold text-[#8f4452]">
+                            <option value="" selected>請選擇</option>
+                            <option value="all">全部</option>
+                            <option value="gender:男">男生</option>
+                            <option value="gender:女">女生</option>
                         </select>
-                        <button onclick="renderAdminAll()" class="px-3 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-100 transition">
+                        <button type="button" onclick="renderAdminAll(true)" class="h-8 px-3 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-100 transition whitespace-nowrap">
                             ↻ 立即刷新名單
                         </button>
                     </div>
@@ -46,8 +49,7 @@
                     <thead>
                         <tr class="text-xs">
                             <th class="p-3.5">唯一玩家 ID</th>
-                            <th class="p-3.5">暱稱 / IG / 年齡</th>
-                            <th class="p-3.5">性別 / 星座 / MBTI / 身分 / 居住地</th>
+                            <th class="p-3.5">暱稱 / IG / 年齡 / 性別 / 居住地</th>
                             <th class="p-3.5">報名場次</th>
                             <th class="p-3.5">希望吻合條件</th>
                             <th class="p-3.5">配對與限制狀態</th>
@@ -151,13 +153,6 @@
             <div id="forceMatchRulesList" class="space-y-2 pt-2"></div>
         </div>
 
-        <!-- 配對執行日誌 -->
-        <div class="card-jp rounded-2xl p-5">
-            <h2 class="text-base font-bold font-serif-jp text-[#8f4452] mb-3">📜 20:00 自動配對演算法執行日誌</h2>
-            <div id="matchLogs" class="bg-[#2c2224] text-[#fbd5dc] p-4 rounded-xl h-52 overflow-y-auto font-mono text-xs leading-relaxed space-y-1.5">
-                <div class="text-pink-300/70">[系統就緒] 排程監聽中，每逢週三 / 週六 20:00 將自動進行配對...</div>
-            </div>
-        </div>
     </div>
 
     <!-- 玩家完整資料檢視 Modal -->
@@ -165,9 +160,45 @@
         <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-6 md:p-8 shadow-2xl border border-pink-100">
             <div class="flex justify-between items-center border-b border-pink-100 pb-3 mb-4">
                 <h3 class="text-lg font-bold font-serif-jp text-[#8f4452]" id="detailModalTitle">玩家完整檔案記錄</h3>
-                <button onclick="document.getElementById('playerDetailModal').classList.add('hidden')" class="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+                <button onclick="closePlayerDetailModal()" class="text-gray-400 hover:text-gray-700 text-xl">✕</button>
             </div>
             <div id="detailModalBody" class="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs text-gray-700"></div>
+        </div>
+    </div>
+
+    <!-- 🔐 管理員敏感操作密碼驗證 Modal（禁止配對 / 禁止發話 / 刪除資料） -->
+    <div id="adminActionPasswordModal" class="hidden fixed inset-0 bg-black/55 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border-2 border-rose-300 space-y-4">
+            <div class="flex items-center justify-between border-b border-rose-100 pb-2.5">
+                <div class="flex items-center gap-2">
+                    <span class="text-xl">🔐</span>
+                    <div>
+                        <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">管理員密碼驗證</h3>
+                        <p class="text-[11px] text-gray-500" id="adminActionPwdSubtitle">請輸入後台管理員密碼以繼續操作</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeAdminActionPasswordModal()" class="text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
+            </div>
+
+            <form onsubmit="submitAdminActionPassword(event)" class="space-y-3">
+                <div class="admin-field-box !border-rose-200">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">後台管理員密碼 <span class="text-rose-500">*</span></label>
+                    <input type="password" id="adminActionPwdInput" placeholder="請輸入管理員密碼" class="w-full p-2.5 admin-input-box text-sm" required>
+                </div>
+
+                <div id="adminActionPwdError" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-700 font-bold text-center">
+                    🚫 管理員密碼錯誤，無法執行此操作！
+                </div>
+
+                <div class="flex justify-end gap-2 pt-1">
+                    <button type="button" onclick="closeAdminActionPasswordModal()" class="px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-5 py-2 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition">
+                        🔓 確認驗證
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -231,15 +262,53 @@
         </div>
     </div>
 
+    <!-- ⚡ 管理員專屬：即時手動配對 Modal -->
+    <div id="instantMatchModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl border-2 border-emerald-200 space-y-5">
+            <div class="flex items-start justify-between gap-2 border-b border-emerald-100 pb-3">
+                <div>
+                    <h3 class="text-lg md:text-xl font-bold font-serif-jp text-emerald-800">⚡ 管理員專屬：即時手動配對（立即生效）</h3>
+                    <p class="text-xs text-gray-500 mt-1">輸入雙方 ID 並執行後，兩位玩家將立刻成為配對好友並開啟專屬聊天室，不受 20:00 排程限制。</p>
+                </div>
+                <button type="button" onclick="closeInstantMatchModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0">✕</button>
+            </div>
+
+            <form id="adminInstantMatchForm" onsubmit="triggerInstantManualMatch(event)" class="space-y-4">
+                <div class="admin-field-box !bg-emerald-50/30 !border-emerald-200 space-y-1.5">
+                    <label class="block text-xs font-bold text-emerald-800">玩家 A 的 ID <span class="text-rose-500">*</span></label>
+                    <input type="text" id="instantMatchIdA" oninput="updateInstantMatchPreview()" placeholder="例如：10001" class="w-full p-2.5 admin-input-box text-sm font-mono" required>
+                    <p id="instantMatchPreviewA" class="text-[11px] text-gray-500 min-h-[16px]"></p>
+                </div>
+
+                <div class="admin-field-box !bg-emerald-50/30 !border-emerald-200 space-y-1.5">
+                    <label class="block text-xs font-bold text-emerald-800">玩家 B 的 ID <span class="text-rose-500">*</span></label>
+                    <input type="text" id="instantMatchIdB" oninput="updateInstantMatchPreview()" placeholder="例如：20001" class="w-full p-2.5 admin-input-box text-sm font-mono" required>
+                    <p id="instantMatchPreviewB" class="text-[11px] text-gray-500 min-h-[16px]"></p>
+                </div>
+
+                <div id="instantMatchPairStatusHint" class="hidden p-2.5 rounded-xl text-xs font-semibold"></div>
+
+                <div class="flex flex-wrap justify-end gap-2.5 pt-2 border-t border-emerald-100">
+                    <button type="button" onclick="closeInstantMatchModal()" class="px-5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs md:text-sm font-bold shadow-md hover:opacity-95 transition">
+                        ⚡ 立即強制配對成好友
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261116a"></script>
+    <script src="shared/schedule.js?v=20261116c"></script>
     <script src="shared/schema.js?v=20261115l"></script>
-    <script src="shared/cloud-store.js?v=20261115y"></script>
+    <script src="shared/cloud-store.js?v=20261116e"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261115h"></script>
-    <script src="backend/matching.js?v=20261115k"></script>
-    <script src="backend/roster.js?v=20261115m"></script>
+    <script src="backend/state.js?v=20261116a"></script>
+    <script src="backend/matching.js?v=20261116b"></script>
+    <script src="backend/roster.js?v=20261116a"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261115"></script>
+    <script src="backend/layout.js?v=20261116c"></script>
 </body>
 </html>

@@ -12,8 +12,39 @@ const BAN_FIELD_NAMES = {
 let lastUsersSnapshot = '';
 let lastReportsSnapshot = '';
 let lastSystemSnapshot = '';
+let lastChatsAdminSnapshot = '';
+let lastOverviewRenderSig = '';
 let rosterPageSize = '5';
 let currentRosterPage = 1;
+
+// ==================== ⚡ 後台記憶體快取（減少重複 JSON.parse 負擔） ====================
+const AdminMemoryCache = {
+    usersRaw: null,
+    users: null,
+    reportsRaw: null,
+    reports: null,
+    systemRaw: null,
+    system: null,
+    mailboxRaw: null,
+    mailbox: null,
+    bannedRulesRaw: null,
+    bannedRules: null,
+    forceRulesRaw: null,
+    forceRules: null,
+    chatsRaw: null,
+    chats: null,
+    regHistoryRaw: null,
+    regHistory: null,
+    invalidate(key) {
+        if (!key) {
+            this.usersRaw = this.reportsRaw = this.systemRaw = this.mailboxRaw = this.bannedRulesRaw = this.forceRulesRaw = this.chatsRaw = this.regHistoryRaw = null;
+            this.users = this.reports = this.system = this.mailbox = this.bannedRules = this.forceRules = this.chats = this.regHistory = null;
+            return;
+        }
+        this[key + 'Raw'] = null;
+        this[key] = null;
+    }
+};
 
 function onRosterPageSizeChange(newSize) {
     const val = ['5', '10', '50', 'all'].includes(String(newSize)) ? String(newSize) : '5';
@@ -64,7 +95,19 @@ let lastRenderedBatchNumber = calcAutoBatchNumber(new Date());
 
 function getSystemConfig() {
     const autoBatch = calcAutoBatchNumber(new Date());
-    const sys = JSON.parse(localStorage.getItem(SYSTEM_STATE_KEY) || '{}');
+    const raw = localStorage.getItem(SYSTEM_STATE_KEY) || '{}';
+    let sys;
+    if (raw === AdminMemoryCache.systemRaw && AdminMemoryCache.system) {
+        sys = AdminMemoryCache.system;
+    } else {
+        try {
+            sys = JSON.parse(raw);
+        } catch (e) {
+            sys = {};
+        }
+        AdminMemoryCache.systemRaw = raw;
+        AdminMemoryCache.system = sys;
+    }
     const batchOffset = Number(sys.batchOffset || 0);
     const effectiveBatch = Math.max(1, autoBatch + batchOffset);
     return {
@@ -81,7 +124,10 @@ function getSystemConfig() {
 function setSystemConfig(patch) {
     const current = getSystemConfig();
     const updated = { ...current, ...patch };
-    localStorage.setItem(SYSTEM_STATE_KEY, JSON.stringify(updated));
+    const serialized = JSON.stringify(updated);
+    AdminMemoryCache.systemRaw = serialized;
+    AdminMemoryCache.system = updated;
+    localStorage.setItem(SYSTEM_STATE_KEY, serialized);
     CloudSync.putNode(SYSTEM_STATE_KEY, updated);
     return updated;
 }
@@ -189,9 +235,22 @@ async function copyPlayerBackupCode(playerId) {
 }
 
 function getUsers() {
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const raw = localStorage.getItem(USERS_KEY) || '[]';
+    if (raw === AdminMemoryCache.usersRaw && Array.isArray(AdminMemoryCache.users)) {
+        return AdminMemoryCache.users;
+    }
+
+    let users;
+    try {
+        users = JSON.parse(raw);
+        if (!Array.isArray(users)) users = [];
+    } catch (e) {
+        users = [];
+    }
+
     let migrated = false;
     users.forEach(u => {
+        if (!u || typeof u !== 'object') return;
         if (Array.isArray(u.registeredSessions)) {
             const norm = Array.from(new Set(u.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
             if (JSON.stringify(norm) !== JSON.stringify(u.registeredSessions)) {
@@ -234,10 +293,16 @@ function getUsers() {
         }
     });
     if (migrated) {
-        localStorage.setItem(USERS_KEY, JSON.stringify(users));
+        const nextRaw = JSON.stringify(users);
+        AdminMemoryCache.usersRaw = nextRaw;
+        AdminMemoryCache.users = users;
+        localStorage.setItem(USERS_KEY, nextRaw);
         if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
             CloudSync.syncUsersArray(users);
         }
+    } else {
+        AdminMemoryCache.usersRaw = raw;
+        AdminMemoryCache.users = users;
     }
     return users;
 }
@@ -250,18 +315,72 @@ function saveUsers(users) {
             }
         });
     }
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    const nextRaw = JSON.stringify(users);
+    AdminMemoryCache.usersRaw = nextRaw;
+    AdminMemoryCache.users = users;
+    localStorage.setItem(USERS_KEY, nextRaw);
     CloudSync.syncUsersArray(users);
-    renderAdminAll();
+    renderAdminAll(true);
 }
 
 function getMailbox() {
-    return JSON.parse(localStorage.getItem(MAILBOX_KEY) || '[]');
+    const raw = localStorage.getItem(MAILBOX_KEY) || '[]';
+    if (raw === AdminMemoryCache.mailboxRaw && Array.isArray(AdminMemoryCache.mailbox)) {
+        return AdminMemoryCache.mailbox;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) parsed = [];
+    } catch (e) {
+        parsed = [];
+    }
+    AdminMemoryCache.mailboxRaw = raw;
+    AdminMemoryCache.mailbox = parsed;
+    return parsed;
 }
 
 function saveMailbox(mails) {
-    localStorage.setItem(MAILBOX_KEY, JSON.stringify(mails));
-    renderAdminAll();
+    const nextRaw = JSON.stringify(mails);
+    AdminMemoryCache.mailboxRaw = nextRaw;
+    AdminMemoryCache.mailbox = mails;
+    localStorage.setItem(MAILBOX_KEY, nextRaw);
+    renderAdminAll(true);
+}
+
+function getAdminChatsMap() {
+    const raw = localStorage.getItem(CHATS_KEY) || '{}';
+    if (raw === AdminMemoryCache.chatsRaw && AdminMemoryCache.chats && typeof AdminMemoryCache.chats === 'object') {
+        return AdminMemoryCache.chats;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) parsed = {};
+    } catch (e) {
+        parsed = {};
+    }
+    AdminMemoryCache.chatsRaw = raw;
+    AdminMemoryCache.chats = parsed;
+    return parsed;
+}
+
+function getActivityRegHistory() {
+    const keyName = (typeof REG_HISTORY_KEY !== 'undefined') ? REG_HISTORY_KEY : 'yuelao_activity_reg_history';
+    const raw = localStorage.getItem(keyName) || '{}';
+    if (raw === AdminMemoryCache.regHistoryRaw && AdminMemoryCache.regHistory && typeof AdminMemoryCache.regHistory === 'object') {
+        return AdminMemoryCache.regHistory;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) parsed = {};
+    } catch (e) {
+        parsed = {};
+    }
+    AdminMemoryCache.regHistoryRaw = raw;
+    AdminMemoryCache.regHistory = parsed;
+    return parsed;
 }
 
 function sendAdminMailboxMessage() {
@@ -309,39 +428,81 @@ function getBannedRules() {
     const raw = localStorage.getItem(BANNED_RULES_KEY);
     if (!raw) {
         const initial = [{ id: 'BR_DEFAULT_1', field: 'ig', keyword: 'gak' }];
-        localStorage.setItem(BANNED_RULES_KEY, JSON.stringify(initial));
+        const initRaw = JSON.stringify(initial);
+        AdminMemoryCache.bannedRulesRaw = initRaw;
+        AdminMemoryCache.bannedRules = initial;
+        localStorage.setItem(BANNED_RULES_KEY, initRaw);
         return initial;
     }
-    return JSON.parse(raw);
+    if (raw === AdminMemoryCache.bannedRulesRaw && Array.isArray(AdminMemoryCache.bannedRules)) {
+        return AdminMemoryCache.bannedRules;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) parsed = [];
+    } catch (e) {
+        parsed = [];
+    }
+    AdminMemoryCache.bannedRulesRaw = raw;
+    AdminMemoryCache.bannedRules = parsed;
+    return parsed;
 }
 
 function saveBannedRules(rules) {
-    localStorage.setItem(BANNED_RULES_KEY, JSON.stringify(rules));
+    const nextRaw = JSON.stringify(rules);
+    AdminMemoryCache.bannedRulesRaw = nextRaw;
+    AdminMemoryCache.bannedRules = rules;
+    localStorage.setItem(BANNED_RULES_KEY, nextRaw);
     CloudSync.putNode(BANNED_RULES_KEY, rules);
-    renderAdminAll();
+    renderAdminAll(true);
 }
 
 function getForceRules() {
-    return JSON.parse(localStorage.getItem(FORCE_KEY) || '[]');
+    const raw = localStorage.getItem(FORCE_KEY) || '[]';
+    if (raw === AdminMemoryCache.forceRulesRaw && Array.isArray(AdminMemoryCache.forceRules)) {
+        return AdminMemoryCache.forceRules;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) parsed = [];
+    } catch (e) {
+        parsed = [];
+    }
+    AdminMemoryCache.forceRulesRaw = raw;
+    AdminMemoryCache.forceRules = parsed;
+    return parsed;
 }
 
 function saveForceRules(rules) {
-    localStorage.setItem(FORCE_KEY, JSON.stringify(rules));
+    const nextRaw = JSON.stringify(rules);
+    AdminMemoryCache.forceRulesRaw = nextRaw;
+    AdminMemoryCache.forceRules = rules;
+    localStorage.setItem(FORCE_KEY, nextRaw);
     CloudSync.putNode(FORCE_KEY, rules);
-    renderAdminAll();
+    renderAdminAll(true);
 }
 
 function getReports() {
-    return JSON.parse(localStorage.getItem(REPORTS_KEY) || '[]');
+    const raw = localStorage.getItem(REPORTS_KEY) || '[]';
+    if (raw === AdminMemoryCache.reportsRaw && Array.isArray(AdminMemoryCache.reports)) {
+        return AdminMemoryCache.reports;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) parsed = [];
+    } catch (e) {
+        parsed = [];
+    }
+    AdminMemoryCache.reportsRaw = raw;
+    AdminMemoryCache.reports = parsed;
+    return parsed;
 }
 
 function appendLog(html) {
-    const box = document.getElementById('matchLogs');
-    if (!box) return;
-    const div = document.createElement('div');
-    div.innerHTML = html;
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
+    // 20:00 自動配對演算法執行日誌區塊已移除，保留空函式以相容其他模組的呼叫
 }
 
 function shuffle(arr) {
@@ -353,106 +514,6 @@ function shuffle(arr) {
     return copy;
 }
 
-let clearAllPasswordVerified = false;
-
-function clearAllAdminData() {
-    clearAllPasswordVerified = false;
-    const modal = document.getElementById('clearAllConfirmModal');
-    if (modal) {
-        const step1 = document.getElementById('clearAllStep1');
-        const step2 = document.getElementById('clearAllStep2');
-        const passInput = document.getElementById('clearAllAdminPassInput');
-        const errBox = document.getElementById('clearAllPassError');
-        if (step1) step1.classList.remove('hidden');
-        if (step2) step2.classList.add('hidden');
-        if (passInput) passInput.value = '';
-        if (errBox) errBox.classList.add('hidden');
-        modal.classList.remove('hidden');
-        if (passInput) setTimeout(() => passInput.focus(), 50);
-        return;
-    }
-
-    // 備援驗證流程（若無彈窗元素時）
-    const inputPwd = prompt('【第一關安全驗證】請輸入管理員密碼以清空全部資料：');
-    if (inputPwd === null) return;
-    if (inputPwd !== VALID_ADMIN_PASS) {
-        alert('🚫 管理員密碼錯誤，無法執行清空全部資料！');
-        return;
-    }
-    if (!confirm('⚠️【二次確定】密碼驗證通過！確定要永久清空所有玩家、秘密規則、信件與問題回報資料嗎？此動作無法復原！')) {
-        return;
-    }
-    executeClearAllAdminDataConfirmed(true);
-}
-
-function closeClearAllConfirmModal() {
-    clearAllPasswordVerified = false;
-    const modal = document.getElementById('clearAllConfirmModal');
-    if (modal) modal.classList.add('hidden');
-}
-
-function verifyClearAllPassword() {
-    const passInput = document.getElementById('clearAllAdminPassInput');
-    const errBox = document.getElementById('clearAllPassError');
-    const pwd = passInput ? passInput.value : '';
-
-    if (pwd !== VALID_ADMIN_PASS) {
-        clearAllPasswordVerified = false;
-        if (errBox) errBox.classList.remove('hidden');
-        if (passInput) {
-            passInput.value = '';
-            passInput.focus();
-        }
-        return;
-    }
-
-    clearAllPasswordVerified = true;
-    if (errBox) errBox.classList.add('hidden');
-    const step1 = document.getElementById('clearAllStep1');
-    const step2 = document.getElementById('clearAllStep2');
-    if (step1) step1.classList.add('hidden');
-    if (step2) step2.classList.remove('hidden');
-}
-
-function backToClearAllStep1() {
-    clearAllPasswordVerified = false;
-    const step1 = document.getElementById('clearAllStep1');
-    const step2 = document.getElementById('clearAllStep2');
-    const passInput = document.getElementById('clearAllAdminPassInput');
-    if (step2) step2.classList.add('hidden');
-    if (step1) step1.classList.remove('hidden');
-    if (passInput) {
-        passInput.value = '';
-        passInput.focus();
-    }
-}
-
-function executeClearAllAdminDataConfirmed(bypassModalFlag = false) {
-    if (!bypassModalFlag && !clearAllPasswordVerified) {
-        alert('🚫 尚未通過管理員密碼驗證！');
-        return;
-    }
-
-    localStorage.removeItem(USERS_KEY);
-    localStorage.removeItem(REPORTS_KEY);
-    localStorage.removeItem(FORCE_KEY);
-    localStorage.removeItem('yuelao_id_counters');
-    localStorage.removeItem(SYSTEM_STATE_KEY);
-    localStorage.removeItem(AUTO_RUN_LOG_KEY);
-    localStorage.removeItem(BANNED_RULES_KEY);
-    localStorage.removeItem(MAILBOX_KEY);
-    localStorage.removeItem(CHATS_KEY);
-    localStorage.removeItem(CUSTOM_ACTIVITIES_KEY);
-    CloudSync.clearAll();
-
-    closeClearAllConfirmModal();
-    const logsBox = document.getElementById('matchLogs');
-    if (logsBox) {
-        logsBox.innerHTML = '<div class="text-pink-300/70">[系統就緒] 已通過管理員密碼驗證並完成二次確定，全部資料已清空...</div>';
-    }
-    renderAdminAll();
-    alert('✅ 已通過密碼驗證並完成二次確定，全部資料已清空！');
-}
 
 const ADMIN_AUTH_KEY = 'yuelao_admin_auth';
 const VALID_ADMIN_USER = 'roy';
@@ -473,7 +534,7 @@ async function unlockAdminUI() {
     renderAdminAll();
 }
 
-function handleAdminLogin(e) {
+async function handleAdminLogin(e) {
     e.preventDefault();
     const acc = document.getElementById('adminLoginAccount').value.trim();
     const pwd = document.getElementById('adminLoginPassword').value;
@@ -487,6 +548,45 @@ function handleAdminLogin(e) {
         errBox.classList.remove('hidden');
         document.getElementById('adminLoginPassword').value = '';
         document.getElementById('adminLoginPassword').focus();
+
+        // 記錄登入失敗日誌（包含嘗試取得當前 IP）
+        try {
+            let ip = 'Unknown IP';
+            try {
+                const res = await fetch('https://api.ipify.org?format=json');
+                if (res.ok) {
+                    const data = await res.json();
+                    ip = data.ip || 'Unknown IP';
+                }
+            } catch (err) {
+                console.warn('Failed to fetch IP', err);
+            }
+            
+            const logEntry = {
+                id: 'AL_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+                accountTried: acc,
+                ipAddress: ip,
+                userAgent: navigator.userAgent || 'Unknown Browser',
+                ts: Date.now(),
+                createdAt: new Date().toLocaleString('zh-TW')
+            };
+
+            const logs = JSON.parse(localStorage.getItem('yuelao_admin_login_logs') || '[]');
+            logs.unshift(logEntry);
+            // 只保留最近 10 筆失敗紀錄（同步清理雲端與本地超過 10 筆的舊紀錄）
+            const removedLogs = logs.length > 10 ? logs.slice(10) : [];
+            const keptLogs = logs.slice(0, 10);
+            localStorage.setItem('yuelao_admin_login_logs', JSON.stringify(keptLogs));
+            
+            if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+                CloudSync.putNode(`yuelao_admin_login_logs/${logEntry.id}`, logEntry);
+                removedLogs.forEach(oldItem => {
+                    if (oldItem && oldItem.id) {
+                        CloudSync.deleteNode(`yuelao_admin_login_logs/${oldItem.id}`);
+                    }
+                });
+            }
+        } catch (logErr) {}
     }
 }
 
@@ -513,16 +613,17 @@ function pollSharedStorageChanges() {
     const curUsers = localStorage.getItem(USERS_KEY) || '';
     const curReports = localStorage.getItem(REPORTS_KEY) || '';
     const curSys = localStorage.getItem(SYSTEM_STATE_KEY) || '';
+    const curChats = localStorage.getItem(CHATS_KEY) || '';
     const curBatch = getCurrentBatch();
-    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curBatch !== lastRenderedBatchNumber) {
-        renderAdminAll();
+    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
+        renderAdminAll(false);
     }
 }
 
 window.addEventListener('storage', (e) => {
     if (!isAdminAuthenticated()) return;
-    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY].includes(e.key)) {
-        renderAdminAll();
+    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, CHATS_KEY, REG_HISTORY_KEY, 'yuelao_admin_login_logs'].includes(e.key)) {
+        renderAdminAll(false);
     }
 });
 
@@ -540,10 +641,11 @@ setInterval(() => {
 // 由 backend/layout.js 渲染側邊欄骨架後自動檢查登入狀態
 
 
-function renderAdminSharedOverview() {
+function renderAdminSharedOverview(forceUpdate = false) {
     lastUsersSnapshot = localStorage.getItem(USERS_KEY) || '';
     lastReportsSnapshot = localStorage.getItem(REPORTS_KEY) || '';
     lastSystemSnapshot = localStorage.getItem(SYSTEM_STATE_KEY) || '';
+    lastChatsAdminSnapshot = localStorage.getItem(CHATS_KEY) || '';
 
     const sysCfg = getSystemConfig();
     const batch = sysCfg.currentBatch;
@@ -551,9 +653,23 @@ function renderAdminSharedOverview() {
     const currentSched = getBatchScheduleInfo(batch);
     const users = getUsers();
     const reports = getReports();
+    const chatsMap = getAdminChatsMap();
     const customActsList = (typeof getCustomActivities === 'function')
         ? getCustomActivities()
         : JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
+
+    const regCount = users.filter(u => (Array.isArray(u.registeredSessions) && u.registeredSessions.length > 0) || (u.customActivityRegs && Object.keys(u.customActivityRegs).length > 0)).length;
+    const totalHistoryLinks = users.reduce((acc, u) => acc + (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0 ? u.matchedHistory.length : (u.matchedWithId ? 1 : 0)), 0);
+    const matchedPairs = Math.floor(totalHistoryLinks / 2);
+    const openCustomActs = customActsList.filter(a => Boolean(a && a.isOpen)).length;
+    const pendingReps = reports.filter(r => r && r.status === '待處理').length;
+    const activeChatRooms = Object.keys(chatsMap).filter(k => Array.isArray(chatsMap[k]) && chatsMap[k].length > 0).length;
+
+    const overviewSig = `${currentSched.batchPrefix}|${users.length}|${regCount}|${matchedPairs}|${reports.length}|${customActsList.length}|${openCustomActs}|${pendingReps}|${activeChatRooms}`;
+    if (!forceUpdate && overviewSig === lastOverviewRenderSig) {
+        return;
+    }
+    lastOverviewRenderSig = overviewSig;
 
     const batchBadge = document.getElementById('adminCurrentBatchBadge');
     if (batchBadge) {
@@ -564,15 +680,10 @@ function renderAdminSharedOverview() {
     if (statTotalEl) statTotalEl.textContent = `${users.length} 人`;
 
     const statRegEl = document.getElementById('statRegistered');
-    if (statRegEl) {
-        statRegEl.textContent = `${users.filter(u => (Array.isArray(u.registeredSessions) && u.registeredSessions.length > 0) || (u.customActivityRegs && Object.keys(u.customActivityRegs).length > 0)).length} 人`;
-    }
+    if (statRegEl) statRegEl.textContent = `${regCount} 人`;
 
     const statMatchedEl = document.getElementById('statMatched');
-    if (statMatchedEl) {
-        const totalHistoryLinks = users.reduce((acc, u) => acc + (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0 ? u.matchedHistory.length : (u.matchedWithId ? 1 : 0)), 0);
-        statMatchedEl.textContent = `${Math.floor(totalHistoryLinks / 2)} 對`;
-    }
+    if (statMatchedEl) statMatchedEl.textContent = `${matchedPairs} 對`;
 
     const statRepEl = document.getElementById('statReports');
     if (statRepEl) statRepEl.textContent = `${reports.length} 則`;
@@ -580,18 +691,26 @@ function renderAdminSharedOverview() {
     // Update Sidebar badges
     const customBadge = document.getElementById('sidebarCustomActBadge');
     if (customBadge) {
-        const openCount = customActsList.filter(a => Boolean(a && a.isOpen)).length;
         if (customActsList.length > 0) {
-            customBadge.textContent = openCount > 0 ? `${openCount} 開啟` : `${customActsList.length}`;
+            customBadge.textContent = openCustomActs > 0 ? `${openCustomActs} 開啟` : `${customActsList.length}`;
             customBadge.classList.remove('hidden');
         } else {
             customBadge.classList.add('hidden');
         }
     }
 
+    const chatBadge = document.getElementById('sidebarChatRoomsBadge');
+    if (chatBadge) {
+        if (activeChatRooms > 0) {
+            chatBadge.textContent = `${activeChatRooms}`;
+            chatBadge.classList.remove('hidden');
+        } else {
+            chatBadge.classList.add('hidden');
+        }
+    }
+
     const repBadge = document.getElementById('sidebarPendingReportsBadge');
     if (repBadge) {
-        const pendingReps = reports.filter(r => r && r.status === '待處理').length;
         if (pendingReps > 0) {
             repBadge.textContent = `${pendingReps}`;
             repBadge.classList.remove('hidden');
@@ -601,9 +720,9 @@ function renderAdminSharedOverview() {
     }
 }
 
-function renderAdminAll() {
+function renderAdminAll(forceUpdate = false) {
     if (typeof renderAdminSharedOverview === 'function') {
-        renderAdminSharedOverview();
+        renderAdminSharedOverview(forceUpdate);
     }
 
     const sysCfg = getSystemConfig();
@@ -618,15 +737,28 @@ function renderAdminAll() {
             if (m) maxUserBatch = Math.max(maxUserBatch, parseInt(m[1], 10));
         });
     });
+    const regHistMap = getActivityRegHistory();
+    Object.values(regHistMap).forEach(rec => {
+        if (rec && rec.kind === 'regular' && rec.session) {
+            const m = String(rec.session).match(/^第\s*(\d+)\s*屆/);
+            if (m) maxUserBatch = Math.max(maxUserBatch, parseInt(m[1], 10));
+        }
+    });
     const maxDisplayBatch = Math.max(4, batch + 2, maxUserBatch);
 
     if (typeof renderMemberPageSection === 'function') {
-        renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayBatch);
+        renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayBatch, forceUpdate);
     }
     if (typeof renderActivitiesPageSection === 'function') {
         renderActivitiesPageSection(users, batch, maxDisplayBatch);
     }
+    if (typeof renderChatsPageSection === 'function') {
+        renderChatsPageSection(users, forceUpdate);
+    }
     if (typeof renderOpsPageSection === 'function') {
         renderOpsPageSection(batch, currentSched, maxDisplayBatch);
+    }
+    if (typeof renderLogsPageSection === 'function') {
+        renderLogsPageSection();
     }
 }

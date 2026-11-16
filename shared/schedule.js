@@ -489,6 +489,7 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     const unmatchedCount = Math.max(0, eligiblePool.length - pairedThisRunIds.size);
     act.matchCount = Number(act.matchCount || 0) + pairCount;
     act.lastMatchedAt = new Date().toLocaleString('zh-TW');
+    act.lastMatchedTs = nowTs;
     if (markScheduledDone) {
         act.autoMatchedDone = true;
     }
@@ -640,4 +641,173 @@ function checkScheduledCustomActivities(isFrontendCaller = false) {
     });
 
     return triggeredAny;
+}
+
+
+// ==================== ⏱️ 活動結束後 3 分鐘自動清除「報名場次」選項（不影響會員已配對紀錄） ====================
+const POST_ACTIVITY_REG_CLEAR_DELAY_MS = 3 * 60 * 1000;
+let lastRegCleanupCheckTs = 0;
+
+function getRegularSessionEndTs(sessionStr) {
+    const norm = normalizeSessionLabel(sessionStr);
+    if (!norm) return 0;
+    const batchMatch = norm.match(/^第\s*(\d+)\s*屆/);
+    if (!batchMatch) return 0;
+    const b = Math.max(1, parseInt(batchMatch[1], 10));
+    const info = getBatchScheduleInfo(b);
+    let targetDate = null;
+    if (/(三|星期三|週三)/.test(norm)) {
+        targetDate = new Date(info.wed);
+    } else if (/(六|星期六|週六)/.test(norm)) {
+        targetDate = new Date(info.sat);
+    } else {
+        targetDate = new Date(info.sat);
+    }
+    targetDate.setHours(20, 0, 0, 0);
+    return targetDate.getTime();
+}
+
+function getCustomActivityClearRegsTs(act) {
+    if (!act || typeof act !== 'object') return 0;
+    const endTs = parseLocalDateTimeTs(act.endTime || act.endTimeTs);
+    const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+    const lastMatchedTs = Number(act.lastMatchedTs || 0);
+    const effectiveEndTs = (matchTs > 0 || endTs > 0)
+        ? Math.max(matchTs, endTs)
+        : (lastMatchedTs > 0 ? lastMatchedTs : 0);
+    if (!effectiveEndTs) return 0;
+    return effectiveEndTs + POST_ACTIVITY_REG_CLEAR_DELAY_MS;
+}
+
+function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = Date.now()) {
+    if (typeof USERS_KEY === 'undefined') return false;
+    if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return false;
+    if (nowTs - lastRegCleanupCheckTs < 1500) return false;
+    lastRegCleanupCheckTs = nowTs;
+
+    let users = [];
+    try {
+        users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    } catch (e) {
+        return false;
+    }
+    if (!Array.isArray(users) || users.length === 0) return false;
+
+    let customActs = [];
+    try {
+        customActs = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
+    } catch (e) {
+        customActs = [];
+    }
+
+    const expiredCustomActMap = new Map();
+    (Array.isArray(customActs) ? customActs : []).forEach(act => {
+        if (!act || !act.id) return;
+        const clearTs = getCustomActivityClearRegsTs(act);
+        if (clearTs > 0 && nowTs >= clearTs) {
+            expiredCustomActMap.set(String(act.id), { name: act.name || String(act.id), clearTs });
+        }
+    });
+
+    const currentPlayerId = (isFrontendCaller && typeof appState !== 'undefined' && appState && appState.playerId)
+        ? String(appState.playerId).trim()
+        : '';
+
+    const changedUsers = [];
+    const clearedRegularSummary = new Map();
+    const clearedCustomSummary = new Map();
+
+    users.forEach(u => {
+        if (!u || !u.id) return;
+        const uid = String(u.id).trim();
+        let userModified = false;
+
+        // 1. 檢查常規場次（例如：第2屆11/21(六) 於 20:00 結束後，等到 20:03 自動清除選項）
+        const prevSessions = Array.isArray(u.registeredSessions)
+            ? u.registeredSessions
+            : (u.registeredSession ? [u.registeredSession] : []);
+        if (prevSessions.length > 0) {
+            const keptSessions = [];
+            prevSessions.forEach(s => {
+                const endTs = getRegularSessionEndTs(s);
+                const clearTs = endTs > 0 ? (endTs + POST_ACTIVITY_REG_CLEAR_DELAY_MS) : 0;
+                // 前台僅在輪到自己帳號，或已超過緩衝 10 秒仍未清除時協助清理，避免多台手機同時搶寫
+                const canCleanThis = !isFrontendCaller || uid === currentPlayerId || nowTs >= (clearTs + 10000);
+                if (clearTs > 0 && nowTs >= clearTs && canCleanThis) {
+                    const label = normalizeSessionLabel(s) || String(s);
+                    if (typeof ActivityRegArchive !== 'undefined') {
+                        ActivityRegArchive.recordRegular(u, label, true);
+                    }
+                    clearedRegularSummary.set(label, (clearedRegularSummary.get(label) || 0) + 1);
+                    userModified = true;
+                } else {
+                    keptSessions.push(s);
+                }
+            });
+
+            if (userModified) {
+                u.registeredSessions = keptSessions;
+                delete u.registeredSession;
+                if (keptSessions.length === 0) {
+                    u.exactMatchCriteria = {};
+                }
+            }
+        }
+
+        // 2. 檢查第 2 種自定義活動（活動結束後經過 3 分鐘自動清除報名選項）
+        if (u.customActivityRegs && typeof u.customActivityRegs === 'object' && !Array.isArray(u.customActivityRegs)) {
+            Object.keys(u.customActivityRegs).forEach(actId => {
+                const info = expiredCustomActMap.get(String(actId));
+                if (!info) return;
+                const canCleanThis = !isFrontendCaller || uid === currentPlayerId || nowTs >= (info.clearTs + 10000);
+                if (canCleanThis) {
+                    if (typeof ActivityRegArchive !== 'undefined') {
+                        ActivityRegArchive.recordCustom(u, actId, u.customActivityRegs[actId], true);
+                    }
+                    delete u.customActivityRegs[actId];
+                    clearedCustomSummary.set(info.name, (clearedCustomSummary.get(info.name) || 0) + 1);
+                    userModified = true;
+                }
+            });
+        }
+
+        if (userModified) {
+            changedUsers.push(u);
+        }
+    });
+
+    if (changedUsers.length === 0) return false;
+
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+
+    if (isFrontendCaller && currentPlayerId && typeof appState !== 'undefined' && appState) {
+        const me = users.find(u => String(u.id).trim() === currentPlayerId);
+        if (me) {
+            delete appState.registeredSession;
+            appState.registeredSessions = Array.isArray(me.registeredSessions) ? [...me.registeredSessions] : [];
+            appState.exactMatchCriteria = (me.exactMatchCriteria && typeof me.exactMatchCriteria === 'object') ? { ...me.exactMatchCriteria } : {};
+            appState.customActivityRegs = (me.customActivityRegs && typeof me.customActivityRegs === 'object') ? { ...me.customActivityRegs } : {};
+        }
+    }
+
+    if (typeof CloudSync !== 'undefined') {
+        changedUsers.forEach(u => {
+            CloudSync.upsertUser(u, true);
+        });
+    }
+
+    if (!isFrontendCaller && typeof appendLog === 'function') {
+        clearedRegularSummary.forEach((cnt, label) => {
+            appendLog(`<span class="text-sky-300">[自動清除報名選項]</span> 場次「<strong>${label}</strong>」結束已滿 3 分鐘，已自動清除 <strong>${cnt} 位</strong>玩家的報名場次選項（不影響已配對好友）。`);
+        });
+        clearedCustomSummary.forEach((cnt, actName) => {
+            appendLog(`<span class="text-sky-300">[自動清除活動報名]</span> 自定義活動「<strong>${actName}</strong>」結束已滿 3 分鐘，已自動清除 <strong>${cnt} 位</strong>玩家的報名選項（不影響已配對好友）。`);
+        });
+    }
+
+    if (!isFrontendCaller && typeof renderAdminAll === 'function') {
+        renderAdminAll();
+    }
+
+    return true;
 }

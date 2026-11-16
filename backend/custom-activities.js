@@ -1,6 +1,33 @@
 /* backend/custom-activities.js - 後台第 2 種自定義活動（新增、編輯、配對與清除已報名名單） */
 
 // ==================== 🎪 第 2 種活動（自定義活動）管理與 3 種配對引擎 ====================
+const expandedCustomActivityCards = new Set();
+
+function toggleCustomActivityCardExpand(activityId) {
+    const key = String(activityId || '').trim();
+    if (!key) return;
+    if (expandedCustomActivityCards.has(key)) {
+        expandedCustomActivityCards.delete(key);
+    } else {
+        expandedCustomActivityCards.add(key);
+    }
+    renderAdminAll();
+}
+
+function openCreateCustomActivityModal() {
+    const modal = document.getElementById('createCustomActivityModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        const nameInput = document.getElementById('newCustomActivityName');
+        if (nameInput) setTimeout(() => nameInput.focus(), 50);
+    }
+}
+
+function closeCreateCustomActivityModal() {
+    const modal = document.getElementById('createCustomActivityModal');
+    if (modal) modal.classList.add('hidden');
+}
+
 function onCustomActivityTypeChange(typeVal) {
     const twoChoiceWrap = document.getElementById('newCustomTwoChoiceWrap');
     const descWrap = document.getElementById('newCustomDescWrap');
@@ -127,6 +154,7 @@ function createCustomActivity() {
         createdAt: new Date().toLocaleString('zh-TW')
     };
 
+    expandedCustomActivityCards.add(String(newAct.id));
     list.push(newAct);
     saveCustomActivities(list);
     CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${newAct.id}`, newAct);
@@ -137,6 +165,7 @@ function createCustomActivity() {
     if (startInput) startInput.value = '';
     if (endInput) endInput.value = '';
     if (matchInput) matchInput.value = '';
+    closeCreateCustomActivityModal();
 
     const schedSummary = formatCustomActivityTimeSummary(newAct);
     const timeNote = schedSummary.hasSchedule
@@ -327,6 +356,9 @@ async function clearCustomActivityRegistrations(activityId) {
     localStorage.setItem(USERS_KEY, JSON.stringify(users));
     renderAdminAll();
 
+    if (typeof ActivityRegArchive !== 'undefined') {
+        affectedUsers.forEach(u => ActivityRegArchive.removeCustom(act.id, u.id));
+    }
     if (typeof CloudSync !== 'undefined') {
         for (const u of affectedUsers) {
             await CloudSync.upsertUser(u, true);
@@ -359,6 +391,9 @@ async function clearSinglePlayerCustomActivityReg(activityId, playerId) {
     localStorage.setItem(USERS_KEY, JSON.stringify(users));
     renderAdminAll();
 
+    if (typeof ActivityRegArchive !== 'undefined') {
+        ActivityRegArchive.removeCustom(act.id, target.id);
+    }
     if (typeof CloudSync !== 'undefined') {
         await CloudSync.upsertUser(target, true);
         await CloudSync.deleteNode(`${USERS_KEY}/${target.id}/customActivityRegs/${act.id}`);
@@ -384,6 +419,9 @@ function deleteCustomActivity(activityId) {
         if (typeof CloudSync !== 'undefined') {
             CloudSync.deleteNode(`yuelao_custom_act_locks/${oldLockNodeKey}`);
         }
+    }
+    if (typeof ActivityRegArchive !== 'undefined') {
+        ActivityRegArchive.removeAllForCustomActivity(activityId);
     }
     const remaining = list.filter(a => String(a.id) !== String(activityId));
     saveCustomActivities(remaining);
@@ -432,9 +470,10 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
     const customActsAdminBox = document.getElementById('customActivitiesAdminList');
     if (customActsAdminBox) {
         if (customActsList.length === 0) {
-            customActsAdminBox.innerHTML = `<p class="text-xs text-gray-400">尚未創建任何第 2 種自定義活動（可在上方輸入「a活動」並點擊新增活動）。</p>`;
+            customActsAdminBox.innerHTML = `<p class="text-xs text-gray-400">尚未創建任何第 2 種自定義活動（可點擊右上角「➕ 新增活動」建立）。</p>`;
         } else {
             customActsAdminBox.innerHTML = customActsList.map(act => {
+                const isExpanded = expandedCustomActivityCards.has(String(act.id));
                 const actType = act.activityType || 'classic';
                 const typeBadgeHtml = actType === 'fortune_number'
                     ? `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">🎋 第2類：月老籤詩 1~5 號（男女配對）</span>`
@@ -478,22 +517,18 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                     `;
                 }
 
-                return `
-                    <div class="p-4 rounded-2xl bg-white border-2 ${act.isOpen ? 'border-emerald-300 shadow-sm' : 'border-pink-200'} flex flex-col lg:flex-row lg:items-stretch justify-between gap-3">
-                        <div class="space-y-2 min-w-0 flex-1 p-3 rounded-xl bg-pink-50/30 border border-pink-200">
+                const expandedBodyHtml = isExpanded ? `
+                    <div class="p-4 pt-3 border-t border-pink-100 bg-pink-50/20 flex flex-col lg:flex-row lg:items-stretch justify-between gap-3">
+                        <div class="space-y-2 min-w-0 flex-1 p-3 rounded-xl bg-white border border-pink-200">
                             <div class="flex flex-wrap items-center gap-2">
-                                <span class="text-xs px-2.5 py-0.5 rounded-full font-bold ${act.isOpen ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600 border border-gray-300'}">
-                                    ${act.isOpen ? '🟢 開啟中（前台顯示第2活動）' : '⚪ 已關閉（前台隱藏）'}
-                                </span>
                                 ${typeBadgeHtml}
-                                <h3 class="text-sm font-bold text-[#8f4452]">🎪 ${act.name}</h3>
-                                <span class="text-[11px] px-2 py-0.5 rounded-full bg-white border border-pink-300 text-[#c96a7b] font-semibold">
+                                <span class="text-[11px] px-2 py-0.5 rounded-full bg-pink-50 border border-pink-200 text-[#c96a7b] font-semibold">
                                     累計配對 ${act.matchCount || 0} 對
                                 </span>
                             </div>
                             ${scheduleBadgeHtml}
-                            ${act.description ? `<p class="text-xs text-gray-600 bg-white px-2.5 py-1 rounded-lg border border-pink-100">${act.description}</p>` : ''}
-                            <div class="text-xs text-gray-600 flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-white border border-pink-200">
+                            ${act.description ? `<p class="text-xs text-gray-600 bg-pink-50/40 px-2.5 py-1.5 rounded-lg border border-pink-100">${act.description}</p>` : ''}
+                            <div class="text-xs text-gray-600 flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-pink-50/25 border border-pink-100">
                                 <span class="font-bold text-[#5e464a]">已報名（${regUsers.length} 人）：</span>
                                 ${regSummary}
                             </div>
@@ -515,6 +550,23 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                                 🗑️ 刪除
                             </button>
                         </div>
+                    </div>
+                ` : '';
+
+                return `
+                    <div class="rounded-2xl bg-white border ${act.isOpen ? 'border-emerald-300' : 'border-pink-200'} overflow-hidden transition shadow-2xs">
+                        <button type="button" onclick="toggleCustomActivityCardExpand('${act.id}')" class="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-amber-50/35 transition">
+                            <div class="flex flex-wrap items-center gap-2 min-w-0">
+                                <span class="text-[11px] px-2.5 py-0.5 rounded-full font-bold ${act.isOpen ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600 border border-gray-300'}">
+                                    ${act.isOpen ? '🟢 開啟中' : '⚪ 已關閉'}
+                                </span>
+                                <span class="text-xs md:text-sm font-bold text-[#8f4452] truncate">🎪 ${act.name}</span>
+                            </div>
+                            <span class="text-xs font-semibold text-[#c96a7b] shrink-0">
+                                ${isExpanded ? '▴ 收合管理' : '▾ 點開管理活動'}
+                            </span>
+                        </button>
+                        ${expandedBodyHtml}
                     </div>
                 `;
             }).join('');

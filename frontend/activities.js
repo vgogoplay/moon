@@ -234,12 +234,16 @@ function formatCriteriaDisplayList(criteria) {
 }
 
 async function cancelRegularRegistration() {
+    const prevCancelledSessions = Array.isArray(appState.registeredSessions) ? [...appState.registeredSessions] : [];
     document.querySelectorAll('input[name="regSessionCheck"]').forEach(cb => {
         cb.checked = false;
     });
     delete appState.registeredSession;
     appState.registeredSessions = [];
     appState.exactMatchCriteria = {};
+    if (appState.playerId && typeof ActivityRegArchive !== 'undefined') {
+        prevCancelledSessions.forEach(s => ActivityRegArchive.removeRegular(s, appState.playerId));
+    }
 
     closeRegisterModal();
     refreshAllUI();
@@ -270,10 +274,19 @@ async function confirmRegistration() {
         }
     });
 
+    const prevRegisteredList = Array.isArray(appState.registeredSessions) ? [...appState.registeredSessions] : [];
     const finalCriteria = selectedSessions.length === 0 ? {} : criteria;
     delete appState.registeredSession;
     appState.registeredSessions = selectedSessions;
     appState.exactMatchCriteria = finalCriteria;
+    if (appState.playerId && typeof ActivityRegArchive !== 'undefined') {
+        prevRegisteredList.forEach(oldS => {
+            const stillSelected = selectedSessions.some(ns => isSameSession(ns, oldS));
+            if (!stillSelected) {
+                ActivityRegArchive.removeRegular(oldS, appState.playerId);
+            }
+        });
+    }
 
     closeRegisterModal();
     refreshAllUI();
@@ -739,6 +752,9 @@ async function cancelCustomActivityRegistration() {
     refreshAllUI();
 
     await Store.save(appState, true);
+    if (appState.playerId && actId && typeof ActivityRegArchive !== 'undefined') {
+        ActivityRegArchive.removeCustom(actId, appState.playerId);
+    }
     if (appState.playerId && actId && typeof CloudSync !== 'undefined') {
         await CloudSync.deleteNode(`${USERS_KEY}/${appState.playerId}/customActivityRegs/${actId}`);
     }

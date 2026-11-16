@@ -8,6 +8,7 @@ let lastCustomActivitiesSnapshot = localStorage.getItem(CUSTOM_ACTIVITIES_KEY) |
 let lastCustomActivityPhaseSnapshot = '';
 let lastGenderQuotaSnapshot = JSON.stringify(Store.getGenderQuotaStatus());
 let lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
+let lastReportsFrontendSnapshot = localStorage.getItem(REPORTS_KEY) || '[]';
 let lastUsersStatsSnapshot = '';
 let lastActiveBatch = getCurrentBatchNumber();
 let lastRenderedChatSignature = '';
@@ -57,9 +58,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         await CloudSync.init(() => {
             syncFromSharedStorage();
             updateMailboxBadge();
+    const currentReportsRaw = localStorage.getItem(REPORTS_KEY) || '[]';
+    if (currentReportsRaw !== lastReportsFrontendSnapshot) {
+        lastReportsFrontendSnapshot = currentReportsRaw;
+        if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
+        const repModal = document.getElementById('reportModal');
+        if (repModal && !repModal.classList.contains('hidden') && typeof renderMyIssueReportsList === 'function') {
+            if (typeof markMyReportRepliesAsRead === 'function') markMyReportRepliesAsRead();
+            renderMyIssueReportsList();
+        }
+    }
+            if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
             if (!document.getElementById('mailboxModal').classList.contains('hidden') &&
                 !document.getElementById('mailboxListView').classList.contains('hidden')) {
                 renderMailboxList();
+            }
+            const repModal = document.getElementById('reportModal');
+            if (repModal && !repModal.classList.contains('hidden') && typeof renderMyIssueReportsList === 'function') {
+                if (typeof markMyReportRepliesAsRead === 'function') markMyReportRepliesAsRead();
+                renderMyIssueReportsList();
             }
         });
         appState = Store.load();
@@ -68,6 +85,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderProfileForm();
     refreshAllUI();
     updateMailboxBadge();
+    if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
 
     setInterval(() => {
         updateNextMatchCountdown();
@@ -76,12 +94,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateNextMatchCountdown();
 
     window.addEventListener('storage', (e) => {
-        if ([USERS_KEY, SYSTEM_STATE_KEY, CUSTOM_ACTIVITIES_KEY, BANNED_RULES_KEY, MAILBOX_KEY, CHATS_KEY, 'yuelao_test_event'].includes(e.key)) {
+        if ([USERS_KEY, SYSTEM_STATE_KEY, CUSTOM_ACTIVITIES_KEY, BANNED_RULES_KEY, MAILBOX_KEY, REPORTS_KEY, CHATS_KEY, 'yuelao_test_event'].includes(e.key)) {
             syncFromSharedStorage();
             updateMailboxBadge();
+            if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
             if (!document.getElementById('mailboxModal').classList.contains('hidden') &&
                 !document.getElementById('mailboxListView').classList.contains('hidden')) {
                 renderMailboxList();
+            }
+            const repModal = document.getElementById('reportModal');
+            if (repModal && !repModal.classList.contains('hidden') && typeof renderMyIssueReportsList === 'function') {
+                if (typeof markMyReportRepliesAsRead === 'function') markMyReportRepliesAsRead();
+                renderMyIssueReportsList();
             }
         }
     });
@@ -125,6 +149,14 @@ function syncFromSharedStorage() {
     if (typeof checkScheduledCustomActivities === 'function') {
         const autoMatchedNow = checkScheduledCustomActivities(true);
         if (autoMatchedNow) {
+            users.splice(0, users.length, ...JSON.parse(localStorage.getItem(USERS_KEY) || '[]'));
+            stateChanged = true;
+        }
+    }
+
+    if (typeof cleanupExpiredActivityRegistrations === 'function') {
+        const regCleanedNow = cleanupExpiredActivityRegistrations(true);
+        if (regCleanedNow) {
             users.splice(0, users.length, ...JSON.parse(localStorage.getItem(USERS_KEY) || '[]'));
             stateChanged = true;
         }

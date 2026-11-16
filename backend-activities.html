@@ -15,7 +15,7 @@
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
                     <h2 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">📊 某屆 / 自定義活動：報名人數 & 成功配對人數統計</h2>
-                    <p class="text-xs text-gray-500">選擇指定屆數、單一場次或第 2 種自定義活動，即時查看該活動的報名人數、男女分布與成功配對人數</p>
+                    <p class="text-xs text-gray-500">選擇指定屆數、單一場次或第 2 種自定義活動，即時查看該活動的報名人數、男女分布與成功配對人數（活動結束 3 分鐘自動清除會員報名欄位後，此處統計人數仍永久保留紀錄）</p>
                 </div>
                 <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2 text-xs">
                     <span class="font-bold text-[#8f4452]">統計對象：</span>
@@ -32,7 +32,7 @@
                 <div class="p-4 rounded-2xl bg-pink-50/55 border border-pink-200/80">
                     <p class="text-xs text-gray-500 font-medium">該活動報名人數</p>
                     <p class="text-2xl font-bold text-[#c96a7b] mt-1" id="selActStatRegCount">0 人</p>
-                    <p class="text-[11px] text-gray-500 mt-1" id="selActStatRegGender">男 0 人 ／ 女 0 人</p>
+                    <p class="text-[11px] text-gray-500 mt-1" id="selActStatRegGender">請先選擇統計對象</p>
                 </div>
                 <div class="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/80">
                     <p class="text-xs text-gray-500 font-medium">成功配對人數</p>
@@ -76,18 +76,36 @@
         </div>
 
         <!-- ==================== 🎪 第 2 種活動管理：後台自定義專屬活動 ==================== -->
-        <div class="card-jp rounded-2xl p-6 border-2 border-amber-200 bg-gradient-to-r from-amber-50/50 via-white to-pink-50/50 space-y-4">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+        <div class="card-jp rounded-2xl p-5 md:p-6 border-2 border-amber-200 bg-gradient-to-r from-amber-50/40 via-white to-pink-50/40 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                    <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">🎪 第 2 種活動管理：後台自定義專屬活動（獨立報名與一鍵配對）</h2>
+                    <h2 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">🎪 第 2 種活動管理：後台自定義專屬活動</h2>
                     <p class="text-xs text-gray-600 mt-0.5">
-                        新增活動並設為<strong>「開啟狀態」</strong>後，前台首頁才會顯示第 2 個報名按鈕（關閉則前台不顯示）；與週三／週六自動配對完全獨立，玩家報名後可直接點擊下方配對按鈕依條件自動配對。
+                        與週三／週六常規配對完全獨立；點擊活動名稱可展開管理設定，點擊右上角按鈕可新增專屬活動。
                     </p>
                 </div>
+                <button type="button" onclick="openCreateCustomActivityModal()" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-white text-xs md:text-sm font-bold hover:opacity-95 transition shadow shrink-0 flex items-center justify-center gap-1.5">
+                    <span>➕</span><span>新增活動</span>
+                </button>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-stretch bg-white/95 p-4 rounded-2xl border-2 border-amber-200">
-                <div class="md:col-span-3 admin-field-box">
+            <div id="customActivitiesAdminList" class="space-y-2.5"></div>
+        </div>
+    </div>
+
+    <!-- ➕ 新增自定義活動 Modal -->
+    <div id="createCustomActivityModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 md:p-8 shadow-2xl border-2 border-amber-200 space-y-5">
+            <div class="flex items-center justify-between border-b border-pink-100 pb-3 sticky top-0 bg-white/95 z-10">
+                <div>
+                    <h3 class="text-lg md:text-xl font-bold font-serif-jp text-[#8f4452]">➕ 新增第 2 種自定義專屬活動</h3>
+                    <p class="text-xs text-gray-500">填寫活動類型、名稱與時間設定後建立專屬活動</p>
+                </div>
+                <button type="button" onclick="closeCreateCustomActivityModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="admin-field-box">
                     <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 活動類型 <span class="text-rose-500">*</span></label>
                     <select id="newCustomActivityType" onchange="onCustomActivityTypeChange(this.value)" class="w-full p-2.5 admin-input-box text-xs font-bold text-[#8f4452]">
                         <option value="classic">1. 原本機制報名（吻合條件）</option>
@@ -95,48 +113,47 @@
                         <option value="two_choice">3. 二選一活動（手動輸入文字・僅限男女配對）</option>
                     </select>
                 </div>
-                <div class="md:col-span-3 admin-field-box">
+                <div class="admin-field-box">
                     <label class="block text-xs font-bold text-[#8f4452] mb-1.5">2. 活動名稱 <span class="text-rose-500">*</span></label>
                     <input type="text" id="newCustomActivityName" placeholder="例如：月老籤詩 / 默契大考驗" class="w-full p-2.5 admin-input-box text-xs font-semibold">
                 </div>
-                <div id="newCustomTwoChoiceWrap" class="hidden md:col-span-4 admin-field-box !border-amber-300 !bg-amber-50/40">
+                <div id="newCustomTwoChoiceWrap" class="hidden md:col-span-2 admin-field-box !border-amber-300 !bg-amber-50/40">
                     <label class="block text-xs font-bold text-amber-800 mb-1.5">3. 二選一文字（以 / 分隔） <span class="text-rose-500">*</span></label>
                     <input type="text" id="newCustomTwoChoiceText" placeholder="例如：大海/森林" class="w-full p-2.5 admin-input-box text-xs font-bold text-[#8f4452]">
                 </div>
-                <div id="newCustomDescWrap" class="md:col-span-4 admin-field-box">
+                <div id="newCustomDescWrap" class="md:col-span-2 admin-field-box">
                     <label class="block text-xs font-bold text-[#8f4452] mb-1.5">3. 簡介（選填）</label>
                     <input type="text" id="newCustomActivityDesc" placeholder="選填說明" class="w-full p-2.5 admin-input-box text-xs">
                 </div>
-                <div class="md:col-span-2 admin-field-box">
+                <div class="admin-field-box">
                     <label class="block text-xs font-bold text-[#8f4452] mb-1.5">4. 初始狀態</label>
                     <select id="newCustomActivityInitialOpen" class="w-full p-2.5 admin-input-box text-xs font-bold text-[#8f4452]">
                         <option value="true">🟢 立即開啟（前台顯示）</option>
                         <option value="false">⚪ 先關閉（前台隱藏）</option>
                     </select>
                 </div>
-
-                <!-- 第二列：開始時間、結束時間、配對時間與新增按鈕 -->
-                <div class="md:col-span-3 admin-field-box !bg-rose-50/35">
+                <div class="admin-field-box !bg-rose-50/35">
                     <label class="block text-xs font-bold text-[#8f4452] mb-1.5">5. 活動開始時間（選填）</label>
                     <input type="datetime-local" id="newCustomActStartTime" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
                 </div>
-                <div class="md:col-span-3 admin-field-box !bg-rose-50/35">
+                <div class="admin-field-box !bg-rose-50/35">
                     <label class="block text-xs font-bold text-[#8f4452] mb-1.5">6. 報名結束時間（截止前可報名）</label>
                     <input type="datetime-local" id="newCustomActEndTime" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
                 </div>
-                <div class="md:col-span-3 admin-field-box !bg-amber-50/45 !border-amber-300">
+                <div class="admin-field-box !bg-amber-50/45 !border-amber-300">
                     <label class="block text-xs font-bold text-amber-900 mb-1.5">7. 自動配對時間（到點自動配對）</label>
                     <input type="datetime-local" id="newCustomActMatchTime" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
                 </div>
-                <div class="md:col-span-3 admin-field-box flex flex-col justify-end">
-                    <label class="block text-[11px] font-semibold text-gray-500 mb-1.5">建立選項</label>
-                    <button type="button" onclick="createCustomActivity()" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-white text-xs font-bold hover:opacity-95 transition shadow">
-                        ➕ 新增活動
-                    </button>
-                </div>
             </div>
 
-            <div id="customActivitiesAdminList" class="space-y-3"></div>
+            <div class="sticky bottom-0 bg-white/95 pt-4 pb-1 border-t border-pink-100 flex flex-wrap justify-end gap-2.5">
+                <button type="button" onclick="closeCreateCustomActivityModal()" class="px-5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                    取消
+                </button>
+                <button type="button" onclick="createCustomActivity()" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-white text-xs md:text-sm font-bold shadow-md hover:opacity-95 transition">
+                    ➕ 確認新增活動
+                </button>
+            </div>
         </div>
     </div>
 
@@ -195,15 +212,15 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261116a"></script>
+    <script src="shared/schedule.js?v=20261116c"></script>
     <script src="shared/schema.js?v=20261115l"></script>
-    <script src="shared/cloud-store.js?v=20261115y"></script>
+    <script src="shared/cloud-store.js?v=20261116e"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261115h"></script>
-    <script src="backend/matching.js?v=20261115k"></script>
-    <script src="backend/activity-stats.js?v=20261115i"></script>
-    <script src="backend/custom-activities.js?v=20261115z"></script>
+    <script src="backend/state.js?v=20261116a"></script>
+    <script src="backend/matching.js?v=20261116b"></script>
+    <script src="backend/activity-stats.js?v=20261116a"></script>
+    <script src="backend/custom-activities.js?v=20261116b"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261115"></script>
+    <script src="backend/layout.js?v=20261116c"></script>
 </body>
 </html>

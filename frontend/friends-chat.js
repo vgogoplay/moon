@@ -94,12 +94,213 @@ function backToMailboxList() {
     renderMailboxList();
 }
 
-// ==================== 問題回報（僅後台可見） ====================
+// ==================== 問題回報（送出後可查看送出內容、處理狀態與管理員回覆） ====================
+const MY_REPORT_IDS_KEY = 'yuelao_my_report_ids';
+const READ_REPORT_REPLIES_KEY = 'yuelao_read_report_replies';
+
+function escapeReportHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getMyLocalReportIds() {
+    try {
+        const arr = JSON.parse(localStorage.getItem(MY_REPORT_IDS_KEY) || '[]');
+        return Array.isArray(arr) ? arr.map(String) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function rememberMyLocalReportId(repId) {
+    if (!repId) return;
+    const set = new Set(getMyLocalReportIds());
+    set.add(String(repId));
+    try {
+        localStorage.setItem(MY_REPORT_IDS_KEY, JSON.stringify(Array.from(set)));
+    } catch (e) {}
+}
+
+function getReadReportReplyKeys() {
+    try {
+        const arr = JSON.parse(localStorage.getItem(READ_REPORT_REPLIES_KEY) || '[]');
+        return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch (e) {
+        return new Set();
+    }
+}
+
+function makeReportReplyReceiptKey(rep) {
+    return `${rep.id}_${rep.repliedAt || rep.adminReply || ''}`;
+}
+
+function getPlayerSubmittedReports() {
+    const allReports = (typeof Store !== 'undefined' && typeof Store.getReports === 'function')
+        ? Store.getReports()
+        : JSON.parse(localStorage.getItem(REPORTS_KEY) || '[]');
+    const myIdSet = new Set(getMyLocalReportIds());
+    const pid = appState && appState.playerId ? String(appState.playerId).trim() : '';
+
+    return allReports
+        .filter(r => {
+            if (!r || !r.id) return false;
+            if (myIdSet.has(String(r.id))) return true;
+            if (pid) {
+                if (String(r.playerId || '').trim() === pid) return true;
+                if (String(r.contact || '').includes(`ID:${pid}`)) return true;
+            }
+            return false;
+        })
+        .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+}
+
+function updateReportReplyBadge() {
+    const badge = document.getElementById('reportReplyUnreadBadge');
+    if (!badge) return;
+    const myReps = getPlayerSubmittedReports();
+    const readSet = getReadReportReplyKeys();
+    const unreadReplies = myReps.filter(r => String(r.adminReply || '').trim() !== '' && !readSet.has(makeReportReplyReceiptKey(r))).length;
+
+    if (unreadReplies > 0) {
+        badge.textContent = unreadReplies > 99 ? '99+' : String(unreadReplies);
+        badge.classList.remove('hidden');
+    } else {
+        badge.classList.add('hidden');
+    }
+}
+
+function markMyReportRepliesAsRead() {
+    const myReps = getPlayerSubmittedReports();
+    const readSet = getReadReportReplyKeys();
+    let changed = false;
+    myReps.forEach(r => {
+        if (String(r.adminReply || '').trim() !== '') {
+            const k = makeReportReplyReceiptKey(r);
+            if (!readSet.has(k)) {
+                readSet.add(k);
+                changed = true;
+            }
+        }
+    });
+    if (changed) {
+        try {
+            localStorage.setItem(READ_REPORT_REPLIES_KEY, JSON.stringify(Array.from(readSet)));
+        } catch (e) {}
+    }
+    updateReportReplyBadge();
+}
+
+const expandedMyReportIds = new Set();
+
+function toggleMyIssueReportExpand(reportId) {
+    const key = String(reportId || '').trim();
+    if (!key) return;
+    if (expandedMyReportIds.has(key)) {
+        expandedMyReportIds.delete(key);
+    } else {
+        expandedMyReportIds.add(key);
+    }
+    renderMyIssueReportsList();
+}
+
+function renderMyIssueReportsList() {
+    const listEl = document.getElementById('myIssueReportsList');
+    const countBadge = document.getElementById('myReportsCountBadge');
+    if (!listEl) return;
+
+    const myReps = getPlayerSubmittedReports();
+    if (countBadge) countBadge.textContent = `${myReps.length} 筆`;
+
+    if (myReps.length === 0) {
+        listEl.innerHTML = `
+            <div class="text-center py-5 text-xs text-gray-400 bg-pink-50/35 rounded-2xl border border-dashed border-pink-200">
+                目前尚無問題回報紀錄 🌸<br>送出後可在此查看處理狀態與管理員回覆。
+            </div>
+        `;
+        return;
+    }
+
+    listEl.innerHTML = myReps.map(r => {
+        const repId = String(r.id);
+        const isExpanded = expandedMyReportIds.has(repId);
+        const isResolved = r.status === '已解決';
+        const replyText = String(r.adminReply || '').trim();
+        const titleText = String(r.title || r.category || '問題回報').trim();
+
+        const statusBadge = isResolved
+            ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold shrink-0">✅ 已解決</span>`
+            : `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold shrink-0">⏳ 待處理</span>`;
+
+        const repliedTag = replyText
+            ? `<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-[#8f4452] font-bold shrink-0">💬 已回覆</span>`
+            : '';
+
+        const replyBlockHtml = replyText
+            ? `
+                <div class="p-2.5 rounded-xl bg-gradient-to-r from-rose-50 to-pink-50 border border-pink-300 space-y-1">
+                    <div class="flex items-center justify-between gap-2 text-[11px]">
+                        <span class="font-bold text-[#8f4452]">💌 管理員回覆</span>
+                        <span class="text-[10px] text-gray-400">${escapeReportHtml(r.repliedAt || '')}</span>
+                    </div>
+                    <p class="text-xs text-[#6e3a43] leading-relaxed whitespace-pre-line">${escapeReportHtml(replyText)}</p>
+                </div>
+            `
+            : `
+                <div class="text-[11px] text-gray-400 bg-gray-50/80 px-2.5 py-1.5 rounded-lg border border-gray-100">
+                    💬 管理員尚未回覆（管理員回覆後將即時顯示於此）
+                </div>
+            `;
+
+        const detailBodyHtml = isExpanded ? `
+            <div class="px-3 pb-3 pt-2 border-t border-pink-100 bg-pink-50/15 space-y-2">
+                <div class="flex items-center justify-between text-[10px] text-gray-400">
+                    <span>單號：${escapeReportHtml(repId)}</span>
+                    <span>送出時間：${escapeReportHtml(r.createdAt || '')}</span>
+                </div>
+                <div class="p-2.5 rounded-xl bg-pink-50/45 border border-pink-100 text-xs text-gray-700 leading-relaxed whitespace-pre-line">
+                    <span class="text-[10px] font-bold text-[#c96a7b] block mb-0.5">我送出的內容：</span>${escapeReportHtml(r.content || '')}
+                </div>
+                ${replyBlockHtml}
+            </div>
+        ` : '';
+
+        return `
+            <div class="rounded-2xl bg-white border ${isExpanded ? 'border-[#c96a7b] shadow-2xs' : (replyText ? 'border-pink-300' : 'border-pink-100')} overflow-hidden transition">
+                <button type="button" onclick="toggleMyIssueReportExpand('${escapeReportHtml(repId)}')" class="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-pink-50/40 transition">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <span class="text-xs font-bold text-[#5e464a] truncate">${escapeReportHtml(titleText)}</span>
+                        ${repliedTag}
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        ${statusBadge}
+                        <span class="text-[11px] text-[#c96a7b] font-semibold">${isExpanded ? '▴' : '▾'}</span>
+                    </div>
+                </button>
+                ${detailBodyHtml}
+            </div>
+        `;
+    }).join('');
+}
+
+async function refreshMyIssueReports() {
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchFullTree === 'function') {
+        await CloudSync.fetchFullTree();
+    }
+    markMyReportRepliesAsRead();
+    renderMyIssueReportsList();
+}
+
 function openReportModal() {
     const contactInput = document.getElementById('reportContact');
-    if (!contactInput.value && (appState.playerId || appState.profile.nickname)) {
+    if (contactInput && !contactInput.value && (appState.playerId || appState.profile.nickname)) {
         contactInput.value = `ID:${appState.playerId || '未產生'} / ${appState.profile.nickname || ''}`;
     }
+    markMyReportRepliesAsRead();
+    renderMyIssueReportsList();
     document.getElementById('reportModal').classList.remove('hidden');
 }
 
@@ -114,10 +315,28 @@ document.getElementById('issueReportForm').addEventListener('submit', function(e
     const content = document.getElementById('reportContent').value.trim();
     if (!content) return;
 
-    Store.addIssueReport({ category, contact, content });
-    this.reset();
-    closeReportModal();
-    showMiniNotice('📮 問題回報已送出', '此內容僅後台管理員看得到，我們會盡快確認處理。');
+    const created = Store.addIssueReport({
+        playerId: appState.playerId || '',
+        category,
+        contact,
+        content
+    });
+    if (created && created.id) {
+        rememberMyLocalReportId(created.id);
+    }
+
+    const contentBox = document.getElementById('reportContent');
+    if (contentBox) contentBox.value = '';
+    if (!contact && (appState.playerId || appState.profile.nickname)) {
+        document.getElementById('reportContact').value = `ID:${appState.playerId || '未產生'} / ${appState.profile.nickname || ''}`;
+    }
+
+    renderMyIssueReportsList();
+    const listSec = document.getElementById('myIssueReportsSection');
+    if (listSec) {
+        listSec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    showMiniNotice('📮 問題回報已送出', '已送出至後台！您可直接在此視窗下方查看送出內容、處理狀態與管理員回覆。');
 });
 
 // ==================== 好友名單與對話（含禁止玩家發話：顯示「請聯繫管理員」） ====================
@@ -196,7 +415,7 @@ function removeMockTestFriend(friendId) {
 
 function selectFriend(friendId) {
     appState.activeFriendId = String(friendId);
-    shouldScrollChatToLatest = true;
+    resetChatVisibleBatch(true);
     Store.save(appState);
     renderFriendsSection();
 
@@ -245,6 +464,54 @@ function getProgressiveUnlockCounts(totalCount, remainDays, isIgUnlocked) {
         unlockedCount,
         lockedCount: Math.max(0, totalCount - unlockedCount)
     };
+}
+
+const CHAT_BATCH_STEP = 30;
+let chatVisibleBatchLimit = CHAT_BATCH_STEP;
+let activeChatWindowFriendKey = '';
+let lastObservedChatTotalCount = 0;
+let wasFriendsTabVisibleLastRender = false;
+let pendingPreserveScrollOnPrepend = false;
+let isAutoScrollingChatBottom = false;
+let lastChatPrependTriggerTs = 0;
+
+function resetChatVisibleBatch(scrollBottom = true) {
+    chatVisibleBatchLimit = CHAT_BATCH_STEP;
+    pendingPreserveScrollOnPrepend = false;
+    lastRenderedChatSignature = '';
+    if (scrollBottom) {
+        shouldScrollChatToLatest = true;
+    }
+}
+
+function loadMoreOlderChatMessages() {
+    const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
+    if (!friend || !Array.isArray(friend.messages)) return;
+    if (chatVisibleBatchLimit >= friend.messages.length) return;
+
+    chatVisibleBatchLimit = Math.min(friend.messages.length, chatVisibleBatchLimit + CHAT_BATCH_STEP);
+    pendingPreserveScrollOnPrepend = true;
+    renderActiveFriendWorkspace();
+}
+
+function ensureChatBoxScrollPagination(chatBox) {
+    if (!chatBox || chatBox.dataset.scrollPaginationBound === '1') return;
+    chatBox.dataset.scrollPaginationBound = '1';
+
+    chatBox.addEventListener('scroll', () => {
+        if (isAutoScrollingChatBottom || shouldScrollChatToLatest) return;
+        if (chatBox.scrollTop > 24) return;
+
+        const now = Date.now();
+        if (now - lastChatPrependTriggerTs < 200) return;
+
+        const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
+        if (!friend || !Array.isArray(friend.messages)) return;
+        if (chatVisibleBatchLimit >= friend.messages.length) return;
+
+        lastChatPrependTriggerTs = now;
+        loadMoreOlderChatMessages();
+    }, { passive: true });
 }
 
 function renderActiveFriendWorkspace() {
@@ -400,14 +667,69 @@ function renderActiveFriendWorkspace() {
     }
 
     const chatBox = document.getElementById('chatMessagesBox');
+    ensureChatBoxScrollPagination(chatBox);
     const friendsTabEl = document.getElementById('tab-friends');
     const isFriendsTabVisible = Boolean(friendsTabEl && !friendsTabEl.classList.contains('hidden'));
-    const currentSignature = `${appState.playerId || ''}_${friend.id}_${friend.messages.length}_${friend.messages[friend.messages.length - 1]?.id || friend.messages[friend.messages.length - 1]?.text || ''}`;
+
+    const currentFriendKey = `${appState.playerId || ''}_${friend.id}`;
+    const totalMsgCount = friend.messages.length;
+
+    if (currentFriendKey !== activeChatWindowFriendKey) {
+        activeChatWindowFriendKey = currentFriendKey;
+        chatVisibleBatchLimit = CHAT_BATCH_STEP;
+        lastObservedChatTotalCount = totalMsgCount;
+        shouldScrollChatToLatest = true;
+    } else if (isFriendsTabVisible && !wasFriendsTabVisibleLastRender) {
+        // 重新切回好友分頁時，恢復只顯示最新近 30 則訊息
+        chatVisibleBatchLimit = CHAT_BATCH_STEP;
+        lastObservedChatTotalCount = totalMsgCount;
+        shouldScrollChatToLatest = true;
+    } else if (totalMsgCount > lastObservedChatTotalCount && chatVisibleBatchLimit > CHAT_BATCH_STEP && !shouldScrollChatToLatest) {
+        // 正在往上瀏覽歷史訊息時若收到新訊息，保持上方閱讀位置不偏移
+        chatVisibleBatchLimit += (totalMsgCount - lastObservedChatTotalCount);
+    }
+    wasFriendsTabVisibleLastRender = isFriendsTabVisible;
+    lastObservedChatTotalCount = totalMsgCount;
+
+    const effectiveVisibleCount = Math.min(totalMsgCount, Math.max(CHAT_BATCH_STEP, chatVisibleBatchLimit));
+    const visibleMessages = effectiveVisibleCount < totalMsgCount
+        ? friend.messages.slice(-effectiveVisibleCount)
+        : friend.messages;
+    const remainingOlderCount = Math.max(0, totalMsgCount - visibleMessages.length);
+
+    const lastMsgObj = visibleMessages[visibleMessages.length - 1];
+    const firstMsgObj = visibleMessages[0];
+    const currentSignature = `${currentFriendKey}_${totalMsgCount}_${visibleMessages.length}_${firstMsgObj?.id || firstMsgObj?.ts || ''}_${lastMsgObj?.id || lastMsgObj?.text || ''}`;
 
     if (currentSignature !== lastRenderedChatSignature) {
         const prevScrollTop = chatBox.scrollTop;
+        const prevScrollHeight = chatBox.scrollHeight;
+        const isPrependingOlder = pendingPreserveScrollOnPrepend;
+        pendingPreserveScrollOnPrepend = false;
+
         lastRenderedChatSignature = currentSignature;
-        chatBox.innerHTML = friend.messages.map(m => {
+
+        let topStatusHtml = '';
+        if (remainingOlderCount > 0) {
+            const nextLoadCount = Math.min(CHAT_BATCH_STEP, remainingOlderCount);
+            topStatusHtml = `
+                <div class="text-center pb-1">
+                    <button type="button" onclick="loadMoreOlderChatMessages()" class="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-pink-200 text-[11px] text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-2xs">
+                        <span>⬆️ 往上滑動或點擊載入更早 ${nextLoadCount} 則（還有 ${remainingOlderCount} 則）</span>
+                    </button>
+                </div>
+            `;
+        } else if (totalMsgCount > CHAT_BATCH_STEP) {
+            topStatusHtml = `
+                <div class="text-center pb-1">
+                    <span class="inline-block px-3 py-0.5 rounded-full bg-pink-50/80 text-[10px] text-gray-400">
+                        🌸 已顯示全部 ${totalMsgCount} 則對話紀錄
+                    </span>
+                </div>
+            `;
+        }
+
+        const bubblesHtml = visibleMessages.map(m => {
             if (m.senderId === 'system' || m.sender === 'system') {
                 return `
                     <div class="text-center my-2">
@@ -431,13 +753,21 @@ function renderActiveFriendWorkspace() {
             `;
         }).join('');
 
+        chatBox.innerHTML = topStatusHtml + bubblesHtml;
+
         if (!shouldScrollChatToLatest) {
-            chatBox.scrollTop = prevScrollTop;
+            if (isPrependingOlder) {
+                const newScrollHeight = chatBox.scrollHeight;
+                chatBox.scrollTop = Math.max(28, prevScrollTop + (newScrollHeight - prevScrollHeight));
+            } else {
+                chatBox.scrollTop = prevScrollTop;
+            }
         }
     }
 
     if (isFriendsTabVisible && shouldScrollChatToLatest) {
         shouldScrollChatToLatest = false;
+        isAutoScrollingChatBottom = true;
         const scrollToLatest = () => {
             chatBox.scrollTop = chatBox.scrollHeight;
         };
@@ -445,7 +775,10 @@ function renderActiveFriendWorkspace() {
         if (typeof requestAnimationFrame === 'function') {
             requestAnimationFrame(scrollToLatest);
         }
-        setTimeout(scrollToLatest, 40);
+        setTimeout(() => {
+            scrollToLatest();
+            isAutoScrollingChatBottom = false;
+        }, 60);
     }
 }
 

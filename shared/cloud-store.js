@@ -9,6 +9,7 @@ const BANNED_RULES_KEY = 'yuelao_banned_rules';
 const MAILBOX_KEY = 'yuelao_mailbox';
 const CHATS_KEY = 'yuelao_chats';
 const CUSTOM_ACTIVITIES_KEY = 'yuelao_custom_activities';
+const REG_HISTORY_KEY = 'yuelao_activity_reg_history';
 const FORCE_KEY = 'yuelao_force_matches';
 const AUTO_RUN_LOG_KEY = 'yuelao_auto_matched_sessions';
 const FRONTEND_STORAGE_KEY = 'yuelao_romance_app_v2';
@@ -205,9 +206,16 @@ const CloudSync = {
             const threadRaw = raw[pairKey];
             const msgs = this.mapToArray(threadRaw);
             msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
-            result[pairKey] = msgs;
+            // 同步雲端回本地時，也強制裁切至最近 500 則
+            result[pairKey] = msgs.slice(-500);
         });
         return result;
+    },
+
+    writeLocalIfChanged(key, nextStr) {
+        if (localStorage.getItem(key) !== nextStr) {
+            localStorage.setItem(key, nextStr);
+        }
     },
 
     applyTreeToLocalStorage() {
@@ -255,66 +263,78 @@ const CloudSync = {
                 : {};
             return cleanUser;
         });
-        localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
+        this.writeLocalIfChanged(USERS_KEY, JSON.stringify(usersArr));
         usersArr.forEach(u => {
             if (u && u.id) {
                 this.lastPushedUsersJson[String(u.id)] = JSON.stringify(u);
             }
         });
 
+        // 1b. 活動歷史報名紀錄同步（確保活動結束 3 分鐘自動清除會員「報名場次」後，後台統計人數仍完整保留）
+        if (typeof ActivityRegArchive !== 'undefined') {
+            ActivityRegArchive.mergeCloudTreeAndUsers(t[REG_HISTORY_KEY], usersArr);
+        }
+
         // 2. 聊天紀錄
-        localStorage.setItem(CHATS_KEY, JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY])));
+        this.writeLocalIfChanged(CHATS_KEY, JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY])));
 
         // 3. 系統開關與期數設定
         if (t[SYSTEM_STATE_KEY] && typeof t[SYSTEM_STATE_KEY] === 'object') {
-            localStorage.setItem(SYSTEM_STATE_KEY, JSON.stringify(t[SYSTEM_STATE_KEY]));
-        } else {
+            this.writeLocalIfChanged(SYSTEM_STATE_KEY, JSON.stringify(t[SYSTEM_STATE_KEY]));
+        } else if (localStorage.getItem(SYSTEM_STATE_KEY) !== null) {
             localStorage.removeItem(SYSTEM_STATE_KEY);
         }
 
         // 4. 管理員信箱（依時間新到舊排序）
         const mailsArr = this.mapToArray(t[MAILBOX_KEY]);
         mailsArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
-        localStorage.setItem(MAILBOX_KEY, JSON.stringify(mailsArr));
+        this.writeLocalIfChanged(MAILBOX_KEY, JSON.stringify(mailsArr));
 
         // 5. 問題回報（依時間新到舊排序）
         const reportsArr = this.mapToArray(t[REPORTS_KEY]);
         reportsArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
-        localStorage.setItem(REPORTS_KEY, JSON.stringify(reportsArr));
+        this.writeLocalIfChanged(REPORTS_KEY, JSON.stringify(reportsArr));
 
         // 6. 禁止字眼規則
         if (t[BANNED_RULES_KEY] !== undefined) {
-            localStorage.setItem(BANNED_RULES_KEY, JSON.stringify(this.mapToArray(t[BANNED_RULES_KEY])));
+            this.writeLocalIfChanged(BANNED_RULES_KEY, JSON.stringify(this.mapToArray(t[BANNED_RULES_KEY])));
         }
 
         // 7. 後台秘密強制配對與自動執行紀錄
         if (t[FORCE_KEY] !== undefined) {
-            localStorage.setItem(FORCE_KEY, JSON.stringify(this.mapToArray(t[FORCE_KEY])));
+            this.writeLocalIfChanged(FORCE_KEY, JSON.stringify(this.mapToArray(t[FORCE_KEY])));
         }
         if (t[AUTO_RUN_LOG_KEY] && typeof t[AUTO_RUN_LOG_KEY] === 'object') {
-            localStorage.setItem(AUTO_RUN_LOG_KEY, JSON.stringify(t[AUTO_RUN_LOG_KEY]));
+            this.writeLocalIfChanged(AUTO_RUN_LOG_KEY, JSON.stringify(t[AUTO_RUN_LOG_KEY]));
         }
 
         // 8. ID 計數器
         if (t[ID_COUNTER_KEY] && typeof t[ID_COUNTER_KEY] === 'object') {
-            localStorage.setItem(ID_COUNTER_KEY, JSON.stringify(t[ID_COUNTER_KEY]));
+            this.writeLocalIfChanged(ID_COUNTER_KEY, JSON.stringify(t[ID_COUNTER_KEY]));
         }
 
         // 9. 後台自定義專屬活動（第 2 種活動）
         if (t[CUSTOM_ACTIVITIES_KEY] !== undefined) {
             const actsArr = this.mapToArray(t[CUSTOM_ACTIVITIES_KEY]);
             actsArr.sort((a, b) => Number(a.createdAtTs || 0) - Number(b.createdAtTs || 0));
-            localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(actsArr));
+            this.writeLocalIfChanged(CUSTOM_ACTIVITIES_KEY, JSON.stringify(actsArr));
         } else {
-            localStorage.setItem(CUSTOM_ACTIVITIES_KEY, '[]');
+            this.writeLocalIfChanged(CUSTOM_ACTIVITIES_KEY, '[]');
         }
 
         // 10. 互動流程測試指令（支援跨瀏覽器即時連動新增／刪除測試好友）
         if (t['yuelao_test_event'] && typeof t['yuelao_test_event'] === 'object') {
-            localStorage.setItem('yuelao_test_event', JSON.stringify(t['yuelao_test_event']));
+            this.writeLocalIfChanged('yuelao_test_event', JSON.stringify(t['yuelao_test_event']));
         }
 
-        // 11. 第 2 種活動雲端單次執行鎖定同步（防止其他分頁或裝置重複觸發第二次配對）
+        // 11. 後台登入失敗日誌同步（僅保留最近 10 筆）
+        if (t['yuelao_admin_login_logs'] !== undefined) {
+            const logsArr = this.mapToArray(t['yuelao_admin_login_logs']);
+            logsArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+            this.writeLocalIfChanged('yuelao_admin_login_logs', JSON.stringify(logsArr.slice(0, 10)));
+        }
+
+        // 12. 第 2 種活動雲端單次執行鎖定同步（防止其他分頁或裝置重複觸發第二次配對）
         if (t['yuelao_custom_act_locks'] && typeof t['yuelao_custom_act_locks'] === 'object') {
             Object.keys(t['yuelao_custom_act_locks']).forEach(lockNodeKey => {
                 const lockObj = t['yuelao_custom_act_locks'][lockNodeKey];
@@ -417,6 +437,12 @@ const CloudSync = {
                     }
                 } catch (err) {}
             };
+            es.onopen = () => {
+                this.updateCloudBadge(true);
+            };
+            es.onerror = () => {
+                this.updateCloudBadge(false);
+            };
             es.addEventListener('put', handleEvent);
             es.addEventListener('patch', handleEvent);
             this.eventSource = es;
@@ -429,13 +455,10 @@ const CloudSync = {
         this.initialized = true;
         this.startRealtimeStream();
 
-        if (!this.pollTimer) {
-            this.pollTimer = setInterval(async () => {
-                const ok = await this.fetchFullTree();
-                if (ok && typeof this.onUpdateCallback === 'function') {
-                    this.onUpdateCallback();
-                }
-            }, 3500);
+        // 已關閉多餘的 3.5 秒全庫輪詢，完全改由 EventSource 即時推播與分頁聚焦同步
+        if (this.pollTimer) {
+            clearInterval(this.pollTimer);
+            this.pollTimer = null;
         }
 
         document.addEventListener('visibilitychange', async () => {
@@ -585,6 +608,9 @@ const CloudSync = {
         }
         if (!this.isUserDeleted(pid)) {
             this.setSharedPendingUser(pid, cleanRecord, 15000);
+        }
+        if (typeof ActivityRegArchive !== 'undefined') {
+            ActivityRegArchive.syncFromUserRecord(cleanRecord, true);
         }
     },
 
@@ -1103,20 +1129,33 @@ const Store = {
         }
     },
 
+    getReports() {
+        try {
+            const arr = JSON.parse(localStorage.getItem(REPORTS_KEY) || '[]');
+            return Array.isArray(arr) ? arr.filter(r => r && typeof r === 'object' && r.id) : [];
+        } catch (e) {
+            return [];
+        }
+    },
+
     addIssueReport(report) {
-        const reports = JSON.parse(localStorage.getItem(REPORTS_KEY) || '[]');
+        const reports = this.getReports();
         const newRep = {
             id: 'R' + Date.now().toString().slice(-6),
+            playerId: report.playerId ? String(report.playerId).trim() : '',
             category: report.category,
             contact: report.contact || '匿名玩家',
             content: report.content,
             status: '待處理',
+            adminReply: '',
+            repliedAt: '',
             ts: Date.now(),
             createdAt: new Date().toLocaleString('zh-TW')
         };
         reports.unshift(newRep);
         localStorage.setItem(REPORTS_KEY, JSON.stringify(reports));
         if (typeof CloudSync !== 'undefined') CloudSync.putNode(`${REPORTS_KEY}/${newRep.id}`, newRep);
+        return newRep;
     }
 };
 
@@ -1180,9 +1219,22 @@ const ChatStore = {
             ts: msg.ts || Date.now()
         };
         all[key].push(savedMsg);
+        
+        // 限制每個聊天室最多保留最近 500 則訊息，避免 DOM 卡頓與超過 localStorage 容量
+        let removedIds = [];
+        if (all[key].length > 500) {
+            const removedMsgs = all[key].slice(0, all[key].length - 500);
+            removedIds = removedMsgs.map(m => m.id).filter(Boolean);
+            all[key] = all[key].slice(-500);
+        }
+        
         this.saveAll(all);
+        
         if (typeof CloudSync !== 'undefined') {
             CloudSync.putNode(`${CHATS_KEY}/${key}/${savedMsg.id}`, savedMsg);
+            removedIds.forEach(delId => {
+                CloudSync.deleteNode(`${CHATS_KEY}/${key}/${delId}`);
+            });
         }
         return all[key];
     },
@@ -1211,5 +1263,218 @@ const ChatStore = {
             }
         });
         if (changed) this.saveAll(all);
+    }
+};
+
+
+// 7. 活動報名歷史統計封存器（永久保留各屆／單場／自定義活動報名人數與選項，不因活動結束 3 分鐘自動清除而歸零）
+const ActivityRegArchive = {
+    sanitizeSeg(str) {
+        return String(str ?? '').trim().replace(/[\/.#$\[\]\s]+/g, '_');
+    },
+
+    makeRegularKey(sessionStr, playerId) {
+        const norm = (typeof normalizeSessionLabel === 'function')
+            ? normalizeSessionLabel(sessionStr)
+            : String(sessionStr || '').trim();
+        const pid = String(playerId || '').trim();
+        if (!norm || !pid) return '';
+        return `S__${this.sanitizeSeg(norm)}__${this.sanitizeSeg(pid)}`;
+    },
+
+    makeCustomKey(actId, playerId) {
+        const aid = String(actId || '').trim();
+        const pid = String(playerId || '').trim();
+        if (!aid || !pid) return '';
+        return `C__${this.sanitizeSeg(aid)}__${this.sanitizeSeg(pid)}`;
+    },
+
+    getAllMap() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(REG_HISTORY_KEY) || '{}');
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (e) {
+            return {};
+        }
+    },
+
+    saveAllMap(mapObj) {
+        const nextStr = JSON.stringify(mapObj || {});
+        if (localStorage.getItem(REG_HISTORY_KEY) !== nextStr) {
+            localStorage.setItem(REG_HISTORY_KEY, nextStr);
+        }
+    },
+
+    buildRegularEntry(user, sessionStr, existingEntry = null) {
+        const norm = (typeof normalizeSessionLabel === 'function')
+            ? normalizeSessionLabel(sessionStr)
+            : String(sessionStr || '').trim();
+        const pid = String((user && user.id) || (existingEntry && existingEntry.playerId) || '').trim();
+        const key = this.makeRegularKey(norm, pid);
+        if (!key) return null;
+        const batchLbl = (typeof extractBatchLabel === 'function')
+            ? extractBatchLabel(norm)
+            : ((norm.match(/^第\s*(\d+)\s*屆/) || [])[0] || '');
+        return {
+            id: key,
+            kind: 'regular',
+            session: norm,
+            batchLabel: batchLbl,
+            playerId: pid,
+            nickname: String((user && user.nickname) || (existingEntry && existingEntry.nickname) || '').trim(),
+            gender: String((user && user.gender) || (existingEntry && existingEntry.gender) || '').trim(),
+            recordedAt: Number((existingEntry && existingEntry.recordedAt) || Date.now())
+        };
+    },
+
+    buildCustomEntry(user, actId, regObj, existingEntry = null) {
+        const aid = String(actId || '').trim();
+        const pid = String((user && user.id) || (existingEntry && existingEntry.playerId) || '').trim();
+        const key = this.makeCustomKey(aid, pid);
+        if (!key) return null;
+        const r = (regObj && typeof regObj === 'object') ? regObj : {};
+        return {
+            id: key,
+            kind: 'custom',
+            activityId: aid,
+            activityName: String(r.activityName || (existingEntry && existingEntry.activityName) || '').trim(),
+            activityType: String(r.activityType || (existingEntry && existingEntry.activityType) || '').trim(),
+            fortuneNumber: r.fortuneNumber || (existingEntry && existingEntry.fortuneNumber) || null,
+            twoChoiceValue: String(r.twoChoiceValue || (existingEntry && existingEntry.twoChoiceValue) || '').trim(),
+            playerId: pid,
+            nickname: String((user && user.nickname) || (existingEntry && existingEntry.nickname) || '').trim(),
+            gender: String((user && user.gender) || (existingEntry && existingEntry.gender) || '').trim(),
+            recordedAt: Number(r.registeredAt || (existingEntry && existingEntry.recordedAt) || Date.now())
+        };
+    },
+
+    recordRegular(user, sessionStr, pushToCloud = true) {
+        if (!user || !user.id || !sessionStr) return null;
+        const map = this.getAllMap();
+        const key = this.makeRegularKey(sessionStr, user.id);
+        if (!key) return null;
+        const prev = map[key] || null;
+        const entry = this.buildRegularEntry(user, sessionStr, prev);
+        if (!entry) return null;
+        if (!prev || prev.nickname !== entry.nickname || prev.gender !== entry.gender || prev.session !== entry.session) {
+            map[key] = entry;
+            this.saveAllMap(map);
+            if (pushToCloud && typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+                CloudSync.putNode(`${REG_HISTORY_KEY}/${key}`, entry);
+            }
+        }
+        return entry;
+    },
+
+    recordCustom(user, actId, regObj, pushToCloud = true) {
+        if (!user || !user.id || !actId) return null;
+        const map = this.getAllMap();
+        const key = this.makeCustomKey(actId, user.id);
+        if (!key) return null;
+        const prev = map[key] || null;
+        const entry = this.buildCustomEntry(user, actId, regObj, prev);
+        if (!entry) return null;
+        if (!prev || JSON.stringify(prev) !== JSON.stringify(entry)) {
+            map[key] = entry;
+            this.saveAllMap(map);
+            if (pushToCloud && typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+                CloudSync.putNode(`${REG_HISTORY_KEY}/${key}`, entry);
+            }
+        }
+        return entry;
+    },
+
+    syncFromUserRecord(user, pushToCloud = true) {
+        if (!user || !user.id) return;
+        const sessions = Array.isArray(user.registeredSessions)
+            ? user.registeredSessions
+            : (user.registeredSession ? [user.registeredSession] : []);
+        sessions.forEach(s => {
+            if (s) this.recordRegular(user, s, pushToCloud);
+        });
+        if (user.customActivityRegs && typeof user.customActivityRegs === 'object' && !Array.isArray(user.customActivityRegs)) {
+            Object.keys(user.customActivityRegs).forEach(actId => {
+                if (actId && user.customActivityRegs[actId]) {
+                    this.recordCustom(user, actId, user.customActivityRegs[actId], pushToCloud);
+                }
+            });
+        }
+    },
+
+    mergeCloudTreeAndUsers(cloudRegNode, usersArr) {
+        const merged = this.getAllMap();
+        if (cloudRegNode && typeof cloudRegNode === 'object' && !Array.isArray(cloudRegNode)) {
+            Object.keys(cloudRegNode).forEach(k => {
+                const item = cloudRegNode[k];
+                if (item && typeof item === 'object' && item.playerId) {
+                    merged[k] = item;
+                }
+            });
+        }
+        (Array.isArray(usersArr) ? usersArr : []).forEach(u => {
+            if (!u || !u.id) return;
+            const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : [];
+            sessions.forEach(s => {
+                const key = this.makeRegularKey(s, u.id);
+                if (key) {
+                    const entry = this.buildRegularEntry(u, s, merged[key] || null);
+                    if (entry) merged[key] = entry;
+                }
+            });
+            if (u.customActivityRegs && typeof u.customActivityRegs === 'object' && !Array.isArray(u.customActivityRegs)) {
+                Object.keys(u.customActivityRegs).forEach(actId => {
+                    const key = this.makeCustomKey(actId, u.id);
+                    if (key) {
+                        const entry = this.buildCustomEntry(u, actId, u.customActivityRegs[actId], merged[key] || null);
+                        if (entry) merged[key] = entry;
+                    }
+                });
+            }
+        });
+        this.saveAllMap(merged);
+    },
+
+    removeRegular(sessionStr, playerId) {
+        const key = this.makeRegularKey(sessionStr, playerId);
+        if (!key) return;
+        const map = this.getAllMap();
+        if (Object.prototype.hasOwnProperty.call(map, key)) {
+            delete map[key];
+            this.saveAllMap(map);
+        }
+        if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+            CloudSync.deleteNode(`${REG_HISTORY_KEY}/${key}`);
+        }
+    },
+
+    removeCustom(actId, playerId) {
+        const key = this.makeCustomKey(actId, playerId);
+        if (!key) return;
+        const map = this.getAllMap();
+        if (Object.prototype.hasOwnProperty.call(map, key)) {
+            delete map[key];
+            this.saveAllMap(map);
+        }
+        if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+            CloudSync.deleteNode(`${REG_HISTORY_KEY}/${key}`);
+        }
+    },
+
+    removeAllForCustomActivity(actId) {
+        const prefix = `C__${this.sanitizeSeg(actId)}__`;
+        const map = this.getAllMap();
+        const removedKeys = [];
+        Object.keys(map).forEach(k => {
+            if (k.startsWith(prefix)) {
+                delete map[k];
+                removedKeys.push(k);
+            }
+        });
+        if (removedKeys.length > 0) {
+            this.saveAllMap(map);
+            if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+                removedKeys.forEach(k => CloudSync.deleteNode(`${REG_HISTORY_KEY}/${k}`));
+            }
+        }
     }
 };

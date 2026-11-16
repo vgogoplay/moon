@@ -10,34 +10,80 @@
 </head>
 <body data-admin-page="ops">
     <div id="adminLayoutMount" class="space-y-6">
-        <!-- 玩家問題回報清單 -->
-        <div class="card-jp rounded-2xl overflow-hidden border-2 border-pink-200">
-            <div class="p-5 border-b border-pink-200 flex items-center justify-between bg-amber-50/40">
-                <div>
-                    <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">📮 玩家問題回報表單（僅後台管理員可見）</h2>
+        <!-- ==================== 1. ✉️ 管理員發送信件／文字給前台玩家 ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-4">
+            <div>
+                <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">✉️ 發送信件 / 文字給前台玩家（玩家可於前台「✉️ 信件」點開閱讀）</h2>
+                <p class="text-xs text-gray-500">可指定特定玩家 ID 單獨發送，或選擇「全體玩家」群發系統公告與提醒信件</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-stretch">
+                <div class="md:col-span-3 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 收件對象（玩家 ID 或全體）</label>
+                    <div class="flex gap-1.5">
+                        <input type="text" id="mailTargetPlayerId" value="ALL" placeholder="輸入玩家 ID 或 ALL" class="w-full p-2.5 admin-input-box text-xs font-mono">
+                        <button type="button" onclick="document.getElementById('mailTargetPlayerId').value='ALL'" class="px-2.5 py-2 rounded-xl bg-pink-100 border border-pink-300 text-[#8f4452] text-[11px] font-bold shrink-0 hover:bg-pink-200">
+                            全體
+                        </button>
+                    </div>
                 </div>
-                <button onclick="renderAdminAll()" class="text-xs px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50">
-                    ↻ 重新整理
-                </button>
+                <div class="md:col-span-3 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">2. 信件標題 <span class="text-rose-500">*</span></label>
+                    <input type="text" id="mailTitleInput" placeholder="例如：月老小提醒 / 系統通知" class="w-full p-2.5 admin-input-box text-xs">
+                </div>
+                <div class="md:col-span-4 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">3. 信件文字內容 <span class="text-rose-500">*</span></label>
+                    <input type="text" id="mailContentInput" placeholder="輸入要發送給玩家的文字內容..." class="w-full p-2.5 admin-input-box text-xs">
+                </div>
+                <div class="md:col-span-2 admin-field-box flex flex-col justify-end">
+                    <label class="block text-[11px] font-semibold text-gray-500 mb-1.5">確認寄出</label>
+                    <button type="button" onclick="sendAdminMailboxMessage()" class="w-full py-2.5 px-4 rounded-xl bg-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition shadow">
+                        📤 發送信件
+                    </button>
+                </div>
             </div>
-            <div class="overflow-x-auto p-3 bg-white">
-                <table class="admin-grid-table text-left text-xs md:text-sm">
-                    <thead>
-                        <tr class="text-xs">
-                            <th class="p-3.5">單號 / 時間</th>
-                            <th class="p-3.5">問題類型</th>
-                            <th class="p-3.5">回報玩家</th>
-                            <th class="p-3.5">問題內容描述</th>
-                            <th class="p-3.5">處理狀態</th>
-                            <th class="p-3.5">管理操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="reportsTableBody"></tbody>
-                </table>
-            </div>
+
+            <div id="adminSentMailsList" class="space-y-1.5 pt-1"></div>
         </div>
 
-        <!-- ==================== 🧪 互動流程測試工具 ==================== -->
+        <!-- ==================== 2. 📮 玩家問題回報清單（待處理優先＋最新排序＋分頁顯示） ==================== -->
+        <div class="card-jp rounded-2xl p-5 md:p-6 border-2 border-pink-200 space-y-4">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">📮 玩家問題回報表單（僅後台管理員可見）</h2>
+                        <span id="reportsStatusSummaryBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                            待處理 0 則 ／ 已解決 0 則
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-0.5">自動將「⏳ 待處理」排在最前面並依最新時間排序；點擊標題即可展開查看與回覆</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">每頁顯示：</span>
+                        <select id="reportsPageSizeSelect" onchange="onReportsPageSizeChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
+                            <option value="5" selected>5 則（預設）</option>
+                            <option value="10">10 則</option>
+                            <option value="20">20 則</option>
+                            <option value="all">全部</option>
+                        </select>
+                    </div>
+                    <button type="button" onclick="expandAllAdminReports()" class="px-3 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition">
+                        🔽 全部展開
+                    </button>
+                    <button type="button" onclick="collapseAllAdminReports()" class="px-3 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition">
+                        🔼 全部收合
+                    </button>
+                    <button type="button" onclick="renderAdminAll(true)" class="px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition">
+                        ↻ 重新整理
+                    </button>
+                </div>
+            </div>
+            <div id="reportsAccordionList" class="space-y-2.5"></div>
+            <div id="reportsPaginationBar" class="pt-3 border-t border-pink-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
+        </div>
+
+        <!-- ==================== 3. 🧪 互動流程測試工具 ==================== -->
         <div class="card-jp rounded-2xl p-5 bg-pink-50/50 border-2 border-pink-200 space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -108,43 +154,7 @@
             </div>
         </div>
 
-        <!-- ==================== ✉️ 管理員發送信件／文字給前台玩家 ==================== -->
-        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-4">
-            <div>
-                <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">✉️ 發送信件 / 文字給前台玩家（玩家可於前台「✉️ 信件」點開閱讀）</h2>
-                <p class="text-xs text-gray-500">可指定特定玩家 ID 單獨發送，或選擇「全體玩家」群發系統公告與提醒信件</p>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-stretch">
-                <div class="md:col-span-3 admin-field-box">
-                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 收件對象（玩家 ID 或全體）</label>
-                    <div class="flex gap-1.5">
-                        <input type="text" id="mailTargetPlayerId" value="ALL" placeholder="輸入玩家 ID 或 ALL" class="w-full p-2.5 admin-input-box text-xs font-mono">
-                        <button type="button" onclick="document.getElementById('mailTargetPlayerId').value='ALL'" class="px-2.5 py-2 rounded-xl bg-pink-100 border border-pink-300 text-[#8f4452] text-[11px] font-bold shrink-0 hover:bg-pink-200">
-                            全體
-                        </button>
-                    </div>
-                </div>
-                <div class="md:col-span-3 admin-field-box">
-                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">2. 信件標題 <span class="text-rose-500">*</span></label>
-                    <input type="text" id="mailTitleInput" placeholder="例如：月老小提醒 / 系統通知" class="w-full p-2.5 admin-input-box text-xs">
-                </div>
-                <div class="md:col-span-4 admin-field-box">
-                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">3. 信件文字內容 <span class="text-rose-500">*</span></label>
-                    <input type="text" id="mailContentInput" placeholder="輸入要發送給玩家的文字內容..." class="w-full p-2.5 admin-input-box text-xs">
-                </div>
-                <div class="md:col-span-2 admin-field-box flex flex-col justify-end">
-                    <label class="block text-[11px] font-semibold text-gray-500 mb-1.5">確認寄出</label>
-                    <button type="button" onclick="sendAdminMailboxMessage()" class="w-full py-2.5 px-4 rounded-xl bg-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition shadow">
-                        📤 發送信件
-                    </button>
-                </div>
-            </div>
-
-            <div id="adminSentMailsList" class="space-y-1.5 pt-1"></div>
-        </div>
-
-        <!-- ==================== 🚫 禁止字眼與警告帳號規則管理 ==================== -->
+        <!-- ==================== 4. 🚫 禁止字眼與警告帳號規則管理 ==================== -->
         <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 space-y-3">
             <div>
                 <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🚫 禁止字眼與警告帳號規則設定</h2>
@@ -177,17 +187,52 @@
         </div>
     </div>
 
-    
+    <!-- 💬 管理員回覆玩家問題 Modal -->
+    <div id="replyReportModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 md:p-7 shadow-2xl border-2 border-pink-200 space-y-4">
+            <div class="flex items-center justify-between border-b border-pink-100 pb-3">
+                <div>
+                    <h3 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">💬 回覆玩家問題回報</h3>
+                    <p class="text-xs text-gray-500">送出後將即時同步至前台玩家的「📮 問題回報」查詢列表</p>
+                </div>
+                <button type="button" onclick="closeReplyReportModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+
+            <div id="replyReportInfoBox" class="p-3.5 rounded-2xl bg-pink-50/50 border border-pink-200 text-xs text-gray-700 space-y-1.5"></div>
+
+            <form id="adminReplyReportForm" onsubmit="submitAdminReportReply(event)" class="space-y-3.5">
+                <input type="hidden" id="replyReportTargetId">
+                <div class="admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">管理員回覆內容 <span class="text-rose-500">*</span></label>
+                    <textarea id="replyReportTextarea" rows="4" placeholder="請輸入要回覆給玩家的說明內容..." class="w-full p-2.5 admin-input-box text-xs resize-y" required></textarea>
+                </div>
+
+                <label class="flex items-center gap-2 text-xs font-semibold text-[#5e464a] cursor-pointer px-1">
+                    <input type="checkbox" id="replyReportMarkResolved" checked class="accent-[#c96a7b] w-4 h-4">
+                    <span>送出回覆時，同時將處理狀態設為「✅ 已解決」</span>
+                </label>
+
+                <div class="flex justify-end gap-2 pt-2 border-t border-pink-100">
+                    <button type="button" onclick="closeReplyReportModal()" class="px-4 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-5 py-2 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition">
+                        📤 送出回覆並同步前台
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261116a"></script>
+    <script src="shared/schedule.js?v=20261116c"></script>
     <script src="shared/schema.js?v=20261115l"></script>
-    <script src="shared/cloud-store.js?v=20261115y"></script>
+    <script src="shared/cloud-store.js?v=20261116e"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261115h"></script>
-    <script src="backend/matching.js?v=20261115k"></script>
-    <script src="backend/ops.js?v=20261115f"></script>
+    <script src="backend/state.js?v=20261116a"></script>
+    <script src="backend/matching.js?v=20261116b"></script>
+    <script src="backend/ops.js?v=20261116a"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261115"></script>
+    <script src="backend/layout.js?v=20261116c"></script>
 </body>
 </html>

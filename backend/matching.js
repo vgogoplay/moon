@@ -331,6 +331,10 @@ function checkAutoSchedule2000() {
     if (typeof checkScheduledCustomActivities === 'function') {
         checkScheduledCustomActivities(false);
     }
+
+    if (typeof cleanupExpiredActivityRegistrations === 'function') {
+        cleanupExpiredActivityRegistrations(false);
+    }
 }
 
 function unmatchPlayerPair(userId, specificPartnerId = null) {
@@ -674,4 +678,182 @@ function seedAsymmetricPool() {
 
     saveUsers(users);
     appendLog(`<span class="text-pink-300">[測試池建立]</span> 已加入 100 名男生與 10 名女生報名「${session}」，執行配對後將只會成功 10 對！`);
+}
+
+// ==================== 即時手動強制配對（彈窗控制與立即配對） ====================
+function openInstantMatchModal() {
+    const modal = document.getElementById('instantMatchModal');
+    if (!modal) return;
+    const inputA = document.getElementById('instantMatchIdA');
+    const inputB = document.getElementById('instantMatchIdB');
+    if (inputA) inputA.value = '';
+    if (inputB) inputB.value = '';
+    updateInstantMatchPreview();
+    modal.classList.remove('hidden');
+    if (inputA) {
+        setTimeout(() => inputA.focus(), 50);
+    }
+}
+
+function closeInstantMatchModal() {
+    const modal = document.getElementById('instantMatchModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function updateInstantMatchPreview() {
+    const inputA = document.getElementById('instantMatchIdA');
+    const inputB = document.getElementById('instantMatchIdB');
+    const prevA = document.getElementById('instantMatchPreviewA');
+    const prevB = document.getElementById('instantMatchPreviewB');
+    const statusHint = document.getElementById('instantMatchPairStatusHint');
+    if (!inputA || !inputB || !prevA || !prevB) return;
+
+    const idA = inputA.value.trim();
+    const idB = inputB.value.trim();
+    const users = getUsers();
+    const userA = idA ? users.find(u => String(u.id) === idA) : null;
+    const userB = idB ? users.find(u => String(u.id) === idB) : null;
+
+    if (!idA) {
+        prevA.textContent = '';
+    } else if (userA) {
+        prevA.className = 'text-[11px] text-emerald-700 font-semibold min-h-[16px]';
+        prevA.textContent = `✓ 找到玩家：${userA.nickname}（${userA.gender || '-'} ・ ${userA.age || '-'}歲）`;
+    } else {
+        prevA.className = 'text-[11px] text-rose-600 font-semibold min-h-[16px]';
+        prevA.textContent = `⚠️ 查無 ID「${idA}」的玩家`;
+    }
+
+    if (!idB) {
+        prevB.textContent = '';
+    } else if (userB) {
+        prevB.className = 'text-[11px] text-emerald-700 font-semibold min-h-[16px]';
+        prevB.textContent = `✓ 找到玩家：${userB.nickname}（${userB.gender || '-'} ・ ${userB.age || '-'}歲）`;
+    } else {
+        prevB.className = 'text-[11px] text-rose-600 font-semibold min-h-[16px]';
+        prevB.textContent = `⚠️ 查無 ID「${idB}」的玩家`;
+    }
+
+    if (statusHint) {
+        if (idA && idB && idA === idB) {
+            statusHint.className = 'p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold';
+            statusHint.textContent = '🚫 玩家 A 與玩家 B 的 ID 不能相同！';
+            statusHint.classList.remove('hidden');
+        } else if (userA && userB) {
+            const alreadyMatched = (userA.matchedHistory || []).some(h => String(h.partnerId) === String(userB.id)) ||
+                                   (userB.matchedHistory || []).some(h => String(h.partnerId) === String(userA.id)) ||
+                                   String(userA.matchedWithId) === String(userB.id);
+            if (alreadyMatched) {
+                statusHint.className = 'p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold';
+                statusHint.textContent = `⚠️ 「${userA.nickname}」與「${userB.nickname}」目前已經是配對好友了！`;
+                statusHint.classList.remove('hidden');
+            } else {
+                statusHint.className = 'p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold';
+                statusHint.textContent = `💞 可立即配對：「${userA.nickname}」⇄「${userB.nickname}」`;
+                statusHint.classList.remove('hidden');
+            }
+        } else {
+            statusHint.classList.add('hidden');
+        }
+    }
+}
+
+function executeInstantManualMatch(idA, idB) {
+    const users = getUsers();
+    const userA = users.find(u => String(u.id) === String(idA));
+    const userB = users.find(u => String(u.id) === String(idB));
+
+    if (!userA || !userB) {
+        alert('🚫 找不到對應的玩家 ID，請確認後再試！');
+        return;
+    }
+    if (String(userA.id) === String(userB.id)) {
+        alert('🚫 玩家 ID 不能相同！');
+        return;
+    }
+
+    const alreadyMatchedA = (userA.matchedHistory || []).some(h => String(h.partnerId) === String(userB.id));
+    const alreadyMatchedB = (userB.matchedHistory || []).some(h => String(h.partnerId) === String(userA.id));
+    if (alreadyMatchedA || alreadyMatchedB || String(userA.matchedWithId) === String(userB.id)) {
+        alert('⚠️ 這兩位玩家已經是配對好友了！');
+        return;
+    }
+
+    const sysCfg = getSystemConfig();
+    const sessionLabel = `第${sysCfg.currentBatch}屆(強制配對)`;
+    const nowMs = Date.now();
+    const nowTimeStr = new Date(nowMs).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+
+    recordPairMatch(userA, userB, sessionLabel, nowMs);
+
+    // 建立聊天室並寫入第一則系統訊息
+    const sysText = '⚡ 管理員已為你們手動牽線成功，現在開始可以聊天囉！';
+    if (typeof ChatStore !== 'undefined' && typeof ChatStore.appendMessage === 'function') {
+        ChatStore.appendMessage(userA.id, userB.id, {
+            senderId: 'system',
+            text: sysText,
+            time: nowTimeStr,
+            ts: nowMs
+        });
+    } else {
+        const pairKey = [String(userA.id), String(userB.id)].sort().join('__');
+        const chatsMap = typeof getAdminChatsMap === 'function' ? getAdminChatsMap() : JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+        if (!Array.isArray(chatsMap[pairKey])) chatsMap[pairKey] = [];
+        const sysMsg = {
+            id: `SYS_MANUAL_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
+            senderId: 'system',
+            text: sysText,
+            time: nowTimeStr,
+            ts: nowMs
+        };
+        chatsMap[pairKey].push(sysMsg);
+        localStorage.setItem(CHATS_KEY, JSON.stringify(chatsMap));
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.putNode(`${CHATS_KEY}/${pairKey}/${sysMsg.id}`, sysMsg);
+        }
+    }
+
+    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+        AdminMemoryCache.invalidate('chats');
+    }
+
+    saveUsers(users);
+    closeInstantMatchModal();
+    appendLog(`<span class="text-emerald-300">[即時手動配對]</span> 管理員已手動將 <strong>${userA.nickname} (ID:${userA.id})</strong> ⇄ <strong>${userB.nickname} (ID:${userB.id})</strong> 配對為好友並開啟聊天室。`);
+    alert(`✅ 成功！「${userA.nickname} (ID:${userA.id})」與「${userB.nickname} (ID:${userB.id})」已成為好友，並開啟專屬聊天室。`);
+}
+
+function triggerInstantManualMatch(e) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    const idA = (document.getElementById('instantMatchIdA')?.value || '').trim();
+    const idB = (document.getElementById('instantMatchIdB')?.value || '').trim();
+    if (!idA || !idB) {
+        alert('請輸入雙方的玩家 ID！');
+        return;
+    }
+    if (idA === idB) {
+        alert('🚫 玩家 ID 不能相同！');
+        return;
+    }
+
+    const users = getUsers();
+    const userA = users.find(u => String(u.id) === idA);
+    const userB = users.find(u => String(u.id) === idB);
+    if (!userA || !userB) {
+        alert('🚫 找不到對應的玩家 ID，請確認後再試！');
+        return;
+    }
+    const alreadyMatched = (userA.matchedHistory || []).some(h => String(h.partnerId) === idB) ||
+                           (userB.matchedHistory || []).some(h => String(h.partnerId) === idA) ||
+                           String(userA.matchedWithId) === idB;
+    if (alreadyMatched) {
+        alert('⚠️ 這兩位玩家已經是配對好友了！');
+        return;
+    }
+
+    if (typeof requestAdminPasswordForAction === 'function') {
+        requestAdminPasswordForAction('即時強制配對', () => executeInstantManualMatch(idA, idB));
+    } else {
+        executeInstantManualMatch(idA, idB);
+    }
 }

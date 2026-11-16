@@ -1,4 +1,4 @@
-/* backend/activity-stats.js - 後台某屆／單場／自定義活動報名與成功配對人數統計 */
+/* backend/activity-stats.js - 後台某屆／單場／自定義活動報名與成功配對人數統計（永久保留歷史報名人數紀錄） */
 
 let showAllActivitiesStatsTable = false;
 
@@ -19,8 +19,26 @@ function selectActivityStatsTarget(targetVal) {
     }
 }
 
+function getMergedActivityRegHistoryList() {
+    const map = (typeof getActivityRegHistory === 'function')
+        ? getActivityRegHistory()
+        : (() => {
+            try {
+                const raw = JSON.parse(localStorage.getItem('yuelao_activity_reg_history') || '{}');
+                return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+            } catch (e) {
+                return {};
+            }
+        })();
+    return Object.values(map).filter(item => item && typeof item === 'object' && item.playerId);
+}
+
 function computeSingleActivityStats(targetKey, users, customActsList) {
     const validUsers = (users || []).filter(u => u && u.id);
+    const userById = new Map();
+    validUsers.forEach(u => userById.set(String(u.id).trim(), u));
+    const archivedRecords = getMergedActivityRegHistoryList();
+
     const getHist = (u) => {
         if (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0) return u.matchedHistory;
         if (u.matchedWithId) return [{ session: u.matchedSession || '', partnerId: u.matchedWithId, partnerName: u.matchedWithName || '' }];
@@ -31,10 +49,30 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
         const bNum = targetKey.split(':')[1];
         const targetPrefix = `第${bNum}屆`;
         const info = getBatchScheduleInfo(bNum);
-        const regUsers = validUsers.filter(u => {
+
+        // 合併「目前仍在報名場次中」與「活動結束後已封存保留」的報名名單（依玩家 ID 去重）
+        const regUserMap = new Map();
+        validUsers.forEach(u => {
             const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);
-            return sessions.some(s => extractBatchLabel(s) === targetPrefix);
+            if (sessions.some(s => extractBatchLabel(s) === targetPrefix)) {
+                regUserMap.set(String(u.id).trim(), u);
+            }
         });
+        archivedRecords.forEach(rec => {
+            if (rec.kind === 'regular' && rec.session && extractBatchLabel(rec.session) === targetPrefix) {
+                const pid = String(rec.playerId).trim();
+                if (!regUserMap.has(pid)) {
+                    const liveUser = userById.get(pid);
+                    regUserMap.set(pid, liveUser || {
+                        id: pid,
+                        nickname: rec.nickname || `玩家_${pid}`,
+                        gender: rec.gender || ''
+                    });
+                }
+            }
+        });
+        const regUsers = Array.from(regUserMap.values());
+
         let totalLinks = 0;
         const matchedUsers = [];
         validUsers.forEach(u => {
@@ -44,8 +82,8 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                 totalLinks += links.length;
             }
         });
-        const matchedIdSet = new Set(matchedUsers.map(u => String(u.id)));
-        const unmatchedUsers = regUsers.filter(u => !matchedIdSet.has(String(u.id)));
+        const matchedIdSet = new Set(matchedUsers.map(u => String(u.id).trim()));
+        const unmatchedUsers = regUsers.filter(u => !matchedIdSet.has(String(u.id).trim()));
         return {
             key: targetKey,
             label: `${info.batchPrefix}（${info.wedDateStr}(三) + ${info.satDateStr}(六)）`,
@@ -60,10 +98,29 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
 
     if (targetKey.startsWith('session:')) {
         const sessionLabel = targetKey.slice('session:'.length);
-        const regUsers = validUsers.filter(u => {
+
+        const regUserMap = new Map();
+        validUsers.forEach(u => {
             const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);
-            return sessions.some(s => isSameSession(s, sessionLabel));
+            if (sessions.some(s => isSameSession(s, sessionLabel))) {
+                regUserMap.set(String(u.id).trim(), u);
+            }
         });
+        archivedRecords.forEach(rec => {
+            if (rec.kind === 'regular' && rec.session && isSameSession(rec.session, sessionLabel)) {
+                const pid = String(rec.playerId).trim();
+                if (!regUserMap.has(pid)) {
+                    const liveUser = userById.get(pid);
+                    regUserMap.set(pid, liveUser || {
+                        id: pid,
+                        nickname: rec.nickname || `玩家_${pid}`,
+                        gender: rec.gender || ''
+                    });
+                }
+            }
+        });
+        const regUsers = Array.from(regUserMap.values());
+
         let totalLinks = 0;
         const matchedUsers = [];
         validUsers.forEach(u => {
@@ -73,8 +130,8 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                 totalLinks += links.length;
             }
         });
-        const matchedIdSet = new Set(matchedUsers.map(u => String(u.id)));
-        const unmatchedUsers = regUsers.filter(u => !matchedIdSet.has(String(u.id)));
+        const matchedIdSet = new Set(matchedUsers.map(u => String(u.id).trim()));
+        const unmatchedUsers = regUsers.filter(u => !matchedIdSet.has(String(u.id).trim()));
         return {
             key: targetKey,
             label: sessionLabel,
@@ -92,7 +149,30 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
         const act = (customActsList || []).find(a => String(a.id) === String(actId));
         const actName = act ? act.name : actId;
         const actType = act ? (act.activityType || 'classic') : 'classic';
-        const regUsers = validUsers.filter(u => Boolean(u.customActivityRegs && u.customActivityRegs[actId]));
+
+        const regUserMap = new Map();
+        const archivedRegDetailByPid = new Map();
+        validUsers.forEach(u => {
+            if (u.customActivityRegs && u.customActivityRegs[actId]) {
+                regUserMap.set(String(u.id).trim(), u);
+            }
+        });
+        archivedRecords.forEach(rec => {
+            if (rec.kind === 'custom' && String(rec.activityId) === String(actId)) {
+                const pid = String(rec.playerId).trim();
+                archivedRegDetailByPid.set(pid, rec);
+                if (!regUserMap.has(pid)) {
+                    const liveUser = userById.get(pid);
+                    regUserMap.set(pid, liveUser || {
+                        id: pid,
+                        nickname: rec.nickname || `玩家_${pid}`,
+                        gender: rec.gender || ''
+                    });
+                }
+            }
+        });
+        const regUsers = Array.from(regUserMap.values());
+
         let totalLinks = 0;
         const matchedUsers = [];
         validUsers.forEach(u => {
@@ -104,14 +184,16 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                 totalLinks += links.length;
             }
         });
-        const matchedIdSet = new Set(matchedUsers.map(u => String(u.id)));
-        const unmatchedUsers = regUsers.filter(u => !matchedIdSet.has(String(u.id)));
+        const matchedIdSet = new Set(matchedUsers.map(u => String(u.id).trim()));
+        const unmatchedUsers = regUsers.filter(u => !matchedIdSet.has(String(u.id).trim()));
 
         let extraHtml = '';
         if (actType === 'fortune_number' && regUsers.length > 0) {
             const numCounts = {};
             regUsers.forEach(u => {
-                const n = u.customActivityRegs[actId]?.fortuneNumber;
+                const pid = String(u.id).trim();
+                const n = (u.customActivityRegs && u.customActivityRegs[actId]?.fortuneNumber) ||
+                          (archivedRegDetailByPid.get(pid)?.fortuneNumber);
                 if (n) numCounts[n] = (numCounts[n] || 0) + 1;
             });
             const chips = Object.keys(numCounts).sort((a, b) => Number(a) - Number(b))
@@ -121,7 +203,9 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
         } else if (actType === 'two_choice' && regUsers.length > 0) {
             const choiceCounts = {};
             regUsers.forEach(u => {
-                const c = u.customActivityRegs[actId]?.twoChoiceValue;
+                const pid = String(u.id).trim();
+                const c = (u.customActivityRegs && u.customActivityRegs[actId]?.twoChoiceValue) ||
+                          (archivedRegDetailByPid.get(pid)?.twoChoiceValue);
                 if (c) choiceCounts[c] = (choiceCounts[c] || 0) + 1;
             });
             const chips = Object.entries(choiceCounts)

@@ -27,8 +27,9 @@
                     ✉️ 信件
                     <span id="mailboxUnreadBadge" class="hidden -top-1.5 -right-1.5 absolute min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow">0</span>
                 </button>
-                <button type="button" onclick="openReportModal()" class="text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 transition shadow-2xs">
+                <button type="button" onclick="openReportModal()" class="relative text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 transition shadow-2xs font-medium">
                     📮 問題回報
+                    <span id="reportReplyUnreadBadge" class="hidden -top-1.5 -right-1.5 absolute min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow">0</span>
                 </button>
                 <div id="headerStatusBadge" class="hidden sm:block text-xs px-3 py-1.5 rounded-full bg-pink-50 border border-pink-200 text-[#8f4452] font-medium">
                     讀取緣分狀態中...
@@ -342,7 +343,7 @@
                             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
                             <span id="chatHeaderTitle" class="font-bold text-sm text-[#8f4452]">與對方的專屬對話</span>
                         </div>
-                        <span class="text-[11px] text-[#c96a7b] font-medium">✨ 擁有 2 位以上好友每隔 2 天 20:00 開啟心動事件</span>
+                        <span class="text-[11px] text-[#c96a7b] font-medium">✨ 系統為維持順暢，每個聊天室最多保留最近 500 則對話內容</span>
                     </div>
 
                     <div id="chatMessagesBox" class="flex-1 overflow-y-auto space-y-3 p-2 bg-[#fffafb] rounded-2xl border border-pink-100/60"></div>
@@ -563,12 +564,12 @@
         </div>
     </div>
 
-    <!-- 輕量化小視窗 2：問題回報 -->
-    <div id="reportModal" class="hidden mini-window !max-w-sm space-y-3.5">
-        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+    <!-- 輕量化小視窗 2：問題回報與管理員回覆查看 -->
+    <div id="reportModal" class="hidden mini-window !max-w-lg max-h-[85vh] overflow-y-auto space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5 sticky top-0 bg-white/95 z-10">
             <div>
-                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">📮 玩家問題回報</h3>
-                <p class="text-[11px] text-gray-400">此表單內容僅後台管理員可見</p>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">📮 玩家問題回報與進度查詢</h3>
+                <p class="text-[11px] text-gray-400">送出後可於下方即時查看送出內容、處理狀態與管理員回覆</p>
             </div>
             <button type="button" onclick="closeReportModal()" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
         </div>
@@ -580,7 +581,7 @@
                     <option value="配對與報名問題">配對與報名問題</option>
                     <option value="好友名單與聊天異常">好友名單與聊天異常</option>
                     <option value="個人資料與隱私顯示">個人資料與隱私顯示</option>
-                    <option value="功能建議與許願">功能建議與許願</option>
+                    <option value="🌸功能建議與許願">🌸功能建議與許願</option>
                     <option value="其他問題">其他問題</option>
                 </select>
             </div>
@@ -596,14 +597,28 @@
             </div>
 
             <div class="flex gap-2 pt-1">
-                <button type="button" onclick="closeReportModal()" class="w-1/3 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">
-                    取消
+                <button type="button" onclick="closeReportModal()" class="w-1/3 py-2 rounded-xl border border-gray-200 text-xs text-gray-500 hover:bg-gray-50">
+                    關閉
                 </button>
                 <button type="submit" class="w-2/3 btn-sakura py-2 rounded-xl text-xs font-bold shadow">
-                    送出問題回報
+                    📤 送出問題回報
                 </button>
             </div>
         </form>
+
+        <!-- 我送出的問題回報與管理員回覆列表 -->
+        <div id="myIssueReportsSection" class="pt-3 border-t border-pink-100 space-y-2.5">
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5">
+                    <h4 class="text-xs font-bold text-[#8f4452]">📋 我的回報紀錄與管理員回覆</h4>
+                    <span id="myReportsCountBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">0 筆</span>
+                </div>
+                <button type="button" onclick="refreshMyIssueReports()" class="text-[11px] px-2.5 py-1 rounded-lg bg-white border border-pink-200 text-[#c96a7b] font-semibold hover:bg-pink-50 transition">
+                    ↻ 刷新進度
+                </button>
+            </div>
+            <div id="myIssueReportsList" class="space-y-2.5 max-h-60 overflow-y-auto pr-0.5"></div>
+        </div>
     </div>
 
     <!-- 輕量化小視窗 3：每隔 2 天 20:00 心動抉擇 -->
@@ -675,13 +690,13 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261116a"></script>
+    <script src="shared/schedule.js?v=20261116c"></script>
     <script src="shared/schema.js?v=20261115l"></script>
-    <script src="shared/cloud-store.js?v=20261115y"></script>
+    <script src="shared/cloud-store.js?v=20261116e"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/state.js?v=20261115x"></script>
+    <script src="frontend/state.js?v=20261115z"></script>
     <script src="frontend/profile.js?v=20261115y"></script>
-    <script src="frontend/activities.js?v=20261115k"></script>
-    <script src="frontend/friends-chat.js?v=20261116a"></script>
+    <script src="frontend/activities.js?v=20261116a"></script>
+    <script src="frontend/friends-chat.js?v=20261116d"></script>
 </body>
 </html>

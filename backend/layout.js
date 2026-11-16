@@ -36,7 +36,9 @@ function getCurrentAdminPageKey() {
     if (pageAttr) return pageAttr;
     const path = (window.location.pathname || '').toLowerCase();
     if (path.includes('backend-activities')) return 'activities';
+    if (path.includes('backend-chats')) return 'chats';
     if (path.includes('backend-ops')) return 'ops';
+    if (path.includes('backend-logs')) return 'logs';
     return 'member';
 }
 
@@ -64,12 +66,27 @@ function renderAdminSharedShell() {
             badgeId: 'sidebarCustomActBadge'
         },
         {
+            key: 'chats',
+            href: 'backend-chats.html',
+            icon: '💬',
+            label: '玩家聊天紀錄查詢',
+            sub: '配對房間・對話內容查核',
+            badgeId: 'sidebarChatRoomsBadge'
+        },
+        {
             key: 'ops',
             href: 'backend-ops.html',
             icon: '✉️',
             label: '信件・回報與測試',
             sub: '問題回報・發信・禁止規則',
             badgeId: 'sidebarPendingReportsBadge'
+        },
+        {
+            key: 'logs',
+            href: 'backend-logs.html',
+            icon: '🛡️',
+            label: '安全防護日誌',
+            sub: '登入失敗紀錄・IP追蹤'
         }
     ];
 
@@ -94,9 +111,6 @@ function renderAdminSharedShell() {
                             <button type="button" onclick="advanceToNextBatch()" class="px-3.5 py-2.5 rounded-xl bg-amber-50 border-2 border-amber-400 text-amber-900 text-xs font-bold hover:bg-amber-100 transition">
                                 🔄 刷新至下一屆（釋放鎖定名單）
                             </button>
-                            <button type="button" onclick="clearAllAdminData()" class="px-4 py-2.5 rounded-xl border-2 border-rose-500 bg-rose-50 text-rose-800 text-xs font-bold hover:bg-rose-100 transition shadow-sm">
-                                🗑️ 清空全部資料
-                            </button>
                         </div>
                     </div>
 
@@ -120,61 +134,6 @@ function renderAdminSharedShell() {
                         </div>
                     </div>
 
-                    <!-- ==================== 🔐 清空全部資料：管理員密碼驗證 ＋ 二次確定視窗 ==================== -->
-                    <div id="clearAllConfirmModal" class="hidden fixed inset-0 bg-black/55 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div class="bg-white rounded-3xl max-w-md w-full p-6 md:p-7 shadow-2xl border-2 border-rose-400 space-y-4">
-                            <div class="flex items-center justify-between border-b border-rose-100 pb-3">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-2xl">⚠️</span>
-                                    <div>
-                                        <h3 class="text-base md:text-lg font-bold font-serif-jp text-rose-800">清空全部資料・安全驗證</h3>
-                                        <p class="text-[11px] text-gray-500">高風險操作，需驗證管理員密碼並進行二次確定</p>
-                                    </div>
-                                </div>
-                                <button type="button" onclick="closeClearAllConfirmModal()" class="text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
-                            </div>
-
-                            <!-- 步驟 1：輸入管理員密碼 -->
-                            <div id="clearAllStep1" class="space-y-3.5">
-                                <div class="p-3 rounded-xl bg-rose-50/80 border border-rose-200 text-xs text-rose-800 leading-relaxed">
-                                    <strong>第一關驗證：</strong>請輸入後台管理員密碼，驗證通過後將進入二次確定畫面。
-                                </div>
-                                <div class="admin-field-box !border-rose-300">
-                                    <label class="block text-xs font-bold text-rose-800 mb-1.5">管理員密碼 <span class="text-rose-600">*</span></label>
-                                    <input type="password" id="clearAllAdminPassInput" placeholder="請輸入管理員密碼" onkeydown="if(event.key==='Enter'){event.preventDefault();verifyClearAllPassword();}" class="w-full p-2.5 admin-input-box text-sm">
-                                </div>
-                                <div id="clearAllPassError" class="hidden p-2.5 rounded-xl bg-rose-100 border border-rose-400 text-xs text-rose-800 font-bold text-center">
-                                    🚫 管理員密碼錯誤，無法執行清空全部資料！
-                                </div>
-                                <div class="flex justify-end gap-2 pt-1">
-                                    <button type="button" onclick="closeClearAllConfirmModal()" class="px-4 py-2.5 rounded-xl border border-gray-300 text-xs font-semibold text-gray-600 hover:bg-gray-50">
-                                        取消
-                                    </button>
-                                    <button type="button" onclick="verifyClearAllPassword()" class="px-5 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 transition shadow">
-                                        下一步：進行二次確定 →
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- 步驟 2：二次確定警告畫面 -->
-                            <div id="clearAllStep2" class="hidden space-y-4">
-                                <div class="p-4 rounded-2xl bg-rose-50 border-2 border-rose-500 space-y-2 text-xs text-rose-900">
-                                    <p class="text-sm font-bold text-rose-700">🚨 二次確定：您確定要永久清空全部資料嗎？</p>
-                                    <p class="leading-relaxed">
-                                        按下確認後，系統將會<strong>同時清空本地與 Firebase 雲端</strong>的所有資料（包含：全部玩家檔案、配對歷史、聊天紀錄、秘密強制配對規則、管理員信件、問題回報與自定義活動），<strong>此動作無法復原！</strong>
-                                    </p>
-                                </div>
-                                <div class="flex flex-wrap justify-end gap-2 pt-1">
-                                    <button type="button" onclick="backToClearAllStep1()" class="px-4 py-2.5 rounded-xl border border-gray-300 text-xs font-semibold text-gray-600 hover:bg-gray-50">
-                                        ← 返回上一步
-                                    </button>
-                                    <button type="button" onclick="executeClearAllAdminDataConfirmed()" class="px-5 py-2.5 rounded-xl bg-rose-700 text-white text-xs font-bold hover:bg-rose-800 transition shadow-md">
-                                        🗑️ 二次確定・立即清空全部資料
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
     ` : '';
 
     mountEl.innerHTML = `
