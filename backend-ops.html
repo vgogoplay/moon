@@ -108,7 +108,20 @@
                     </button>
                 </div>
 
-                <div class="admin-field-box flex flex-col gap-2">
+                <div class="admin-field-box flex flex-col gap-1.5">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-xs font-bold text-[#8f4452]">💘 指定玩家 ID 直接觸發心動抉擇：</span>
+                        <input type="text" id="triggerConfessionTargetId" placeholder="輸入玩家 ID（如 10001）" class="w-40 p-2 admin-input-box text-xs font-mono">
+                        <button type="button" onclick="adminTriggerConfessionForPlayer()" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white text-xs font-bold shadow-2xs hover:opacity-95 transition">
+                            💘 立即觸發該 ID 心動抉擇
+                        </button>
+                    </div>
+                    <div id="triggerConfessionStatusText" class="text-[11px] text-gray-500">
+                        （該玩家需擁有 2 位以上好友；點擊後無論該玩家目前在線或稍後開啟前台，皆會立即彈出心動抉擇視窗）
+                    </div>
+                </div>
+
+                <div class="md:col-span-2 admin-field-box flex flex-col gap-2">
                     <div class="flex flex-wrap items-center gap-2">
                         <span class="text-xs font-bold text-[#8f4452]">💞 測試 C 連動好友（可連續點加到6位）：</span>
                         <input type="text" id="linkFriendCTargetId" oninput="renderLinkedMockFriendsList()" placeholder="輸入需聯動的玩家 ID" class="w-40 p-2 admin-input-box text-xs font-mono">
@@ -227,10 +240,10 @@
     <!-- 前後台共用核心層 -->
     <script src="shared/schedule.js?v=20261116c"></script>
     <script src="shared/schema.js?v=20261115l"></script>
-    <script src="shared/cloud-store.js?v=20261116e"></script>
+    <script src="shared/cloud-store.js?v=20261116f"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261116a"></script>
-    <script src="backend/matching.js?v=20261116b"></script>
+    <script src="backend/state.js?v=20261116b"></script>
+    <script src="backend/matching.js?v=20261116d"></script>
     <script src="backend/ops.js?v=20261116a"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261116c"></script>

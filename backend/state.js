@@ -304,10 +304,18 @@ function getUsers() {
         AdminMemoryCache.usersRaw = raw;
         AdminMemoryCache.users = users;
     }
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.reconcileSymmetricMatches === 'function') {
+        if (CloudSync.reconcileSymmetricMatches(users, false)) {
+            const healedRaw = JSON.stringify(users);
+            AdminMemoryCache.usersRaw = healedRaw;
+            AdminMemoryCache.users = users;
+            localStorage.setItem(USERS_KEY, healedRaw);
+        }
+    }
     return users;
 }
 
-function saveUsers(users) {
+function saveUsers(users, options = { isMatchMutation: false }) {
     if (Array.isArray(users)) {
         users.forEach(u => {
             if (u && u.id) {
@@ -319,7 +327,7 @@ function saveUsers(users) {
     AdminMemoryCache.usersRaw = nextRaw;
     AdminMemoryCache.users = users;
     localStorage.setItem(USERS_KEY, nextRaw);
-    CloudSync.syncUsersArray(users);
+    CloudSync.syncUsersArray(users, options);
     renderAdminAll(true);
 }
 

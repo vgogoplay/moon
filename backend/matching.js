@@ -248,6 +248,74 @@ function adminClearAllFriendCFromPlayer() {
     appendLog(`<span class="text-amber-300">[清空測試好友]</span> 已清空玩家 ID:<strong>${targetId}</strong> 的全部測試 C 連動好友${removed > 0 ? `（共 ${removed} 位）` : ''}。`);
 }
 
+function adminTriggerConfessionForPlayer() {
+    const inputEl = document.getElementById('triggerConfessionTargetId');
+    const statusEl = document.getElementById('triggerConfessionStatusText');
+    const targetId = inputEl ? inputEl.value.trim() : '';
+
+    if (!targetId) {
+        alert('請先輸入要觸發心動抉擇的玩家 ID（例如：10001）！');
+        if (inputEl) inputEl.focus();
+        return;
+    }
+
+    const users = getUsers();
+    const targetUser = users.find(u => String(u.id) === String(targetId));
+    if (!targetUser) {
+        alert(`找不到玩家 ID「${targetId}」，請確認該玩家已完成資料保存！`);
+        if (inputEl) inputEl.focus();
+        return;
+    }
+
+    const partnerIdSet = new Set();
+    const normHist = (typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
+        ? CloudSync.normalizeMatchedHistoryList(targetUser.matchedHistory)
+        : (Array.isArray(targetUser.matchedHistory) ? targetUser.matchedHistory : []);
+    normHist.forEach(h => {
+        if (h && h.partnerId) partnerIdSet.add(String(h.partnerId).trim());
+    });
+    if (targetUser.matchedWithId) {
+        partnerIdSet.add(String(targetUser.matchedWithId).trim());
+    }
+    const mockFriends = getLinkedMockFriendsForTarget(targetId);
+    mockFriends.forEach(mf => {
+        if (mf && mf.id) partnerIdSet.add(String(mf.id).trim());
+    });
+
+    const totalFriendCount = partnerIdSet.size;
+    if (totalFriendCount < 2) {
+        alert(`⚠️ 玩家「${targetUser.nickname || targetId} (ID:${targetId})」目前僅有 ${totalFriendCount} 位好友。\n\n必須擁有「2 位以上好友」才能觸發心動抉擇！\n（可先為該玩家配對或使用下方「連動新增一位好友」加至 2 位以上好友）`);
+        return;
+    }
+
+    const triggerToken = 'CONF_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5);
+    targetUser.forceConfessionTriggerId = triggerToken;
+    saveUsers(users);
+
+    // 同步更新同瀏覽器本地快取中的玩家狀態（若該玩家已於本機登入）
+    const patchLocalPlayerConfession = (storageKey) => {
+        try {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return;
+            const st = JSON.parse(raw);
+            if (!st || String(st.playerId || '') !== String(targetId)) return;
+            st.confessionUnlockAt = Date.now() - 1000;
+            st.lastConfessionDate = null;
+            localStorage.setItem(storageKey, JSON.stringify(st));
+        } catch (e) {}
+    };
+    patchLocalPlayerConfession(PLAYER_STATE_PREFIX + String(targetId));
+    patchLocalPlayerConfession(FRONTEND_STORAGE_KEY);
+
+    triggerFrontendTestEvent('ADVANCE_CONFESSION_2000', targetId, { triggerToken });
+
+    if (statusEl) {
+        statusEl.innerHTML = `<span class="text-emerald-700 font-bold">✅ 已於 ${new Date().toLocaleTimeString('zh-TW')} 為玩家「${targetUser.nickname || targetId} (ID:${targetId})」（目前 ${totalFriendCount} 位好友）觸發心動抉擇！</span>`;
+    }
+    appendLog(`<span class="text-pink-300">[指定觸發心動抉擇]</span> 已為玩家 <strong>${targetUser.nickname || targetId} (ID:${targetId})</strong>（共 ${totalFriendCount} 位好友）直接觸發 20:00 心動抉擇！`);
+    alert(`💘 已成功為玩家「${targetUser.nickname || targetId} (ID:${targetId})」觸發心動抉擇！\n\n目前好友數：${totalFriendCount} 位\n該玩家前台（含目前在線或稍後開啟／重新整理）將立即彈出心動抉擇視窗。`);
+}
+
 function triggerFrontendTestEvent(type, targetPlayerId = '', extraPayload = {}) {
     if (type === 'MINUS_ONE_DAY' || type === 'EXPIRE_TO_ZERO_DAYS') {
         const users = getUsers();
@@ -384,7 +452,7 @@ function unmatchPlayerPair(userId, specificPartnerId = null) {
     }
     CloudSync.deleteNode(`${CHATS_KEY}/${pairKey}`);
 
-    saveUsers(users);
+    saveUsers(users, { isMatchMutation: true });
     appendLog(`<span class="text-amber-300">[彈性解除配對]</span> 管理員已解除 <strong>${userA.nickname}</strong> ⇄ <strong>${partnerName}</strong> 的好友關係並清空聊天紀錄，前台名單已同步更新。`);
 }
 
@@ -571,7 +639,7 @@ function runSessionMatch(isAuto = false) {
     }).length;
 
     appendLog(`<span class="text-pink-300">[結算完成]</span> 本場次共配對成功 <strong>${pairCount} 對</strong>${bannedSkippedCount > 0 ? `（另有 ${bannedSkippedCount} 名已報名玩家因設定「禁止配對」而未配對）` : ''}。`);
-    saveUsers(users);
+    saveUsers(users, { isMatchMutation: true });
 }
 
 function addSecretForceMatch() {
@@ -817,7 +885,7 @@ function executeInstantManualMatch(idA, idB) {
         AdminMemoryCache.invalidate('chats');
     }
 
-    saveUsers(users);
+    saveUsers(users, { isMatchMutation: true });
     closeInstantMatchModal();
     appendLog(`<span class="text-emerald-300">[即時手動配對]</span> 管理員已手動將 <strong>${userA.nickname} (ID:${userA.id})</strong> ⇄ <strong>${userB.nickname} (ID:${userB.id})</strong> 配對為好友並開啟聊天室。`);
     alert(`✅ 成功！「${userA.nickname} (ID:${userA.id})」與「${userB.nickname} (ID:${userB.id})」已成為好友，並開啟專屬聊天室。`);

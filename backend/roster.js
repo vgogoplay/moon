@@ -202,7 +202,7 @@ function executeDeletePlayerEntirely(playerId) {
     } else if (typeof CloudSync !== 'undefined') {
         CloudSync.deleteNode(`${USERS_KEY}/${playerId}`);
     }
-    saveUsers(remaining);
+    saveUsers(remaining, { isMatchMutation: true });
     closePlayerDetailModal();
     appendLog(`<span class="text-rose-400">[刪除玩家資料]</span> 已將玩家 <strong>${target.nickname} (ID:${target.id})</strong> 的整個資料徹底刪除。`);
 }

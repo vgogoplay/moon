@@ -199,6 +199,107 @@ const CloudSync = {
         return Array.from(byPartner.values());
     },
 
+    reconcileSymmetricMatches(usersArr, autoPersistRepaired = false) {
+        if (!Array.isArray(usersArr) || usersArr.length === 0) return false;
+        const userMap = new Map();
+        usersArr.forEach(u => {
+            if (u && u.id) {
+                const pid = String(u.id).trim();
+                if (pid && !this.isUserDeleted(pid)) {
+                    userMap.set(pid, u);
+                }
+            }
+        });
+
+        const repairedUsers = new Map();
+
+        usersArr.forEach(u => {
+            if (!u || !u.id) return;
+            const uid = String(u.id).trim();
+            if (!uid || this.isUserDeleted(uid)) return;
+
+            const uHist = this.normalizeMatchedHistoryList(u.matchedHistory);
+            if (u.matchedWithId && !uHist.some(h => String(h.partnerId) === String(u.matchedWithId).trim())) {
+                uHist.push({
+                    partnerId: String(u.matchedWithId).trim(),
+                    partnerName: String(u.matchedWithName || '').trim(),
+                    session: String(u.matchedSession || '').trim(),
+                    matchedAt: Number(u.matchedAt || 0) || Date.now(),
+                    igUnlocked: false,
+                    continueVotes: []
+                });
+            }
+
+            uHist.forEach(h => {
+                const partnerId = String(h.partnerId || '').trim();
+                if (!partnerId || partnerId === uid) return;
+                const partner = userMap.get(partnerId);
+                if (!partner) return;
+
+                const partnerHist = this.normalizeMatchedHistoryList(partner.matchedHistory);
+                const existingMirror = partnerHist.find(ph => String(ph.partnerId) === uid);
+
+                if (!existingMirror) {
+                    const mirrorEntry = {
+                        partnerId: uid,
+                        partnerName: String(u.nickname || '').trim(),
+                        session: String(h.session || u.matchedSession || '').trim(),
+                        matchedAt: Number(h.matchedAt || u.matchedAt || 0) || Date.now(),
+                        igUnlocked: Boolean(h.igUnlocked),
+                        continueVotes: Array.isArray(h.continueVotes) ? [...h.continueVotes] : []
+                    };
+                    if (h.activityId) mirrorEntry.activityId = String(h.activityId);
+                    if (h.matchDetail) mirrorEntry.matchDetail = String(h.matchDetail);
+
+                    partnerHist.push(mirrorEntry);
+                    partner.matchedHistory = this.normalizeMatchedHistoryList(partnerHist);
+
+                    if (!partner.matchedWithId) {
+                        partner.matchedWithId = uid;
+                        partner.matchedWithName = String(u.nickname || '').trim() || null;
+                        partner.matchedSession = mirrorEntry.session || null;
+                        partner.matchedAt = mirrorEntry.matchedAt;
+                    }
+                    repairedUsers.set(partnerId, partner);
+                } else {
+                    const mergedVotes = Array.from(new Set([
+                        ...(Array.isArray(existingMirror.continueVotes) ? existingMirror.continueVotes.map(String) : []),
+                        ...(Array.isArray(h.continueVotes) ? h.continueVotes.map(String) : [])
+                    ]));
+                    const nextIg = Boolean(existingMirror.igUnlocked || h.igUnlocked);
+                    const nextMatchedAt = Math.max(Number(existingMirror.matchedAt || 0), Number(h.matchedAt || 0)) || existingMirror.matchedAt;
+                    if (
+                        mergedVotes.length !== (existingMirror.continueVotes || []).length ||
+                        Boolean(existingMirror.igUnlocked) !== nextIg ||
+                        Number(existingMirror.matchedAt || 0) !== nextMatchedAt
+                    ) {
+                        existingMirror.continueVotes = mergedVotes;
+                        existingMirror.igUnlocked = nextIg;
+                        existingMirror.matchedAt = nextMatchedAt;
+                        partner.matchedHistory = this.normalizeMatchedHistoryList(partnerHist);
+                        if (String(partner.matchedWithId) === uid) {
+                            partner.matchedAt = nextMatchedAt;
+                        }
+                        repairedUsers.set(partnerId, partner);
+                    }
+                }
+            });
+        });
+
+        if (repairedUsers.size === 0) return false;
+
+        repairedUsers.forEach((repairedUser, pid) => {
+            if (this.tree && this.tree[USERS_KEY] && typeof this.tree[USERS_KEY] === 'object') {
+                this.tree[USERS_KEY][pid] = { ...repairedUser };
+            }
+            if (autoPersistRepaired && this.initialized && this.inFlightWrites === 0) {
+                this.upsertUser(repairedUser, true, { isMatchMutation: true });
+            }
+        });
+
+        return true;
+    },
+
     chatsMapToLocal(raw) {
         const result = {};
         if (!raw || typeof raw !== 'object') return result;
@@ -263,6 +364,7 @@ const CloudSync = {
                 : {};
             return cleanUser;
         });
+        this.reconcileSymmetricMatches(usersArr, this.initialized);
         this.writeLocalIfChanged(USERS_KEY, JSON.stringify(usersArr));
         usersArr.forEach(u => {
             if (u && u.id) {
@@ -563,12 +665,13 @@ const CloudSync = {
         ));
         cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory);
         if (!isMatchMutation && existingTreeUser) {
-            // 非配對／解除配對異動時，絕不以本地舊快照覆蓋雲端最新的好友配對紀錄
-            cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory);
-            cleanRecord.matchedSession = existingTreeUser.matchedSession || null;
-            cleanRecord.matchedWithId = existingTreeUser.matchedWithId || null;
-            cleanRecord.matchedWithName = existingTreeUser.matchedWithName || null;
-            cleanRecord.matchedAt = existingTreeUser.matchedAt || null;
+            // 非配對／解除配對異動時，合併雲端與本地配對歷史，絕不以舊快照覆蓋新配對好友
+            const cloudHist = this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory);
+            cleanRecord.matchedHistory = this.normalizeMatchedHistoryList([...cloudHist, ...cleanRecord.matchedHistory]);
+            cleanRecord.matchedSession = existingTreeUser.matchedSession || cleanRecord.matchedSession || null;
+            cleanRecord.matchedWithId = existingTreeUser.matchedWithId || cleanRecord.matchedWithId || null;
+            cleanRecord.matchedWithName = existingTreeUser.matchedWithName || cleanRecord.matchedWithName || null;
+            cleanRecord.matchedAt = existingTreeUser.matchedAt || cleanRecord.matchedAt || null;
         }
         cleanRecord.exactMatchCriteria = (cleanRecord.exactMatchCriteria && typeof cleanRecord.exactMatchCriteria === 'object' && !Array.isArray(cleanRecord.exactMatchCriteria))
             ? cleanRecord.exactMatchCriteria
@@ -614,12 +717,13 @@ const CloudSync = {
         }
     },
 
-    syncUsersArray(usersArr, options = { isMatchMutation: true }) {
+    syncUsersArray(usersArr, options = { isMatchMutation: false }) {
         const list = Array.isArray(usersArr) ? usersArr : [];
+        const forcePush = Boolean(options && options.isMatchMutation);
         // 僅同步更新名單內的玩家，絕不因舊快照暫時缺少某 ID 而誤發 DELETE 刪除雲端玩家（刪除僅由管理員明確刪除操作觸發）
         list.forEach(u => {
             if (u && u.id && !this.isUserDeleted(u.id)) {
-                this.upsertUser(u, false, options);
+                this.upsertUser(u, forcePush, options);
             }
         });
     },
@@ -859,7 +963,8 @@ const Store = {
             activeFriendId: null,
             multiFriendSince: null,
             confessionUnlockAt: null,
-            lastConfessionDate: null
+            lastConfessionDate: null,
+            lastHandledForceConfessionId: null
         };
     },
 
@@ -1047,11 +1152,15 @@ const Store = {
             const hasCloudTreeRec = Boolean(typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][String(state.playerId)]);
             const cloudTreeRec = hasCloudTreeRec ? CloudSync.tree[USERS_KEY][String(state.playerId)] : {};
             const existingRecord = idx >= 0 ? { ...cloudTreeRec, ...users[idx] } : { ...cloudTreeRec };
-            // 配對歷史與封鎖狀態以雲端最新樹為準，避免本地快取回寫覆蓋新配對好友
+            // 配對歷史與封鎖狀態合併雲端與本地最新紀錄，避免本地或未完成同步的雲端快取覆蓋新配對好友
             const authMatchSource = hasCloudTreeRec ? cloudTreeRec : existingRecord;
+            const rawCombinedHistory = [
+                ...(Array.isArray(cloudTreeRec.matchedHistory) ? cloudTreeRec.matchedHistory : []),
+                ...(Array.isArray(existingRecord.matchedHistory) ? existingRecord.matchedHistory : [])
+            ];
             const preservedMatchedHistory = (typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
-                ? CloudSync.normalizeMatchedHistoryList(authMatchSource.matchedHistory)
-                : (Array.isArray(authMatchSource.matchedHistory) ? authMatchSource.matchedHistory : []);
+                ? CloudSync.normalizeMatchedHistoryList(rawCombinedHistory)
+                : rawCombinedHistory;
 
             const resolvedCity = String(state.profile.city || existingRecord.city || '').trim();
             const resolvedRegion = String(state.profile.region || inferRegionByCity(resolvedCity) || existingRecord.region || '').trim();
@@ -1117,13 +1226,14 @@ const Store = {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     },
 
-    saveSharedUsers(users, options = { isMatchMutation: true }) {
+    saveSharedUsers(users, options = { isMatchMutation: false }) {
         localStorage.setItem(USERS_KEY, JSON.stringify(users));
         if (typeof CloudSync !== 'undefined') {
             const list = Array.isArray(users) ? users : [];
+            const forcePush = Boolean(options && options.isMatchMutation);
             list.forEach(u => {
                 if (u && u.id && !CloudSync.isUserDeleted(u.id)) {
-                    CloudSync.upsertUser(u, false, options);
+                    CloudSync.upsertUser(u, forcePush, options);
                 }
             });
         }

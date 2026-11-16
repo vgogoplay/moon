@@ -474,6 +474,7 @@ function renderFriendsSection() {
         const hasCardUnread = !isActive && isFriendUnread(friend, receiptsMap);
         const remainDays = calcRemainingDays(friend.matchedAt, nowTs);
         const isMockFriend = String(friend.id).startsWith('MOCK_FRIEND_');
+        const canManualUnfriend = canManuallyUnfriendFriend(friend, nowTs);
         return `
             <div onclick="selectFriend('${friend.id}')" class="cursor-pointer p-4 rounded-2xl border transition-all ${isActive ? 'bg-pink-50/90 border-[#c96a7b] shadow-md' : 'bg-white/80 border-pink-100 hover:border-pink-300'}">
                 <div class="flex items-center justify-between gap-2">
@@ -483,8 +484,13 @@ function renderFriendsSection() {
                             ${hasCardUnread ? `<span class="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-rose-500 ring-2 ring-white"></span>` : ''}
                         </div>
                         <div class="min-w-0">
-                            <div class="flex items-center gap-1.5">
+                            <div class="flex items-center gap-1.5 min-w-0">
                                 <h4 class="font-bold text-[#8f4452] text-sm truncate">${friend.nickname} <span class="text-[11px] font-normal text-[#c96a7b]">(${friend.profile.gender || '保密'})</span></h4>
+                                ${canManualUnfriend ? `
+                                    <button type="button" onclick="event.stopPropagation(); openManualUnfriendModal('${friend.id}')" title="手動解除好友（配對第二天起開放）" aria-label="解除好友 ${friend.nickname}" class="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-200 hover:border-rose-500 flex items-center justify-center text-[11px] font-bold leading-none transition shrink-0">
+                                        ✕
+                                    </button>
+                                ` : ''}
                                 ${hasCardUnread ? `<span class="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold shrink-0">新訊息</span>` : ''}
                             </div>
                             <p class="text-[11px] text-gray-500 truncate">${friend.sessionLabel || '七日緣分'} ・ ${friend.profile.region ? friend.profile.region + ' ' : ''}${friend.profile.city || '同城緣分'}</p>
@@ -524,6 +530,70 @@ function removeMockTestFriend(friendId) {
     Store.save(appState);
     refreshAllUI();
     showMiniNotice('🍃 已刪除測試好友', `已將測試好友「${target.nickname}」從好友名單移除。`);
+}
+
+let pendingManualUnfriendId = null;
+
+function canManuallyUnfriendFriend(friend, nowTs = Date.now()) {
+    if (!friend || !friend.id) return false;
+    if (friend.igUnlocked) return true;
+    const remainDays = calcRemainingDays(friend.matchedAt, nowTs);
+    // 配對當天為第 1 天（remainDays === 7）；過第一個 20:00 進入第 2 天（remainDays <= 6）即開放手動解除好友
+    return remainDays <= 6;
+}
+
+function openManualUnfriendModal(friendId) {
+    const fid = String(friendId || '').trim();
+    if (!fid) return;
+    const friend = appState.friends.find(f => String(f.id) === fid);
+    if (!friend) return;
+
+    if (!canManuallyUnfriendFriend(friend, Date.now())) {
+        showMiniNotice('⏳ 尚未開放解除好友', '配對後的第二天（過第一個 20:00）起，才可手動解除好友喔！');
+        return;
+    }
+
+    pendingManualUnfriendId = fid;
+    const textEl = document.getElementById('manualUnfriendConfirmText');
+    if (textEl) {
+        textEl.textContent = `確定要與「${friend.nickname}」解除好友關係嗎？`;
+    }
+    const modal = document.getElementById('manualUnfriendModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeManualUnfriendModal() {
+    pendingManualUnfriendId = null;
+    const modal = document.getElementById('manualUnfriendModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+function confirmManualUnfriend() {
+    const fid = String(pendingManualUnfriendId || '').trim();
+    closeManualUnfriendModal();
+    if (!fid) return;
+
+    const friend = appState.friends.find(f => String(f.id) === fid);
+    if (!friend) return;
+
+    if (!canManuallyUnfriendFriend(friend, Date.now())) {
+        showMiniNotice('⏳ 尚未開放解除好友', '配對後的第二天起才可手動解除好友。');
+        return;
+    }
+
+    if (String(friend.id).startsWith('MOCK_FRIEND_')) {
+        removeMockTestFriend(friend.id);
+        return;
+    }
+
+    clearMutualFriendship(
+        friend,
+        `🍃 你已與「${friend.nickname}」手動解除好友關係，雙方好友名單與聊天紀錄已同步清除。`
+    );
 }
 
 function selectFriend(friendId) {
@@ -1371,41 +1441,50 @@ function completeMutualContinuation(friend) {
 }
 
 function clearMutualFriendship(friend, noticeMsg) {
+    const myPid = String(appState.playerId || '').trim();
+    const partnerPid = String(friend.id || '').trim();
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const touchedUsers = [];
+
     users.forEach(u => {
-        if (String(u.id) === String(appState.playerId)) {
+        if (!u || !u.id) return;
+        const uid = String(u.id).trim();
+        if (uid === myPid || uid === partnerPid) {
+            const removeTargetId = (uid === myPid) ? partnerPid : myPid;
             if (Array.isArray(u.matchedHistory)) {
-                u.matchedHistory = u.matchedHistory.filter(h => String(h.partnerId) !== String(friend.id));
+                u.matchedHistory = u.matchedHistory.filter(h => String(h.partnerId) !== removeTargetId);
             }
-            if (String(u.matchedWithId) === String(friend.id)) {
-                u.matchedSession = null;
-                u.matchedWithId = null;
-                u.matchedWithName = null;
-                u.matchedAt = null;
+            if (String(u.matchedWithId) === removeTargetId) {
+                const fallbackHist = (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0)
+                    ? u.matchedHistory[u.matchedHistory.length - 1]
+                    : null;
+                u.matchedSession = fallbackHist ? (fallbackHist.session || null) : null;
+                u.matchedWithId = fallbackHist ? (fallbackHist.partnerId || null) : null;
+                u.matchedWithName = fallbackHist ? (fallbackHist.partnerName || null) : null;
+                u.matchedAt = fallbackHist ? (fallbackHist.matchedAt || null) : null;
             }
-        }
-        if (String(u.id) === String(friend.id)) {
-            if (Array.isArray(u.matchedHistory)) {
-                u.matchedHistory = u.matchedHistory.filter(h => String(h.partnerId) !== String(appState.playerId));
-            }
-            if (String(u.matchedWithId) === String(appState.playerId)) {
-                u.matchedSession = null;
-                u.matchedWithId = null;
-                u.matchedWithName = null;
-                u.matchedAt = null;
-            }
+            touchedUsers.push(u);
         }
     });
-    Store.saveSharedUsers(users, { isMatchMutation: true });
+
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    if (typeof CloudSync !== 'undefined') {
+        touchedUsers.forEach(u => {
+            CloudSync.upsertUser(u, true, { isMatchMutation: true });
+        });
+    }
 
     // 直接解除配對時，才清空雙方聊天歷史紀錄
-    if (appState.playerId && friend.id) {
-        ChatStore.clearChat(appState.playerId, friend.id);
+    if (myPid && partnerPid) {
+        ChatStore.clearChat(myPid, partnerPid);
         lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
     }
 
-    removeFriendReadReceipt(friend.id);
-    appState.friends = appState.friends.filter(f => String(f.id) !== String(friend.id));
+    removeFriendReadReceipt(partnerPid);
+    appState.friends = appState.friends.filter(f => String(f.id) !== partnerPid);
+    if (String(appState.activeFriendId) === partnerPid) {
+        appState.activeFriendId = appState.friends[0] ? String(appState.friends[0].id) : null;
+    }
     if (appState.matchedSession === friend.sessionLabel) {
         appState.matchedSession = null;
     }
@@ -1415,7 +1494,7 @@ function clearMutualFriendship(friend, noticeMsg) {
     }
     Store.save(appState);
     refreshAllUI();
-    if (noticeMsg) showMiniNotice('🍃 好友名單已清空', noticeMsg);
+    if (noticeMsg) showMiniNotice('🍃 已解除好友', noticeMsg);
 }
 
 // ==================== 每隔 2 天 20:00 多好友心動抉擇 ====================

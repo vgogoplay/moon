@@ -129,6 +129,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function syncFromSharedStorage() {
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.reconcileSymmetricMatches === 'function') {
+        if (CloudSync.reconcileSymmetricMatches(users, true)) {
+            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+        }
+    }
     let stateChanged = false;
     let formLockStateChanged = false;
 
@@ -267,7 +272,8 @@ function syncFromSharedStorage() {
                 'id', 'privacy', 'backupCode', 'isWarned', 'warningReason',
                 'isMatchBanned', 'isChatBanned', 'registeredSessions', 'registeredSession',
                 'exactMatchCriteria', 'customActivityRegs', 'matchedHistory', 'matchedSession',
-                'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt'
+                'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt',
+                'forceConfessionTriggerId'
             ]);
             Object.entries(me).forEach(([k, v]) => {
                 if (!skipSyncKeys.has(k)) {
@@ -462,6 +468,16 @@ function syncFromSharedStorage() {
                 f.messages = sharedMsgs;
             }
         });
+
+        // 6. 檢查後台是否指定此玩家 ID 直接觸發 20:00 心動抉擇（支援在線即時與離線補觸發）
+        if (me && me.forceConfessionTriggerId && String(me.forceConfessionTriggerId) !== String(appState.lastHandledForceConfessionId || '')) {
+            appState.lastHandledForceConfessionId = String(me.forceConfessionTriggerId);
+            if (appState.friends.length >= 2) {
+                appState.confessionUnlockAt = Date.now() - 1000;
+                appState.lastConfessionDate = null;
+                stateChanged = true;
+            }
+        }
     }
 
     updateMailboxBadge();
@@ -609,6 +625,10 @@ function applyBackendTestEvent(cmd, latestUsers) {
             appState.confessionUnlockAt = null;
         }
     } else if (cmd.type === 'ADVANCE_CONFESSION_2000') {
+        if (targetId && String(appState.playerId) !== targetId) return;
+        if (cmd.triggerToken) {
+            appState.lastHandledForceConfessionId = String(cmd.triggerToken);
+        }
         if (appState.friends.length >= 2) {
             appState.confessionUnlockAt = Date.now() - 1000;
             appState.lastConfessionDate = null;

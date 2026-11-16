@@ -728,14 +728,39 @@
         </div>
     </div>
 
+    <!-- 輕量化小視窗 6：配對第二天起手動解除好友二次確認視窗 -->
+    <div id="manualUnfriendModal" class="hidden mini-window !max-w-sm space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">💔 確認解除好友？</h3>
+                <p class="text-[11px] text-gray-500">解除後雙方好友名單與對話紀錄將同步清空</p>
+            </div>
+            <button type="button" onclick="closeManualUnfriendModal()" class="text-gray-400 hover:text-gray-700 text-lg leading-none">✕</button>
+        </div>
+
+        <div class="p-3.5 rounded-2xl bg-rose-50/75 border border-rose-200 space-y-1.5 text-xs text-[#6e3a43] leading-relaxed">
+            <p id="manualUnfriendConfirmText" class="font-semibold"></p>
+            <p class="text-[11px] text-rose-600">⚠️ 此操作會即時同步更新前後台名單並清空雙方聊天室紀錄，解除後無法復原。</p>
+        </div>
+
+        <div class="flex gap-2 pt-1 border-t border-pink-100">
+            <button type="button" onclick="closeManualUnfriendModal()" class="w-1/2 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 font-semibold hover:bg-gray-50">
+                取消
+            </button>
+            <button type="button" onclick="confirmManualUnfriend()" class="w-1/2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow transition">
+                💔 確認解除好友
+            </button>
+        </div>
+    </div>
+
     <!-- 前後台共用核心層 -->
     <script src="shared/schedule.js?v=20261116c"></script>
     <script src="shared/schema.js?v=20261115l"></script>
-    <script src="shared/cloud-store.js?v=20261116e"></script>
+    <script src="shared/cloud-store.js?v=20261116g"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/state.js?v=20261116a"></script>
+    <script src="frontend/state.js?v=20261116c"></script>
     <script src="frontend/profile.js?v=20261115y"></script>
     <script src="frontend/activities.js?v=20261116b"></script>
-    <script src="frontend/friends-chat.js?v=20261116h"></script>
+    <script src="frontend/friends-chat.js?v=20261116i"></script>
 </body>
 </html>
