@@ -83,11 +83,33 @@
             <div id="reportsPaginationBar" class="pt-3 border-t border-pink-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
-        <!-- ==================== 3. 🧪 互動流程測試工具 ==================== -->
+        <!-- ==================== 3. 🛡️ 資料維護工具 ==================== -->
+        <div class="card-jp rounded-2xl p-5 bg-amber-50/50 border-2 border-amber-200 space-y-4">
+            <div>
+                <h2 class="text-base font-bold font-serif-jp text-amber-900">🛡️ 資料維護工具</h2>
+            </div>
+            <div class="p-3.5 rounded-xl bg-white border border-amber-200 space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <div class="text-xs font-bold text-amber-900">🔄 配對資料一致性檢查（以聊天室紀錄為基準）</div>
+                        <p class="text-[11px] text-amber-800/80 mt-0.5">
+                            掃描所有現存聊天室，若發現玩家資料遺漏配對對象（例如 10005 與 20008 有聊天但配對狀態被舊快照覆蓋消失），自動從聊天室提取雙向配對紀錄補回名單中。
+                        </p>
+                    </div>
+                    <button type="button" onclick="runRepairMatchesFromChats()"
+                        class="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-2xs transition shrink-0">
+                        🔍 檢查並修復配對資料
+                    </button>
+                </div>
+                <div id="repairMatchesResult" class="hidden text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></div>
+            </div>
+        </div>
+
+        <!-- ==================== 4. 🧪 互動流程測試工具 ==================== -->
         <div class="card-jp rounded-2xl p-5 bg-pink-50/50 border-2 border-pink-200 space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🧪 互動流程測試工具（即時連動前台畫面）</h2>
+                    <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">4. 🧪 互動流程測試工具（即時連動前台畫面）</h2>
                     <p class="text-xs text-gray-500">可指定特定玩家 ID 一鍵填滿全部資料，或連續點擊新增多位好友（不限人數，可測試 6 位好友與每隔 2 天心動通知）</p>
                 </div>
                 <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2">

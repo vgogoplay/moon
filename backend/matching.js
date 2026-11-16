@@ -1,5 +1,37 @@
 /* backend/matching.js - 後台 20:00 自動配對演算法、秘密強制配對通道與測試工具 */
 
+function runRepairMatchesFromChats() {
+    const resultEl = document.getElementById('repairMatchesResult');
+    const users = getUsers();
+    
+    if (typeof CloudSync === 'undefined' || typeof CloudSync.reconcileSymmetricMatches !== 'function') {
+        if (resultEl) {
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML = '⚠️ CloudSync 工具尚未載入，請稍後再試。';
+        }
+        return;
+    }
+
+    const previousStateStr = JSON.stringify(users);
+    const wasRepaired = CloudSync.reconcileSymmetricMatches(users, false);
+
+    if (!wasRepaired || JSON.stringify(users) === previousStateStr) {
+        if (resultEl) {
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML = '✅ 檢查完成：所有聊天室與玩家配對資料皆為雙向一致，無需修復。';
+        }
+        return;
+    }
+
+    saveUsers(users, { isMatchMutation: true });
+
+    if (resultEl) {
+        resultEl.classList.remove('hidden');
+        resultEl.innerHTML = `✅ 已掃描現有聊天室紀錄，成功自動補回遺漏的雙向配對並同步雲端！`;
+    }
+    appendLog(`<span class="text-pink-300">[資料修復]</span> 管理員已執行「以聊天室為基準修復配對資料」，系統已自動補齊玩家雙向配對紀錄。`);
+}
+
 function adminFillPlayerFullData() {
     let targetId = document.getElementById('fillTargetPlayerId').value.trim();
     const frontendState = JSON.parse(localStorage.getItem(FRONTEND_STORAGE_KEY) || '{}');

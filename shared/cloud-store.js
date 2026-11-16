@@ -201,6 +201,12 @@ const CloudSync = {
 
     reconcileSymmetricMatches(usersArr, autoPersistRepaired = false) {
         if (!Array.isArray(usersArr) || usersArr.length === 0) return false;
+        
+        let chatsMap = {};
+        try {
+            chatsMap = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+        } catch (_) {}
+
         const userMap = new Map();
         usersArr.forEach(u => {
             if (u && u.id) {
@@ -213,6 +219,74 @@ const CloudSync = {
 
         const repairedUsers = new Map();
 
+        // 1. 先用現存的聊天室紀錄來補齊遺失的配對 (處理 10005 與 20008 的狀況)
+        Object.entries(chatsMap).forEach(([pairKey, roomData]) => {
+            const parts = String(pairKey || '').split('__');
+            if (parts.length !== 2) return;
+
+            const [idA, idB] = parts.map(s => s.trim());
+            if (!idA || !idB || idA === idB) return;
+
+            const userA = userMap.get(idA);
+            const userB = userMap.get(idB);
+            if (!userA || !userB) return;
+
+            const messages = Array.isArray(roomData)
+                ? roomData
+                : (Array.isArray(roomData?.messages) ? roomData.messages : []);
+            if (messages.length === 0) return;
+
+            const firstMsg = messages[0] || {};
+            const fallbackTs = Number(firstMsg.timestamp || firstMsg.ts || roomData?.updatedAt) || Date.now();
+
+            userA.matchedHistory = Array.isArray(userA.matchedHistory) ? userA.matchedHistory : [];
+            userB.matchedHistory = Array.isArray(userB.matchedHistory) ? userB.matchedHistory : [];
+
+            const recInA = userA.matchedHistory.find(h => String(h.partnerId) === idB);
+            const recInB = userB.matchedHistory.find(h => String(h.partnerId) === idA);
+
+            let changedA = false;
+            let changedB = false;
+
+            if (!recInA) {
+                userA.matchedHistory.push({
+                    partnerId: idB,
+                    partnerName: userB.nickname || idB,
+                    session: recInB?.session || userA.matchedSession || userB.matchedSession || '系統補回配對',
+                    matchedAt: Number(recInB?.matchedAt) || fallbackTs,
+                    igUnlocked: Boolean(recInB?.igUnlocked),
+                    continueVotes: []
+                });
+                if (!userA.matchedWithId) {
+                    userA.matchedWithId = idB;
+                    userA.matchedWithName = userB.nickname || idB;
+                    userA.matchedAt = Number(recInB?.matchedAt) || fallbackTs;
+                }
+                changedA = true;
+            }
+
+            if (!recInB) {
+                userB.matchedHistory.push({
+                    partnerId: idA,
+                    partnerName: userA.nickname || idA,
+                    session: recInA?.session || userB.matchedSession || userA.matchedSession || '系統補回配對',
+                    matchedAt: Number(recInA?.matchedAt) || fallbackTs,
+                    igUnlocked: Boolean(recInA?.igUnlocked),
+                    continueVotes: []
+                });
+                if (!userB.matchedWithId) {
+                    userB.matchedWithId = idA;
+                    userB.matchedWithName = userA.nickname || idA;
+                    userB.matchedAt = Number(recInA?.matchedAt) || fallbackTs;
+                }
+                changedB = true;
+            }
+
+            if (changedA) repairedUsers.set(idA, userA);
+            if (changedB) repairedUsers.set(idB, userB);
+        });
+
+        // 2. 原本的單邊配對補齊邏輯
         usersArr.forEach(u => {
             if (!u || !u.id) return;
             const uid = String(u.id).trim();
