@@ -1003,7 +1003,11 @@ function refreshAllUI() {
         }
     }
 
-    document.getElementById('navFriendDot').classList.toggle('hidden', appState.friends.length === 0);
+    if (typeof updateFriendUnreadDot === 'function') {
+        updateFriendUnreadDot();
+    } else {
+        document.getElementById('navFriendDot').classList.toggle('hidden', appState.friends.length === 0);
+    }
     renderHomeStatsCharts();
     renderFriendsSection();
 }

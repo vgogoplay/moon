@@ -339,6 +339,102 @@ document.getElementById('issueReportForm').addEventListener('submit', function(e
     showMiniNotice('📮 問題回報已送出', '已送出至後台！您可直接在此視窗下方查看送出內容、處理狀態與管理員回覆。');
 });
 
+// ==================== 好友名單未讀紅點狀態管理（純本地輕量紀錄） ====================
+const FRIEND_READ_RECEIPTS_PREFIX = 'yuelao_friend_read_receipts_';
+
+function getFriendReadReceiptsStorageKey() {
+    const pid = (typeof appState !== 'undefined' && appState && appState.playerId)
+        ? String(appState.playerId).trim()
+        : 'guest';
+    return `${FRIEND_READ_RECEIPTS_PREFIX}${pid || 'guest'}`;
+}
+
+function loadFriendReadReceiptsMap() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(getFriendReadReceiptsStorageKey()) || '{}');
+        return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function saveFriendReadReceiptsMap(mapObj) {
+    try {
+        localStorage.setItem(getFriendReadReceiptsStorageKey(), JSON.stringify(mapObj || {}));
+    } catch (e) {}
+}
+
+function getFriendLatestActivityReceiptKey(friend) {
+    if (!friend || !friend.id) return '';
+    const fid = String(friend.id);
+    const myPid = (typeof appState !== 'undefined' && appState && appState.playerId)
+        ? String(appState.playerId).trim()
+        : '';
+    const isRealFriend = !fid.startsWith('MOCK_FRIEND_') && !!myPid;
+    let msgs = Array.isArray(friend.messages) ? friend.messages : [];
+    if (isRealFriend && typeof ChatStore !== 'undefined' && typeof ChatStore.getMessages === 'function') {
+        const shared = ChatStore.getMessages(myPid, fid);
+        if (shared.length > 0) msgs = shared;
+    }
+
+    const incomingOrSysMsgs = msgs.filter(m => {
+        if (!m) return false;
+        if (m.senderId === 'system' || m.sender === 'system') return true;
+        if (m.senderId) return String(m.senderId).trim() !== myPid;
+        return m.sender !== 'me';
+    });
+    const lastIncoming = incomingOrSysMsgs[incomingOrSysMsgs.length - 1];
+    if (lastIncoming) {
+        return `in_${incomingOrSysMsgs.length}_${lastIncoming.id || lastIncoming.ts || lastIncoming.text || ''}_${friend.matchedAt || 0}`;
+    }
+    return `match_${friend.matchedAt || 0}`;
+}
+
+function isFriendUnread(friend, receiptsMap = null) {
+    if (!friend || !friend.id) return false;
+    const map = receiptsMap || loadFriendReadReceiptsMap();
+    const latestKey = getFriendLatestActivityReceiptKey(friend);
+    if (!latestKey) return false;
+    return map[String(friend.id)] !== latestKey;
+}
+
+function markFriendChatAsRead(friend) {
+    if (!friend || !friend.id) return;
+    const fid = String(friend.id);
+    const latestKey = getFriendLatestActivityReceiptKey(friend);
+    if (!latestKey) return;
+    const map = loadFriendReadReceiptsMap();
+    if (map[fid] !== latestKey) {
+        map[fid] = latestKey;
+        saveFriendReadReceiptsMap(map);
+    }
+}
+
+function removeFriendReadReceipt(friendId) {
+    if (!friendId) return;
+    const fid = String(friendId);
+    const map = loadFriendReadReceiptsMap();
+    if (Object.prototype.hasOwnProperty.call(map, fid)) {
+        delete map[fid];
+        saveFriendReadReceiptsMap(map);
+    }
+}
+
+function updateFriendUnreadDot() {
+    const dotEl = document.getElementById('navFriendDot');
+    if (!dotEl) return;
+    const friendsList = (typeof appState !== 'undefined' && appState && Array.isArray(appState.friends))
+        ? appState.friends
+        : [];
+    if (friendsList.length === 0) {
+        dotEl.classList.add('hidden');
+        return;
+    }
+    const receiptsMap = loadFriendReadReceiptsMap();
+    const hasUnread = friendsList.some(f => isFriendUnread(f, receiptsMap));
+    dotEl.classList.toggle('hidden', !hasUnread);
+}
+
 // ==================== 好友名單與對話（含禁止玩家發話：顯示「請聯繫管理員」） ====================
 function renderFriendsSection() {
     const listEl = document.getElementById('friendsListContainer');
@@ -354,6 +450,7 @@ function renderFriendsSection() {
             </div>
         `;
         workspace.classList.add('hidden');
+        updateFriendUnreadDot();
         return;
     }
 
@@ -361,20 +458,35 @@ function renderFriendsSection() {
         appState.activeFriendId = String(appState.friends[0].id);
     }
 
+    const friendsTabEl = document.getElementById('tab-friends');
+    const isFriendsTabOpen = Boolean(friendsTabEl && !friendsTabEl.classList.contains('hidden'));
+    if (isFriendsTabOpen) {
+        const activeFriendObj = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
+        if (activeFriendObj) {
+            markFriendChatAsRead(activeFriendObj);
+        }
+    }
+
+    const receiptsMap = loadFriendReadReceiptsMap();
     const nowTs = Date.now();
     listEl.innerHTML = appState.friends.map(friend => {
         const isActive = String(friend.id) === String(appState.activeFriendId);
+        const hasCardUnread = !isActive && isFriendUnread(friend, receiptsMap);
         const remainDays = calcRemainingDays(friend.matchedAt, nowTs);
         const isMockFriend = String(friend.id).startsWith('MOCK_FRIEND_');
         return `
             <div onclick="selectFriend('${friend.id}')" class="cursor-pointer p-4 rounded-2xl border transition-all ${isActive ? 'bg-pink-50/90 border-[#c96a7b] shadow-md' : 'bg-white/80 border-pink-100 hover:border-pink-300'}">
                 <div class="flex items-center justify-between gap-2">
                     <div class="flex items-center gap-3 min-w-0">
-                        <div class="w-11 h-11 rounded-full bg-gradient-to-br from-pink-200 to-rose-300 text-white font-bold flex items-center justify-center text-lg shrink-0">
+                        <div class="relative w-11 h-11 rounded-full bg-gradient-to-br from-pink-200 to-rose-300 text-white font-bold flex items-center justify-center text-lg shrink-0">
                             ${friend.nickname.slice(0, 1)}
+                            ${hasCardUnread ? `<span class="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-rose-500 ring-2 ring-white"></span>` : ''}
                         </div>
                         <div class="min-w-0">
-                            <h4 class="font-bold text-[#8f4452] text-sm truncate">${friend.nickname} <span class="text-[11px] font-normal text-[#c96a7b]">(${friend.profile.gender || '保密'})</span></h4>
+                            <div class="flex items-center gap-1.5">
+                                <h4 class="font-bold text-[#8f4452] text-sm truncate">${friend.nickname} <span class="text-[11px] font-normal text-[#c96a7b]">(${friend.profile.gender || '保密'})</span></h4>
+                                ${hasCardUnread ? `<span class="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold shrink-0">新訊息</span>` : ''}
+                            </div>
                             <p class="text-[11px] text-gray-500 truncate">${friend.sessionLabel || '七日緣分'} ・ ${friend.profile.region ? friend.profile.region + ' ' : ''}${friend.profile.city || '同城緣分'}</p>
                         </div>
                     </div>
@@ -395,6 +507,7 @@ function renderFriendsSection() {
 
     workspace.classList.remove('hidden');
     renderActiveFriendWorkspace();
+    updateFriendUnreadDot();
 }
 
 function removeMockTestFriend(friendId) {
@@ -765,6 +878,11 @@ function renderActiveFriendWorkspace() {
         }
     }
 
+    if (isFriendsTabVisible) {
+        markFriendChatAsRead(friend);
+        updateFriendUnreadDot();
+    }
+
     if (isFriendsTabVisible && shouldScrollChatToLatest) {
         shouldScrollChatToLatest = false;
         isAutoScrollingChatBottom = true;
@@ -1027,6 +1145,7 @@ function clearMutualFriendship(friend, noticeMsg) {
         lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
     }
 
+    removeFriendReadReceipt(friend.id);
     appState.friends = appState.friends.filter(f => String(f.id) !== String(friend.id));
     if (appState.matchedSession === friend.sessionLabel) {
         appState.matchedSession = null;

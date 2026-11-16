@@ -58,6 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await CloudSync.init(() => {
             syncFromSharedStorage();
             updateMailboxBadge();
+    if (typeof updateFriendUnreadDot === 'function') updateFriendUnreadDot();
     const currentReportsRaw = localStorage.getItem(REPORTS_KEY) || '[]';
     if (currentReportsRaw !== lastReportsFrontendSnapshot) {
         lastReportsFrontendSnapshot = currentReportsRaw;
@@ -492,6 +493,7 @@ function syncFromSharedStorage() {
     } else {
         if (chatsChanged) {
             Store.save(appState, false, true);
+            if (typeof updateFriendUnreadDot === 'function') updateFriendUnreadDot();
         }
         const curUsersRaw = localStorage.getItem(USERS_KEY) || '[]';
         if (curUsersRaw !== lastUsersStatsSnapshot) {
