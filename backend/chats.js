@@ -110,7 +110,7 @@ function buildAdminChatRoomEntries(users, chatsMap) {
         });
     });
 
-    rooms.sort((a, b) => b.lastTs - a.lastTs);
+    rooms.sort((a, b) => Number(b.lastTs) - Number(a.lastTs));
     return rooms;
 }
 

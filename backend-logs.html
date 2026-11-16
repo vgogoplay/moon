@@ -14,8 +14,8 @@
         <div class="card-jp rounded-2xl overflow-hidden border-2 border-rose-200">
             <div class="p-5 border-b border-rose-200 flex flex-wrap items-center justify-between bg-rose-50/40 gap-3">
                 <div>
-                    <h2 class="text-lg font-bold font-serif-jp text-rose-800">🛡️ 後台登入失敗防護日誌</h2>
-                    <p class="text-xs text-gray-500 mt-0.5">系統自動記錄嘗試登入後台但密碼錯誤的來源 IP 與裝置資訊，保留最近 10 筆紀錄</p>
+                    <h2 class="text-lg font-bold font-serif-jp text-rose-800">🛡️ 後台防護與玩家操作日誌</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">系統自動記錄登入失敗的來源 IP，以及前台玩家手動解除配對的操作紀錄（保留最近 10 筆）</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="clearAdminLoginLogs()" class="text-xs px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-50 transition shadow-sm">
@@ -30,10 +30,10 @@
                 <table class="admin-grid-table text-left text-xs md:text-sm">
                     <thead>
                         <tr class="text-xs">
-                            <th class="p-3.5">發生時間</th>
-                            <th class="p-3.5">嘗試登入帳號</th>
-                            <th class="p-3.5">來源 IP 位址</th>
-                            <th class="p-3.5">來源裝置與瀏覽器 (User Agent)</th>
+                            <th class="p-3.5">時間</th>
+                            <th class="p-3.5 w-48">操作類型 / 嘗試帳號</th>
+                            <th class="p-3.5 w-40">來源 IP / 玩家名稱</th>
+                            <th class="p-3.5">詳細內容 / 裝置資訊</th>
                         </tr>
                     </thead>
                     <tbody id="loginLogsTableBody"></tbody>
@@ -49,7 +49,7 @@
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261116b"></script>
     <script src="backend/matching.js?v=20261116c"></script>
-    <script src="backend/logs.js?v=20261116a"></script>
+    <script src="backend/logs.js?v=20261116b"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261116c"></script>
 </body>

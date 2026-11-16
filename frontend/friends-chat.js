@@ -590,6 +590,32 @@ function confirmManualUnfriend() {
         return;
     }
 
+    // 呼叫 API 將玩家手動解除配對的動作記錄到後台日誌中
+    if (typeof appendAdminLoginLog === 'function') {
+        const myName = String(appState.profile.nickname || appState.playerId);
+        const partnerName = String(friend.nickname || friend.id);
+        appendAdminLoginLog(
+            `[解除配對] ID:${appState.playerId}`,
+            myName,
+            `手動解除與 ID:${friend.id} (${partnerName}) 的配對`
+        );
+    } else {
+        const rawLogs = localStorage.getItem('yuelao_admin_login_logs') || '[]';
+        let logs = [];
+        try { logs = JSON.parse(rawLogs); } catch (e) { logs = []; }
+        logs.unshift({
+            createdAt: new Date().toLocaleString('zh-TW', { hour12: false }),
+            accountTried: `[解除配對] ID:${appState.playerId}`,
+            ipAddress: String(appState.profile.nickname || appState.playerId),
+            userAgent: `手動解除與 ID:${friend.id} (${friend.nickname || friend.id}) 的配對`
+        });
+        if (logs.length > 10) logs.length = 10;
+        localStorage.setItem('yuelao_admin_login_logs', JSON.stringify(logs));
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.putNode('yuelao_admin_login_logs', logs);
+        }
+    }
+
     clearMutualFriendship(
         friend,
         `🍃 你已與「${friend.nickname}」手動解除好友關係，雙方好友名單與聊天紀錄已同步清除。`

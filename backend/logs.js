@@ -10,7 +10,7 @@ function getAdminLoginLogs() {
 }
 
 function clearAdminLoginLogs() {
-    if (!confirm('確定要清空所有的登入失敗防護紀錄嗎？此動作無法復原。')) return;
+    if (!confirm('確定要清空所有的防護與操作紀錄嗎？此動作無法復原。')) return;
     
     localStorage.removeItem('yuelao_admin_login_logs');
     if (typeof CloudSync !== 'undefined') {
@@ -25,7 +25,7 @@ function renderLogsPageSection() {
     if (!tbody) return;
 
     if (logs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-gray-400">目前尚無任何登入失敗紀錄。</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-gray-400">目前尚無任何紀錄。</td></tr>`;
         return;
     }
 
@@ -36,16 +36,22 @@ function renderLogsPageSection() {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 
-    tbody.innerHTML = logs.map(log => `
+    tbody.innerHTML = logs.map(log => {
+        const isUnmatch = String(log.accountTried || '').includes('[解除配對]');
+        const ipCell = isUnmatch
+            ? `<span class="text-emerald-700 font-bold">${escapeHtml(log.ipAddress)}</span>`
+            : `<a href="https://whatismyipaddress.com/ip/${escapeHtml(log.ipAddress)}" target="_blank" class="hover:underline text-rose-600" title="點擊查詢 IP 來源">${escapeHtml(log.ipAddress)}</a>`;
+        const accountCell = isUnmatch
+            ? `<span class="text-emerald-600 font-bold">${escapeHtml(log.accountTried)}</span>`
+            : `<span class="text-[#8f4452] font-bold">${escapeHtml(log.accountTried)}</span>`;
+
+        return `
         <tr class="hover:bg-rose-50/30 transition">
             <td class="p-3.5 text-xs font-mono text-gray-500 whitespace-nowrap">${escapeHtml(log.createdAt)}</td>
-            <td class="p-3.5 text-xs font-bold text-[#8f4452] whitespace-nowrap">${escapeHtml(log.accountTried)}</td>
-            <td class="p-3.5 text-xs font-mono font-bold text-rose-600 whitespace-nowrap">
-                <a href="https://whatismyipaddress.com/ip/${escapeHtml(log.ipAddress)}" target="_blank" class="hover:underline" title="點擊查詢 IP 來源">
-                    ${escapeHtml(log.ipAddress)}
-                </a>
-            </td>
-            <td class="p-3.5 text-[11px] text-gray-600 break-all leading-relaxed">${escapeHtml(log.userAgent)}</td>
+            <td class="p-3.5 text-xs whitespace-nowrap">${accountCell}</td>
+            <td class="p-3.5 text-xs font-mono whitespace-nowrap">${ipCell}</td>
+            <td class="p-3.5 text-[11px] ${isUnmatch ? 'text-emerald-700 font-semibold' : 'text-gray-600'} break-all leading-relaxed">${escapeHtml(log.userAgent)}</td>
         </tr>
-    `).join('');
+        `;
+    }).join('');
 }
