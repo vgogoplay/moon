@@ -295,6 +295,9 @@ function sharedCheckSingleCriterion(key, desiredVal, candidate, seekerCriteria =
 }
 
 function sharedRecordCustomPairMatch(userA, userB, targetSession, nowTs, activityId, matchDetail = '') {
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
+        CloudSync.clearPairUnmatched(userA.id, userB.id);
+    }
     if (!Array.isArray(userA.matchedHistory)) userA.matchedHistory = [];
     if (!Array.isArray(userB.matchedHistory)) userB.matchedHistory = [];
 

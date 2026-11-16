@@ -13,7 +13,7 @@ function runRepairMatchesFromChats() {
     }
 
     const previousStateStr = JSON.stringify(users);
-    const wasRepaired = CloudSync.reconcileSymmetricMatches(users, false);
+    const wasRepaired = CloudSync.reconcileSymmetricMatches(users, false, { includeChatsRepair: true });
 
     if (!wasRepaired || JSON.stringify(users) === previousStateStr) {
         if (resultEl) {
@@ -476,13 +476,22 @@ function unmatchPlayerPair(userId, specificPartnerId = null) {
         }
     }
 
-    const pairKey = [String(userId), String(targetPartnerId)].sort().join('__');
-    const allChats = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
-    if (Object.prototype.hasOwnProperty.call(allChats, pairKey)) {
-        delete allChats[pairKey];
-        localStorage.setItem(CHATS_KEY, JSON.stringify(allChats));
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
+        CloudSync.markPairUnmatched(userId, targetPartnerId);
     }
-    CloudSync.deleteNode(`${CHATS_KEY}/${pairKey}`);
+    if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+        ChatStore.clearChat(userId, targetPartnerId);
+    } else {
+        const pairKey = [String(userId), String(targetPartnerId)].sort().join('__');
+        const allChats = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+        if (Object.prototype.hasOwnProperty.call(allChats, pairKey)) {
+            delete allChats[pairKey];
+            localStorage.setItem(CHATS_KEY, JSON.stringify(allChats));
+        }
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.deleteNode(`${CHATS_KEY}/${pairKey}`);
+        }
+    }
 
     saveUsers(users, { isMatchMutation: true });
     appendLog(`<span class="text-amber-300">[彈性解除配對]</span> 管理員已解除 <strong>${userA.nickname}</strong> ⇄ <strong>${partnerName}</strong> 的好友關係並清空聊天紀錄，前台名單已同步更新。`);
@@ -558,6 +567,9 @@ function canPair(A, B) {
 }
 
 function recordPairMatch(userA, userB, targetSession, nowTs, activityId = null, matchDetail = '') {
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
+        CloudSync.clearPairUnmatched(userA.id, userB.id);
+    }
     if (!Array.isArray(userA.matchedHistory)) userA.matchedHistory = [];
     if (!Array.isArray(userB.matchedHistory)) userB.matchedHistory = [];
 

@@ -17,6 +17,8 @@ const TAB_PLAYER_ID_KEY = 'yuelao_tab_player_id';
 const PLAYER_STATE_PREFIX = 'yuelao_player_state_';
 const PENDING_USERS_SYNC_KEY = 'yuelao_pending_users_sync';
 const DELETED_USERS_SYNC_KEY = 'yuelao_deleted_users_sync';
+const UNMATCHED_PAIRS_SYNC_KEY = 'yuelao_unmatched_pairs_sync';
+const UNMATCHED_PAIRS_CLOUD_NODE = 'yuelao_unmatched_pairs';
 
 const FIREBASE_DB_URL = 'https://moon-8b627-default-rtdb.asia-southeast1.firebasedatabase.app';
 
@@ -33,6 +35,7 @@ const CloudSync = {
     writeEpoch: 0,
     pendingUsers: {},
     deletedUsers: {},
+    unmatchedPairs: {},
 
     loadSharedPendingUsers() {
         const now = Date.now();
@@ -149,6 +152,87 @@ const CloudSync = {
         return Boolean(map[key] && Date.now() <= Number(map[key] || 0));
     },
 
+    makeUnmatchedPairKey(idA, idB) {
+        const a = String(idA || '').trim();
+        const b = String(idB || '').trim();
+        if (!a || !b || a === b) return '';
+        return [a, b].sort().join('__');
+    },
+
+    loadSharedUnmatchedPairs() {
+        const now = Date.now();
+        const merged = { ...this.unmatchedPairs };
+        try {
+            const raw = JSON.parse(localStorage.getItem(UNMATCHED_PAIRS_SYNC_KEY) || '{}');
+            if (raw && typeof raw === 'object') {
+                Object.keys(raw).forEach(pk => {
+                    const exp = Number(raw[pk] || 0);
+                    if (now <= exp) {
+                        merged[pk] = Math.max(Number(merged[pk] || 0), exp);
+                    }
+                });
+            }
+        } catch (e) {}
+        if (this.tree && this.tree[UNMATCHED_PAIRS_CLOUD_NODE] && typeof this.tree[UNMATCHED_PAIRS_CLOUD_NODE] === 'object') {
+            Object.keys(this.tree[UNMATCHED_PAIRS_CLOUD_NODE]).forEach(pk => {
+                const val = this.tree[UNMATCHED_PAIRS_CLOUD_NODE][pk];
+                const exp = (val && typeof val === 'object') ? Number(val.graceUntil || 0) : Number(val || 0);
+                if (now <= exp) {
+                    merged[pk] = Math.max(Number(merged[pk] || 0), exp);
+                }
+            });
+        }
+        let changed = false;
+        Object.keys(merged).forEach(pk => {
+            if (now > Number(merged[pk] || 0)) {
+                delete merged[pk];
+                changed = true;
+            }
+        });
+        this.unmatchedPairs = merged;
+        if (changed) {
+            try { localStorage.setItem(UNMATCHED_PAIRS_SYNC_KEY, JSON.stringify(merged)); } catch (e) {}
+        }
+        return merged;
+    },
+
+    markPairUnmatched(idA, idB, ttlMs = 300000) {
+        const pk = this.makeUnmatchedPairKey(idA, idB);
+        if (!pk) return;
+        const graceUntil = Date.now() + ttlMs;
+        const map = this.loadSharedUnmatchedPairs();
+        map[pk] = graceUntil;
+        this.unmatchedPairs = map;
+        try { localStorage.setItem(UNMATCHED_PAIRS_SYNC_KEY, JSON.stringify(map)); } catch (e) {}
+        if (this.initialized) {
+            this.putNode(`${UNMATCHED_PAIRS_CLOUD_NODE}/${pk}`, { unmatchedAt: Date.now(), graceUntil });
+        }
+    },
+
+    clearPairUnmatched(idA, idB) {
+        const pk = this.makeUnmatchedPairKey(idA, idB);
+        if (!pk) return;
+        const map = this.loadSharedUnmatchedPairs();
+        if (Object.prototype.hasOwnProperty.call(map, pk)) {
+            delete map[pk];
+            this.unmatchedPairs = map;
+            try { localStorage.setItem(UNMATCHED_PAIRS_SYNC_KEY, JSON.stringify(map)); } catch (e) {}
+        }
+        if (this.tree && this.tree[UNMATCHED_PAIRS_CLOUD_NODE] && Object.prototype.hasOwnProperty.call(this.tree[UNMATCHED_PAIRS_CLOUD_NODE], pk)) {
+            delete this.tree[UNMATCHED_PAIRS_CLOUD_NODE][pk];
+        }
+        if (this.initialized) {
+            this.deleteNode(`${UNMATCHED_PAIRS_CLOUD_NODE}/${pk}`);
+        }
+    },
+
+    isPairRecentlyUnmatched(idA, idB) {
+        const pk = this.makeUnmatchedPairKey(idA, idB);
+        if (!pk) return false;
+        const map = this.loadSharedUnmatchedPairs();
+        return Boolean(map[pk] && Date.now() <= Number(map[pk] || 0));
+    },
+
     mapToArray(raw) {
         if (!raw) return [];
         if (Array.isArray(raw)) return raw.filter(item => item && typeof item === 'object');
@@ -199,13 +283,16 @@ const CloudSync = {
         return Array.from(byPartner.values());
     },
 
-    reconcileSymmetricMatches(usersArr, autoPersistRepaired = false) {
+    reconcileSymmetricMatches(usersArr, autoPersistRepaired = false, options = {}) {
         if (!Array.isArray(usersArr) || usersArr.length === 0) return false;
+        const includeChatsRepair = Boolean(options && options.includeChatsRepair);
         
         let chatsMap = {};
-        try {
-            chatsMap = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
-        } catch (_) {}
+        if (includeChatsRepair) {
+            try {
+                chatsMap = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+            } catch (_) {}
+        }
 
         const userMap = new Map();
         usersArr.forEach(u => {
@@ -219,17 +306,19 @@ const CloudSync = {
 
         const repairedUsers = new Map();
 
-        // 1. 先用現存的聊天室紀錄來補齊遺失的配對 (處理 10005 與 20008 的狀況)
-        Object.entries(chatsMap).forEach(([pairKey, roomData]) => {
-            const parts = String(pairKey || '').split('__');
-            if (parts.length !== 2) return;
+        // 1. 僅在管理員手動執行「以聊天室為基準修復」時，才掃描現存聊天室補齊遺失的配對（排除剛手動解除配對的組合）
+        if (includeChatsRepair) {
+            Object.entries(chatsMap).forEach(([pairKey, roomData]) => {
+                const parts = String(pairKey || '').split('__');
+                if (parts.length !== 2) return;
 
-            const [idA, idB] = parts.map(s => s.trim());
-            if (!idA || !idB || idA === idB) return;
+                const [idA, idB] = parts.map(s => s.trim());
+                if (!idA || !idB || idA === idB) return;
+                if (this.isPairRecentlyUnmatched(idA, idB)) return;
 
-            const userA = userMap.get(idA);
-            const userB = userMap.get(idB);
-            if (!userA || !userB) return;
+                const userA = userMap.get(idA);
+                const userB = userMap.get(idB);
+                if (!userA || !userB) return;
 
             const messages = Array.isArray(roomData)
                 ? roomData
@@ -282,9 +371,10 @@ const CloudSync = {
                 changedB = true;
             }
 
-            if (changedA) repairedUsers.set(idA, userA);
-            if (changedB) repairedUsers.set(idB, userB);
-        });
+                if (changedA) repairedUsers.set(idA, userA);
+                if (changedB) repairedUsers.set(idB, userB);
+            });
+        }
 
         // 2. 原本的單邊配對補齊邏輯
         usersArr.forEach(u => {
@@ -307,6 +397,7 @@ const CloudSync = {
             uHist.forEach(h => {
                 const partnerId = String(h.partnerId || '').trim();
                 if (!partnerId || partnerId === uid) return;
+                if (this.isPairRecentlyUnmatched(uid, partnerId)) return;
                 const partner = userMap.get(partnerId);
                 if (!partner) return;
 
@@ -438,6 +529,30 @@ const CloudSync = {
                 : {};
             return cleanUser;
         });
+        const unmatchedPairsMap = this.loadSharedUnmatchedPairs();
+        if (Object.keys(unmatchedPairsMap).length > 0) {
+            usersArr.forEach(u => {
+                if (!u || !u.id) return;
+                const uid = String(u.id).trim();
+                if (Array.isArray(u.matchedHistory)) {
+                    u.matchedHistory = u.matchedHistory.filter(h => !this.isPairRecentlyUnmatched(uid, h.partnerId));
+                }
+                if (u.matchedWithId && this.isPairRecentlyUnmatched(uid, u.matchedWithId)) {
+                    const lastH = (u.matchedHistory || [])[u.matchedHistory.length - 1];
+                    u.matchedSession = lastH ? (lastH.session || null) : null;
+                    u.matchedWithId = lastH ? (lastH.partnerId || null) : null;
+                    u.matchedWithName = lastH ? (lastH.partnerName || null) : null;
+                    u.matchedAt = lastH ? (lastH.matchedAt || null) : null;
+                }
+            });
+            if (t[CHATS_KEY] && typeof t[CHATS_KEY] === 'object') {
+                Object.keys(unmatchedPairsMap).forEach(pk => {
+                    if (Object.prototype.hasOwnProperty.call(t[CHATS_KEY], pk)) {
+                        delete t[CHATS_KEY][pk];
+                    }
+                });
+            }
+        }
         this.reconcileSymmetricMatches(usersArr, this.initialized);
         this.writeLocalIfChanged(USERS_KEY, JSON.stringify(usersArr));
         usersArr.forEach(u => {
@@ -760,6 +875,17 @@ const CloudSync = {
 
         await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord);
         const cleanupTasks = [];
+        if (isMatchMutation) {
+            if (!Array.isArray(cleanRecord.matchedHistory) || cleanRecord.matchedHistory.length === 0) {
+                cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedHistory`));
+            }
+            if (!cleanRecord.matchedWithId) {
+                cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedWithId`));
+                cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedWithName`));
+                cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedSession`));
+                cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedAt`));
+            }
+        }
         if (cleanRecord.registeredSessions.length === 0) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/registeredSessions`));
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/registeredSession`));
@@ -807,9 +933,11 @@ const CloudSync = {
         this.lastPushedUsersJson = {};
         this.pendingUsers = {};
         this.deletedUsers = {};
+        this.unmatchedPairs = {};
         try {
             localStorage.removeItem(PENDING_USERS_SYNC_KEY);
             localStorage.removeItem(DELETED_USERS_SYNC_KEY);
+            localStorage.removeItem(UNMATCHED_PAIRS_SYNC_KEY);
             Object.keys(localStorage).forEach(k => {
                 if (k.startsWith('yuelao_custom_act_lock_')) {
                     localStorage.removeItem(k);
@@ -1378,6 +1506,9 @@ const ChatStore = {
 
     ensureThread(id1, id2, initialMessages = []) {
         if (!id1 || !id2) return [];
+        if (typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(id1, id2)) {
+            return [];
+        }
         const all = this.getAll();
         const key = this.getPairKey(id1, id2);
         if (!Array.isArray(all[key]) || all[key].length === 0) {
@@ -1441,6 +1572,9 @@ const ChatStore = {
         if (!id1 || !id2) return;
         const all = this.getAll();
         const key = this.getPairKey(id1, id2);
+        if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
+            CloudSync.markPairUnmatched(id1, id2);
+        }
         if (Object.prototype.hasOwnProperty.call(all, key)) {
             delete all[key];
             this.saveAll(all);
