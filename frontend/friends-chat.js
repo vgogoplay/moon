@@ -755,6 +755,7 @@ function renderActiveFriendWorkspace() {
         chatInput.classList.remove('!bg-gray-100', '!text-gray-400');
         chatSendBtn.disabled = false;
     }
+    updateRandomTopicButtonState();
 
     const banner = document.getElementById('sevenDayDecisionBanner');
     const statusText = document.getElementById('sevenDayDecisionStatus');
@@ -897,6 +898,264 @@ function renderActiveFriendWorkspace() {
             scrollToLatest();
             isAutoScrollingChatBottom = false;
         }, 60);
+    }
+}
+
+// ==================== 🎲 月老互動題目（彈窗單一選項＋確認發送，5 秒冷卻） ====================
+const LOVE_INTERACTIVE_TOPICS = [
+    '第一次見面時，對方哪個細節最容易吸引你的注意？（眼神、談吐、穿搭還是笑容？）',
+    '在感情裡，你比較是「每天都要分享大小事」還是「各自留一點安靜空間」的人？',
+    '對你來說，另一半做過什麼小舉動會讓你瞬間覺得「就是這個人了」？',
+    '如果這週末我們要一起去約會，你會選「下午茶散步聊天」、「看電影吃晚餐」還是「去看夜景」？',
+    '你覺得曖昧期最讓人心動、小鹿亂撞的瞬間是什麼？',
+    '在戀愛關係中，你最看重對方的哪三個特質？',
+    '如果兩個人意見不合或吵架，你比較習慣當下溝通清楚，還是先冷靜一會再聊？',
+    '戀愛小測驗：你比較偏向「一見鍾情派」還是「日久生情派」？為什麼呢？',
+    '單身這段時間，你最常在週末做什麼來幫自己充電？',
+    '你心目中最理想的「下班後約會行程」是什麼樣子？',
+    '情人節或紀念日，你比較喜歡收到手寫卡片、實用小禮物，還是一起去吃頓好料？',
+    '如果可以用三個關鍵字形容「談戀愛時的自己」，你會選哪三個詞？',
+    '戀愛二選一：下雨天在家一起煮飯追劇 vs 撐傘去逛夜市吃小吃，你選哪一個？',
+    '你覺得兩個人在一起後，最幸福、最療癒的日常畫面是什麼？',
+    '在感情裡，你是比較主動表達喜歡的人，還是會偷偷觀察、等對方先靠近的人？',
+    '如果有機會和另一半一起規劃一趟三天兩夜小旅行，你最想去哪裡？',
+    '你比較喜歡「被照顧、被偏愛」的感覺，還是「照顧對方、替對方安排好一切」？',
+    '談戀愛時，你最無法接受另一半踩到哪一條地雷？',
+    '你覺得遠距離戀愛或忙碌工作時，最重要的是靠什麼來維持感情溫度？',
+    '如果今天月老送你一張「戀愛許願券」，你最希望在下一段感情裡實現什麼心願？',
+    '你喜歡和另一半有完全相同的興趣，還是各自有不同領域可以互相分享？',
+    '在一段感情裡，你覺得「儀式感」重要嗎？哪種小儀式會讓你特別開心？',
+    '如果晚上下班心情有點低落，你希望另一半「靜靜陪在身邊」還是「講笑話帶你去吃美食」？',
+    '你相信「互補的兩個人」比較適合，還是「三觀與個性相似的兩個人」走得更長久？',
+    '如果要在第一次約會挑一間餐廳，你會偏好安靜有氣氛的小餐館，還是熱鬧輕鬆的居酒屋／燒肉？',
+    '你覺得「好朋友變情人」比較浪漫，還是「透過月老牽線認識全新的人」更有驚喜感？',
+    '在感情中，如果對方工作很忙回訊息比較慢，你通常會怎麼調適心情？',
+    '你理想中的另一半，在朋友面前和在你面前會有反差萌嗎？你喜歡哪一種反差？',
+    '如果兩個人一起養一隻寵物，你會想養貓派、狗派，還是先當彼此的小跟班就好？',
+    '回顧過去的經驗，你覺得自己現在對「幸福」的定義跟幾年前有什麼不同？',
+    '如果明天突然多出一天不用上班的戀愛假期，你最想和喜歡的人一起怎麼度過？',
+    '你覺得兩個人在一起久了，要怎麼做才能一直保持像剛認識時的心動感？',
+    '對你而言，「有安全感」的感情具體會表現在哪些日常細節裡？',
+    '如果我們之後約出來見面，你第一眼最希望給對方留下什麼樣的印象？',
+    '在愛人與被愛之間，現階段的你比較渴望哪一種？為什麼？',
+    '你睡前習慣跟另一半說聲晚安、聊幾句今天發生的事嗎？'
+];
+
+const RANDOM_TOPIC_COOLDOWN_MS = 5000;
+let randomTopicCooldownUntil = 0;
+let randomTopicCooldownTimer = null;
+const recentRandomTopicIndices = [];
+let isRandomTopicOptionSelected = false;
+
+function pickNextLoveInteractiveTopic() {
+    const total = LOVE_INTERACTIVE_TOPICS.length;
+    if (total === 0) return '';
+    const maxHistory = Math.min(15, total - 1);
+    const candidates = [];
+    for (let i = 0; i < total; i++) {
+        if (!recentRandomTopicIndices.includes(i)) {
+            candidates.push(i);
+        }
+    }
+    const pool = candidates.length > 0 ? candidates : Array.from({ length: total }, (_, i) => i);
+    const chosenIdx = pool[Math.floor(Math.random() * pool.length)];
+    recentRandomTopicIndices.push(chosenIdx);
+    while (recentRandomTopicIndices.length > maxHistory) {
+        recentRandomTopicIndices.shift();
+    }
+    return LOVE_INTERACTIVE_TOPICS[chosenIdx] || '';
+}
+
+function updateRandomTopicButtonState() {
+    const btn = document.getElementById('randomTopicBtn');
+    if (!btn) return;
+
+    const friend = (typeof appState !== 'undefined' && appState && Array.isArray(appState.friends))
+        ? appState.friends.find(f => String(f.id) === String(appState.activeFriendId))
+        : null;
+    const isLocked = Boolean(
+        !friend ||
+        (appState && appState.isChatBanned) ||
+        (typeof isEveningConfessionPending === 'function' && isEveningConfessionPending()) ||
+        (typeof calcRemainingDays === 'function' && calcRemainingDays(friend.matchedAt, Date.now()) === 0)
+    );
+
+    if (isLocked) {
+        btn.disabled = true;
+        btn.textContent = '🎲 互動';
+        return;
+    }
+
+    const remainMs = randomTopicCooldownUntil - Date.now();
+    if (remainMs > 0) {
+        const remainSec = Math.max(1, Math.ceil(remainMs / 1000));
+        btn.disabled = true;
+        btn.textContent = `⏳ 互動 (${remainSec}s)`;
+    } else {
+        btn.disabled = false;
+        btn.textContent = '🎲 互動';
+        if (randomTopicCooldownTimer) {
+            clearInterval(randomTopicCooldownTimer);
+            randomTopicCooldownTimer = null;
+        }
+    }
+}
+
+function startRandomTopicCooldown() {
+    randomTopicCooldownUntil = Date.now() + RANDOM_TOPIC_COOLDOWN_MS;
+    updateRandomTopicButtonState();
+    if (randomTopicCooldownTimer) {
+        clearInterval(randomTopicCooldownTimer);
+    }
+    randomTopicCooldownTimer = setInterval(() => {
+        updateRandomTopicButtonState();
+    }, 250);
+}
+
+function syncRandomTopicModalSelectionUI() {
+    const cardEl = document.getElementById('randomTopicOptionCard');
+    const radioEl = document.getElementById('randomTopicModeRadio');
+    const confirmBtn = document.getElementById('confirmRandomTopicBtn');
+    const hintEl = document.getElementById('randomTopicSelectHint');
+
+    if (radioEl) {
+        radioEl.checked = isRandomTopicOptionSelected;
+    }
+    if (cardEl) {
+        if (isRandomTopicOptionSelected) {
+            cardEl.classList.remove('border-pink-200', 'bg-white');
+            cardEl.classList.add('border-[#c96a7b]', 'bg-pink-50/80', 'shadow-sm');
+        } else {
+            cardEl.classList.remove('border-[#c96a7b]', 'bg-pink-50/80', 'shadow-sm');
+            cardEl.classList.add('border-pink-200', 'bg-white');
+        }
+    }
+    if (confirmBtn) {
+        confirmBtn.classList.toggle('opacity-60', !isRandomTopicOptionSelected);
+    }
+    if (hintEl && isRandomTopicOptionSelected) {
+        hintEl.classList.add('hidden');
+    }
+}
+
+function selectRandomTopicModeOption() {
+    isRandomTopicOptionSelected = true;
+    syncRandomTopicModalSelectionUI();
+}
+
+function openRandomTopicModal() {
+    if (appState.isChatBanned) {
+        showMiniNotice('🚫 禁止發話', '請聯繫管理員');
+        return;
+    }
+    if (isEveningConfessionPending()) {
+        openEveningConfessionModal();
+        return;
+    }
+    const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
+    if (!friend) return;
+
+    if (calcRemainingDays(friend.matchedAt, Date.now()) === 0) {
+        showMiniNotice('🚫 聊天室已禁止發話', '剩餘 0 天！請先決定是否繼續配對，雙方都按下繼續後才會重新開放聊天。');
+        return;
+    }
+
+    if (Date.now() < randomTopicCooldownUntil) {
+        updateRandomTopicButtonState();
+        return;
+    }
+
+    isRandomTopicOptionSelected = false;
+    const hintEl = document.getElementById('randomTopicSelectHint');
+    if (hintEl) hintEl.classList.add('hidden');
+    syncRandomTopicModalSelectionUI();
+
+    const modal = document.getElementById('randomTopicModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeRandomTopicModal() {
+    const modal = document.getElementById('randomTopicModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function confirmSendRandomLoveTopic() {
+    if (!isRandomTopicOptionSelected) {
+        const hintEl = document.getElementById('randomTopicSelectHint');
+        if (hintEl) hintEl.classList.remove('hidden');
+        return;
+    }
+
+    if (appState.isChatBanned) {
+        closeRandomTopicModal();
+        showMiniNotice('🚫 禁止發話', '請聯繫管理員');
+        return;
+    }
+    if (isEveningConfessionPending()) {
+        closeRandomTopicModal();
+        openEveningConfessionModal();
+        return;
+    }
+    const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
+    if (!friend) {
+        closeRandomTopicModal();
+        return;
+    }
+
+    if (calcRemainingDays(friend.matchedAt, Date.now()) === 0) {
+        closeRandomTopicModal();
+        showMiniNotice('🚫 聊天室已禁止發話', '剩餘 0 天！請先決定是否繼續配對，雙方都按下繼續後才會重新開放聊天。');
+        return;
+    }
+
+    if (Date.now() < randomTopicCooldownUntil) {
+        closeRandomTopicModal();
+        updateRandomTopicButtonState();
+        return;
+    }
+
+    const question = pickNextLoveInteractiveTopic();
+    if (!question) {
+        closeRandomTopicModal();
+        return;
+    }
+
+    const topicMessageText = `🎲【月老互動題目】${question}`;
+    const nowStr = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+    const isMockFriend = String(friend.id).startsWith('MOCK_FRIEND_') || !appState.playerId;
+
+    closeRandomTopicModal();
+    startRandomTopicCooldown();
+
+    if (!isMockFriend) {
+        const updatedMsgs = ChatStore.appendMessage(appState.playerId, friend.id, {
+            senderId: String(appState.playerId),
+            senderName: appState.profile.nickname || String(appState.playerId),
+            text: topicMessageText,
+            time: nowStr
+        });
+        lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
+        friend.messages = updatedMsgs;
+        shouldScrollChatToLatest = true;
+        Store.save(appState);
+        renderActiveFriendWorkspace();
+    } else {
+        friend.messages.push({ sender: 'me', text: topicMessageText, time: nowStr });
+        shouldScrollChatToLatest = true;
+        Store.save(appState);
+        renderActiveFriendWorkspace();
+
+        setTimeout(() => {
+            friend.messages.push({
+                sender: 'partner',
+                text: `這題好有意思！讓我想一下怎麼回答你 🌸`,
+                time: new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })
+            });
+            Store.save(appState);
+            renderActiveFriendWorkspace();
+        }, 900);
     }
 }
 

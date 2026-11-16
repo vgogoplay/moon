@@ -351,9 +351,12 @@
 
                     <div id="chatMessagesBox" class="flex-1 overflow-y-auto space-y-3 p-2 bg-[#fffafb] rounded-2xl border border-pink-100/60"></div>
 
-                    <form id="chatSendForm" onclick="handleLockedChatClick()" class="mt-3 flex gap-2">
-                        <input type="text" id="chatInput" class="input-jp flex-1" placeholder="寫下想對他說的話..." required>
-                        <button type="submit" id="chatSendBtn" class="btn-sakura px-5 py-2.5 rounded-xl text-sm font-semibold shrink-0">
+                    <form id="chatSendForm" onclick="handleLockedChatClick()" class="mt-3 flex items-center gap-1.5 sm:gap-2">
+                        <button type="button" id="randomTopicBtn" onclick="openRandomTopicModal()" title="選擇感情／戀愛互動題目並發送至對話窗（發送後冷卻 5 秒）" class="px-3 sm:px-3.5 py-2.5 rounded-xl bg-pink-50 border border-pink-300 text-[#8f4452] hover:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-bold shrink-0 transition whitespace-nowrap">
+                            🎲 互動
+                        </button>
+                        <input type="text" id="chatInput" class="input-jp flex-1 min-w-0" placeholder="寫下想對他說的話..." required>
+                        <button type="submit" id="chatSendBtn" class="btn-sakura px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold shrink-0 whitespace-nowrap">
                             傳送 💌
                         </button>
                     </form>
@@ -692,6 +695,39 @@
         </div>
     </div>
 
+    <!-- 輕量化小視窗 5：月老互動選項視窗（單一選項：隨機互動題目） -->
+    <div id="randomTopicModal" class="hidden mini-window !max-w-sm space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🎲 月老互動</h3>
+                <p class="text-[11px] text-gray-500">請點選下方選項後，按下「確認」發送題目</p>
+            </div>
+            <button type="button" onclick="closeRandomTopicModal()" class="text-gray-400 hover:text-gray-700 text-lg leading-none">✕</button>
+        </div>
+
+        <div class="space-y-2">
+            <label id="randomTopicOptionCard" onclick="selectRandomTopicModeOption()" class="flex items-center gap-3 p-3.5 rounded-2xl border-2 border-pink-200 bg-white hover:border-[#c96a7b] cursor-pointer transition select-none">
+                <input type="radio" id="randomTopicModeRadio" name="interactiveModeOption" value="random_love_topic" class="w-4 h-4 accent-[#c96a7b] shrink-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-bold text-[#8f4452]">🎲 隨機互動題目</div>
+                    <p class="text-[11px] text-gray-500 mt-0.5 leading-relaxed">由月老隨機抽出一道感情／戀愛話題發送給對方</p>
+                </div>
+            </label>
+            <p id="randomTopicSelectHint" class="hidden text-[11px] text-rose-600 font-semibold px-1">
+                ⚠️ 請先點選「🎲 隨機互動題目」選項，再按確認喔！
+            </p>
+        </div>
+
+        <div class="flex gap-2 pt-2 border-t border-pink-100">
+            <button type="button" onclick="closeRandomTopicModal()" class="w-1/3 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                取消
+            </button>
+            <button type="button" id="confirmRandomTopicBtn" onclick="confirmSendRandomLoveTopic()" class="w-2/3 btn-sakura py-2.5 rounded-xl text-xs font-bold shadow opacity-60">
+                ✨ 確認
+            </button>
+        </div>
+    </div>
+
     <!-- 前後台共用核心層 -->
     <script src="shared/schedule.js?v=20261116c"></script>
     <script src="shared/schema.js?v=20261115l"></script>
@@ -700,6 +736,6 @@
     <script src="frontend/state.js?v=20261116a"></script>
     <script src="frontend/profile.js?v=20261115y"></script>
     <script src="frontend/activities.js?v=20261116b"></script>
-    <script src="frontend/friends-chat.js?v=20261116e"></script>
+    <script src="frontend/friends-chat.js?v=20261116h"></script>
 </body>
 </html>
