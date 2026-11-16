@@ -1368,19 +1368,31 @@ const ChatStore = {
         return Array.isArray(all[key]) ? all[key] : [];
     },
 
+    formatChatDateTimeStr(ts = Date.now()) {
+        const d = new Date(Number(ts) || Date.now());
+        if (Number.isNaN(d.getTime())) return '';
+        const datePart = `${d.getMonth() + 1}/${d.getDate()}`;
+        const timePart = d.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+        return `${datePart} ${timePart}`;
+    },
+
     ensureThread(id1, id2, initialMessages = []) {
         if (!id1 || !id2) return [];
         const all = this.getAll();
         const key = this.getPairKey(id1, id2);
         if (!Array.isArray(all[key]) || all[key].length === 0) {
-            all[key] = initialMessages.map((m, idx) => ({
-                id: m.id || `INIT_${key}_${idx}`,
-                senderId: String(m.senderId || 'system'),
-                senderName: m.senderName || '',
-                text: m.text || '',
-                time: m.time || '',
-                ts: m.ts || (Date.now() + idx)
-            }));
+            all[key] = initialMessages.map((m, idx) => {
+                const msgTs = Number(m.ts) || (Date.now() + idx);
+                return {
+                    id: m.id || `INIT_${key}_${idx}`,
+                    senderId: String(m.senderId || 'system'),
+                    senderName: m.senderName || '',
+                    text: m.text || '',
+                    time: m.time || '',
+                    dateTime: m.dateTime || this.formatChatDateTimeStr(msgTs),
+                    ts: msgTs
+                };
+            });
             this.saveAll(all);
             if (typeof CloudSync !== 'undefined') {
                 all[key].forEach(mObj => CloudSync.putNode(`${CHATS_KEY}/${key}/${mObj.id}`, mObj));
@@ -1394,13 +1406,15 @@ const ChatStore = {
         const all = this.getAll();
         const key = this.getPairKey(id1, id2);
         if (!Array.isArray(all[key])) all[key] = [];
+        const msgTs = Number(msg.ts) || Date.now();
         const savedMsg = {
             id: msg.id || `MSG_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             senderId: String(msg.senderId),
             senderName: msg.senderName || '',
             text: msg.text,
             time: msg.time || '',
-            ts: msg.ts || Date.now()
+            dateTime: msg.dateTime || this.formatChatDateTimeStr(msgTs),
+            ts: msgTs
         };
         all[key].push(savedMsg);
         

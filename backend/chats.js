@@ -15,6 +15,23 @@ function escapeChatAdminHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+function formatAdminChatDateTime(msg) {
+    if (!msg || typeof msg !== 'object') return '';
+    if (msg.dateTime && String(msg.dateTime).trim()) {
+        return String(msg.dateTime).trim();
+    }
+    const tsNum = Number(msg.ts || 0);
+    if (tsNum > 0 && !Number.isNaN(tsNum)) {
+        const d = new Date(tsNum);
+        if (!Number.isNaN(d.getTime())) {
+            const datePart = `${d.getMonth() + 1}/${d.getDate()}`;
+            const timePart = d.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+            return `${datePart} ${timePart}`;
+        }
+    }
+    return String(msg.time || '').trim();
+}
+
 function highlightChatKeywordHtml(text, keyword) {
     const safeText = escapeChatAdminHtml(text);
     const kw = String(keyword || '').trim();
@@ -165,7 +182,7 @@ function renderChatsPageSection(users, forceRender = false) {
                 const isSelected = r.pairKey === selectedAdminChatPairKey;
                 const badgeA = r.genderA === '男' ? 'bg-sky-100 text-sky-700' : (r.genderA === '女' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600');
                 const badgeB = r.genderB === '男' ? 'bg-sky-100 text-sky-700' : (r.genderB === '女' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600');
-                const lastTimeStr = r.lastMsg.time || (r.lastTs ? new Date(r.lastTs).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+                const lastTimeStr = formatAdminChatDateTime(r.lastMsg);
 
                 return `
                     <button type="button" onclick="selectAdminChatRoom('${escapeChatAdminHtml(r.pairKey)}')" class="w-full p-3.5 text-left transition block ${isSelected ? 'bg-pink-50/95 border-l-4 border-l-[#c96a7b]' : 'hover:bg-pink-50/35'}">
@@ -248,12 +265,14 @@ function renderChatsPageSection(users, forceRender = false) {
 
     detailMsgsBox.innerHTML = truncatedBannerHtml + visibleMsgs.map(m => {
         const senderId = String(m.senderId || '');
+        const timeDisplay = formatAdminChatDateTime(m);
         if (senderId === 'system' || m.sender === 'system') {
             return `
                 <div class="text-center my-2">
                     <span class="inline-block px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-[#8f4452] leading-relaxed">
                         ${highlightChatKeywordHtml(m.text || '', adminChatSearchKeyword)}
                     </span>
+                    ${timeDisplay ? `<div class="text-[10px] text-gray-400 mt-0.5">${escapeChatAdminHtml(timeDisplay)}</div>` : ''}
                 </div>
             `;
         }
@@ -262,7 +281,6 @@ function renderChatsPageSection(users, forceRender = false) {
         const senderLabel = isSideB
             ? `${activeRoom.nameB} (ID:${activeRoom.idB})`
             : `${activeRoom.nameA} (ID:${activeRoom.idA})`;
-        const timeDisplay = m.time || (m.ts ? new Date(Number(m.ts)).toLocaleString('zh-TW') : '');
 
         return `
             <div class="flex flex-col ${isSideB ? 'items-end' : 'items-start'}">
