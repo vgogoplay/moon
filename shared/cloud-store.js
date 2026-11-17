@@ -675,7 +675,19 @@ const CloudSync = {
 
         // 9. 後台自定義專屬活動（第 2 種活動）
         if (t[CUSTOM_ACTIVITIES_KEY] !== undefined) {
-            const actsArr = this.mapToArray(t[CUSTOM_ACTIVITIES_KEY]);
+            const actsArr = this.mapToArray(t[CUSTOM_ACTIVITIES_KEY]).map(act => {
+                if (!act || typeof act !== 'object') return act;
+                const cleanAct = { ...act };
+                const mapObj = (cleanAct.matchedUserMap && typeof cleanAct.matchedUserMap === 'object' && !Array.isArray(cleanAct.matchedUserMap))
+                    ? { ...cleanAct.matchedUserMap }
+                    : {};
+                this.normalizeStringArray(cleanAct.matchedUserIds).forEach(uid => {
+                    if (uid && !mapObj[uid]) mapObj[uid] = Number(cleanAct.lastMatchedTs || 0) || Date.now();
+                });
+                cleanAct.matchedUserMap = mapObj;
+                cleanAct.matchedUserIds = Object.keys(mapObj);
+                return cleanAct;
+            });
             actsArr.sort((a, b) => Number(a.createdAtTs || 0) - Number(b.createdAtTs || 0));
             this.writeLocalIfChanged(CUSTOM_ACTIVITIES_KEY, JSON.stringify(actsArr));
         } else {

@@ -331,10 +331,51 @@ function sharedRecordCustomPairMatch(userA, userB, targetSession, nowTs, activit
 
 const CUSTOM_ACT_LOCK_PREFIX = 'yuelao_custom_act_lock_';
 const CUSTOM_ACT_CLOUD_LOCKS_NODE = 'yuelao_custom_act_locks';
+const CUSTOM_ACT_AUTO_MATCH_GRACE_MS = 15 * 60 * 1000; // 超過設定配對時間 15 分鐘即視為逾期，絕不在更新重整時自動補跑
 const customActivityAutoLockInFlight = new Set();
 
 function makeCustomActLockNodeKey(activityId, matchTs) {
     return `${String(activityId || '').trim()}_${Number(matchTs || 0)}`;
+}
+
+function getCustomActivityMatchedUserIdSet(act, usersList = null) {
+    const idSet = new Set();
+    if (!act || typeof act !== 'object') return idSet;
+
+    if (Array.isArray(act.matchedUserIds)) {
+        act.matchedUserIds.forEach(uid => {
+            const clean = String(uid || '').trim();
+            if (clean) idSet.add(clean);
+        });
+    } else if (act.matchedUserIds && typeof act.matchedUserIds === 'object') {
+        Object.values(act.matchedUserIds).forEach(uid => {
+            const clean = String(uid || '').trim();
+            if (clean) idSet.add(clean);
+        });
+    }
+
+    if (act.matchedUserMap && typeof act.matchedUserMap === 'object' && !Array.isArray(act.matchedUserMap)) {
+        Object.keys(act.matchedUserMap).forEach(uid => {
+            const clean = String(uid || '').trim();
+            if (clean) idSet.add(clean);
+        });
+    }
+
+    const usersArr = Array.isArray(usersList) ? usersList : [];
+    const actIdStr = String(act.id || '').trim();
+    const actNameStr = String(act.name || '').trim();
+    usersArr.forEach(u => {
+        if (!u || !u.id || !Array.isArray(u.matchedHistory)) return;
+        const hasActHist = u.matchedHistory.some(h =>
+            (actIdStr && String(h.activityId || '').trim() === actIdStr) ||
+            (actNameStr && String(h.session || '').trim() === actNameStr)
+        );
+        if (hasActHist) {
+            idSet.add(String(u.id).trim());
+        }
+    });
+
+    return idSet;
 }
 
 async function executeCustomActivityMatchCore(activityId, options = {}) {
@@ -348,13 +389,14 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     const act = Array.isArray(acts) ? acts.find(a => String(a.id) === String(activityId)) : null;
     if (!act) return { executed: false, pairCount: 0, unmatchedCount: 0 };
 
-    // 單次執行保護：若為到點自動配對且已標記完成，絕不重複執行第二次
-    if (isAuto && act.autoMatchedDone) {
+    // 單次執行保護：若為到點自動配對且活動已關閉或已標記完成，絕不重複執行第二次
+    if (isAuto && (!act.isOpen || act.autoMatchedDone)) {
         return { executed: false, pairCount: 0, unmatchedCount: 0 };
     }
 
-    if (markScheduledDone) {
+    if (isAuto || markScheduledDone) {
         act.autoMatchedDone = true;
+        act.isOpen = false;
         localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(acts));
     }
 
@@ -381,8 +423,12 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
         return otherKeys.some(k => sharedCheckSingleCriterion(k, criteria[k], candidate, criteria));
     };
 
+    const permanentMatchedSet = getCustomActivityMatchedUserIdSet(act, users);
     const eligiblePool = sharedShuffleArray(users.filter(u => {
         if (!u || !u.id || u.isWarned || u.isMatchBanned) return false;
+        const uid = String(u.id).trim();
+        // 永久名單保護：曾在此活動配對過的玩家即使後續解除好友，也絕不在同一活動再次重複配對
+        if (permanentMatchedSet.has(uid)) return false;
         const hasReg = Boolean(u.customActivityRegs && u.customActivityRegs[act.id]);
         if (!hasReg) return false;
         const alreadyMatchedThisAct = (u.matchedHistory || []).some(h =>
@@ -494,11 +540,24 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     }
 
     const unmatchedCount = Math.max(0, eligiblePool.length - pairedThisRunIds.size);
+    const nextMatchedMap = (act.matchedUserMap && typeof act.matchedUserMap === 'object' && !Array.isArray(act.matchedUserMap))
+        ? { ...act.matchedUserMap }
+        : {};
+    permanentMatchedSet.forEach(uid => {
+        if (!nextMatchedMap[uid]) nextMatchedMap[uid] = nowTs;
+    });
+    pairedThisRunIds.forEach(uid => {
+        nextMatchedMap[String(uid)] = nowTs;
+    });
+
+    act.matchedUserMap = nextMatchedMap;
+    act.matchedUserIds = Object.keys(nextMatchedMap);
     act.matchCount = Number(act.matchCount || 0) + pairCount;
     act.lastMatchedAt = new Date().toLocaleString('zh-TW');
     act.lastMatchedTs = nowTs;
-    if (markScheduledDone) {
+    if (isAuto || markScheduledDone) {
         act.autoMatchedDone = true;
+        act.isOpen = false;
     }
 
     localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(acts));
@@ -507,7 +566,8 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     }
 
     if (typeof appendLog === 'function') {
-        appendLog(`<span class="text-pink-300">[${act.name} 結算完成]</span> 本次共配對成功 <strong>${pairCount} 對</strong>${unmatchedCount > 0 ? `（另有 ${unmatchedCount} 人因號碼／選項落單暫未配對）` : ''}。`);
+        const autoCloseNote = (isAuto || markScheduledDone) ? '，活動已同步自動關閉' : '';
+        appendLog(`<span class="text-pink-300">[${act.name} 結算完成]</span> 本次共配對成功 <strong>${pairCount} 對</strong>${unmatchedCount > 0 ? `（另有 ${unmatchedCount} 人因號碼／選項落單暫未配對）` : ''}${autoCloseNote}。`);
     }
 
     // 僅更新本次配對成功的那幾位玩家資料，避免全庫整批重寫互相覆蓋
@@ -538,10 +598,19 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
 async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, isFrontendCaller = false) {
     const lockNodeKey = makeCustomActLockNodeKey(activityId, matchTs);
     try {
+        // 逾期保護：距離設定配對時間超過 15 分鐘即不再背景自動觸發
+        if (Date.now() - Number(matchTs || 0) > CUSTOM_ACT_AUTO_MATCH_GRACE_MS) {
+            return;
+        }
+
         // 前台稍微錯開 450~1250ms，讓同時在線的多支手機不會在同一毫秒搶寫
         const jitterMs = isFrontendCaller ? (450 + Math.floor(Math.random() * 800)) : 0;
         if (jitterMs > 0) {
             await new Promise(resolve => setTimeout(resolve, jitterMs));
+        }
+
+        if (Date.now() - Number(matchTs || 0) > CUSTOM_ACT_AUTO_MATCH_GRACE_MS) {
+            return;
         }
 
         if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl) {
@@ -553,65 +622,69 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
                 fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json`, { method: 'GET', cache: 'no-store' })
             ]);
 
-            if (actRes.ok && lockRes.ok) {
-                const remoteAct = await actRes.json();
-                const remoteLock = await lockRes.json();
+            // 若查詢雲端鎖失敗（網路逾時或離線），立即中止而不盲目執行配對
+            if (!actRes.ok || !lockRes.ok) {
+                return;
+            }
 
-                // 若雲端活動已關閉、已標記 autoMatchedDone，或已有其他裝置搶先寫入雲端鎖，立即停止不再執行第二次
-                if (!remoteAct || !remoteAct.isOpen || remoteAct.autoMatchedDone || (remoteLock && remoteLock.claimedBy)) {
-                    if (remoteAct && typeof remoteAct === 'object') {
-                        try {
-                            const localActs = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
-                            const idx = localActs.findIndex(a => String(a.id) === String(activityId));
-                            if (idx >= 0) {
-                                localActs[idx] = { ...localActs[idx], ...remoteAct };
-                                localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(localActs));
-                            }
-                        } catch (e) {}
-                    }
-                    if (typeof CloudSync.fetchFullTree === 'function') {
-                        await CloudSync.fetchFullTree();
-                    }
-                    if (typeof renderAdminAll === 'function') renderAdminAll();
-                    if (typeof refreshAllUI === 'function') refreshAllUI();
-                    return;
-                }
+            const remoteAct = await actRes.json();
+            const remoteLock = await lockRes.json();
 
-                // 寫入雲端單次搶占鎖並二次驗證是否為唯一勝出者
-                const claimToken = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-                await CloudSync.putNode(`${CUSTOM_ACT_CLOUD_LOCKS_NODE}/${lockNodeKey}`, {
-                    activityId: String(activityId),
-                    matchTs: Number(matchTs),
-                    claimedBy: claimToken,
-                    claimedAt: Date.now()
-                });
-
-                await new Promise(resolve => setTimeout(resolve, 180));
-
-                const verifyRes = await fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json`, { method: 'GET', cache: 'no-store' });
-                if (verifyRes.ok) {
-                    const verifyLock = await verifyRes.json();
-                    if (!verifyLock || verifyLock.claimedBy !== claimToken) {
-                        if (typeof CloudSync.fetchFullTree === 'function') {
-                            await CloudSync.fetchFullTree();
+            // 若雲端活動已關閉、已標記 autoMatchedDone，或已有其他裝置搶先寫入雲端鎖，立即停止不再執行第二次
+            if (!remoteAct || !remoteAct.isOpen || remoteAct.autoMatchedDone || (remoteLock && remoteLock.claimedBy)) {
+                if (remoteAct && typeof remoteAct === 'object') {
+                    try {
+                        const localActs = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
+                        const idx = localActs.findIndex(a => String(a.id) === String(activityId));
+                        if (idx >= 0) {
+                            localActs[idx] = { ...localActs[idx], ...remoteAct };
+                            localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(localActs));
                         }
-                        if (typeof renderAdminAll === 'function') renderAdminAll();
-                        if (typeof refreshAllUI === 'function') refreshAllUI();
-                        return;
-                    }
+                    } catch (e) {}
                 }
-
-                // 確認取得唯一執行權後，先拉取最新完整玩家資料再進行配對
                 if (typeof CloudSync.fetchFullTree === 'function') {
                     await CloudSync.fetchFullTree();
                 }
+                if (typeof renderAdminAll === 'function') renderAdminAll();
+                if (typeof refreshAllUI === 'function') refreshAllUI();
+                return;
+            }
+
+            // 寫入雲端單次搶占鎖並二次驗證是否為唯一勝出者
+            const claimToken = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+            await CloudSync.putNode(`${CUSTOM_ACT_CLOUD_LOCKS_NODE}/${lockNodeKey}`, {
+                activityId: String(activityId),
+                matchTs: Number(matchTs),
+                claimedBy: claimToken,
+                claimedAt: Date.now()
+            });
+
+            await new Promise(resolve => setTimeout(resolve, 180));
+
+            const verifyRes = await fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json`, { method: 'GET', cache: 'no-store' });
+            if (!verifyRes.ok) {
+                return;
+            }
+            const verifyLock = await verifyRes.json();
+            if (!verifyLock || verifyLock.claimedBy !== claimToken) {
+                if (typeof CloudSync.fetchFullTree === 'function') {
+                    await CloudSync.fetchFullTree();
+                }
+                if (typeof renderAdminAll === 'function') renderAdminAll();
+                if (typeof refreshAllUI === 'function') refreshAllUI();
+                return;
+            }
+
+            // 確認取得唯一執行權後，先拉取最新完整玩家資料再進行配對
+            if (typeof CloudSync.fetchFullTree === 'function') {
+                await CloudSync.fetchFullTree();
             }
         }
 
         await executeCustomActivityMatchCore(activityId, { isAuto: true, markScheduledDone: true });
     } catch (e) {
-        console.warn('claimAndRunScheduledCustomActivity 異常', e);
-        await executeCustomActivityMatchCore(activityId, { isAuto: true, markScheduledDone: true });
+        // 發生網路或同步異常時嚴禁無條件補跑，避免重複配對
+        console.warn('claimAndRunScheduledCustomActivity 異常（已安全中止自動補跑）', e);
     } finally {
         customActivityAutoLockInFlight.delete(lockKey);
     }
@@ -636,6 +709,8 @@ function checkScheduledCustomActivities(isFrontendCaller = false) {
         if (!act || !act.id || !act.isOpen || act.autoMatchedDone) return;
         const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
         if (!matchTs || nowTs < matchTs) return;
+        // 逾期保護：距離設定配對時間超過 15 分鐘不再自動補跑，避免版本更新重整時意外觸發歷史活動
+        if (nowTs - matchTs > CUSTOM_ACT_AUTO_MATCH_GRACE_MS) return;
 
         const lockNodeKey = makeCustomActLockNodeKey(act.id, matchTs);
         const lockKey = `${CUSTOM_ACT_LOCK_PREFIX}${lockNodeKey}`;

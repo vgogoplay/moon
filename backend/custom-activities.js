@@ -147,6 +147,8 @@ function createCustomActivity() {
         endTimeTs: endTimeTs,
         matchTimeTs: matchTimeTs,
         autoMatchedDone: false,
+        matchedUserIds: [],
+        matchedUserMap: {},
         isOpen: isOpen,
         matchCount: 0,
         lastMatchedAt: '',
@@ -289,7 +291,12 @@ function saveEditedCustomActivity(e) {
         startTimeTs: startTimeTs,
         endTimeTs: endTimeTs,
         matchTimeTs: matchTimeTs,
-        autoMatchedDone: isFutureMatchReset ? false : Boolean(prevAct.autoMatchedDone)
+        isOpen: (isFutureMatchReset && prevAct.autoMatchedDone) ? true : Boolean(prevAct.isOpen),
+        autoMatchedDone: isFutureMatchReset ? false : Boolean(prevAct.autoMatchedDone),
+        matchedUserIds: Array.isArray(prevAct.matchedUserIds) ? [...prevAct.matchedUserIds] : [],
+        matchedUserMap: (prevAct.matchedUserMap && typeof prevAct.matchedUserMap === 'object' && !Array.isArray(prevAct.matchedUserMap))
+            ? { ...prevAct.matchedUserMap }
+            : {}
     };
 
     if (isFutureMatchReset && prevAct.matchTimeTs) {
@@ -481,11 +488,14 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                         ? `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-bold">⚖️ 第3類：二選一（${act.optionA || ''} / ${act.optionB || ''}・男女配對）</span>`
                         : `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 font-bold">🎯 第1類：原本機制報名</span>`);
 
+                const permanentMatchedSet = (typeof getCustomActivityMatchedUserIdSet === 'function')
+                    ? getCustomActivityMatchedUserIdSet(act, users)
+                    : new Set();
                 const regUsers = users.filter(u => u && u.id && u.customActivityRegs && u.customActivityRegs[act.id]);
                 const regSummary = regUsers.length > 0
                     ? regUsers.map(u => {
                         const regObj = u.customActivityRegs[act.id] || {};
-                        const alreadyMatched = (u.matchedHistory || []).some(h =>
+                        const alreadyMatched = permanentMatchedSet.has(String(u.id).trim()) || (u.matchedHistory || []).some(h =>
                             String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name)
                         );
                         let pickTag = '';
