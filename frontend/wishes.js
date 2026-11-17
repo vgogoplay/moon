@@ -26,13 +26,32 @@ let lastWishWallRenderSig = '';
 
 function togglePublicWishExpand(wishId) {
     const wid = String(wishId || '').trim();
-    if (expandedPublicWishes.has(wid)) {
-        expandedPublicWishes.delete(wid);
-    } else {
+    const willExpand = !expandedPublicWishes.has(wid);
+    if (willExpand) {
         expandedPublicWishes.add(wid);
+    } else {
+        expandedPublicWishes.delete(wid);
     }
     lastWishWallRenderSig = '';
     renderWishWallTab(true);
+
+    if (willExpand && wid) {
+        setTimeout(() => {
+            const cardEl = document.getElementById(`publicWishCard_${wid}`);
+            if (!cardEl) return;
+            const rect = cardEl.getBoundingClientRect();
+            const bottomNavSafeHeight = 96;
+            const visibleBottom = window.innerHeight - bottomNavSafeHeight;
+            if (rect.bottom > visibleBottom) {
+                const maxScrollDown = Math.max(0, rect.top - 84);
+                const neededScroll = rect.bottom - visibleBottom + 20;
+                const delta = Math.min(maxScrollDown, neededScroll);
+                if (delta > 0) {
+                    window.scrollBy({ top: delta, behavior: 'smooth' });
+                }
+            }
+        }, 60);
+    }
 }
 
 function toggleMyActiveWishExpand() {
@@ -1439,7 +1458,7 @@ function renderWishWallTab(forceRender = false) {
             const isPubExpanded = expandedPublicWishes.has(String(w.id));
 
             return `
-                <div class="glass-card rounded-2xl px-4 py-3 border border-pink-200 space-y-3 shadow-2xs transition-all duration-300">
+                <div id="publicWishCard_${escapeWishHtml(w.id)}" class="glass-card rounded-2xl px-4 py-3 border border-pink-200 space-y-3 shadow-2xs transition-all duration-300">
                     <div class="flex items-center justify-between gap-2 cursor-pointer select-none" onclick="togglePublicWishExpand('${escapeWishHtml(w.id)}')">
                         <div class="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-x-auto">
                             <h4 class="text-xs sm:text-sm font-bold font-serif-jp text-[#7a3542] truncate">🏮 ${escapeWishHtml(w.title)}</h4>
