@@ -1,35 +1,409 @@
 /* backend/matching.js - 後台 20:00 自動配對演算法、秘密強制配對通道與測試工具 */
 
-function runRepairMatchesFromChats() {
-    const resultEl = document.getElementById('repairMatchesResult');
+function escapeMaintenanceHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function collectMatchAndChatDiscrepancies() {
     const users = getUsers();
-    
-    if (typeof CloudSync === 'undefined' || typeof CloudSync.reconcileSymmetricMatches !== 'function') {
-        if (resultEl) {
-            resultEl.classList.remove('hidden');
-            resultEl.innerHTML = '⚠️ CloudSync 工具尚未載入，請稍後再試。';
+    const chatsMap = (typeof getAdminChatsMap === 'function')
+        ? getAdminChatsMap()
+        : JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+
+    const userMap = new Map();
+    users.forEach(u => {
+        if (u && u.id) {
+            const pid = String(u.id).trim();
+            if (pid) userMap.set(pid, u);
         }
+    });
+
+    const getUserMatchedPartnerIds = (u) => {
+        const set = new Set();
+        if (!u || typeof u !== 'object') return set;
+        if (Array.isArray(u.matchedHistory)) {
+            u.matchedHistory.forEach(h => {
+                const pid = String((h && h.partnerId) || '').trim();
+                if (pid && pid !== String(u.id).trim()) set.add(pid);
+            });
+        }
+        const curMid = String(u.matchedWithId || '').trim();
+        if (curMid && curMid !== String(u.id).trim()) {
+            set.add(curMid);
+        }
+        return set;
+    };
+
+    const userMatchSets = new Map();
+    users.forEach(u => {
+        if (u && u.id) {
+            const uid = String(u.id).trim();
+            userMatchSets.set(uid, getUserMatchedPartnerIds(u));
+        }
+    });
+
+    const allPairKeys = new Set();
+    const chatInfoByPair = new Map();
+
+    // 1. Collect pairs from member list
+    userMatchSets.forEach((partnerSet, uid) => {
+        partnerSet.forEach(pid => {
+            if (!uid || !pid || uid === pid) return;
+            const pk = [uid, pid].sort().join('__');
+            allPairKeys.add(pk);
+        });
+    });
+
+    // 2. Collect pairs from chat rooms
+    Object.entries(chatsMap || {}).forEach(([pairKey, rawThread]) => {
+        const parts = String(pairKey || '').split('__').map(s => s.trim()).filter(Boolean);
+        if (parts.length !== 2 || parts[0] === parts[1]) return;
+        const msgs = Array.isArray(rawThread)
+            ? rawThread.filter(m => m && typeof m === 'object')
+            : (rawThread && typeof rawThread === 'object'
+                ? Object.values(rawThread).filter(m => m && typeof m === 'object')
+                : []);
+        if (msgs.length === 0) return;
+
+        msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+        const lastMsg = msgs[msgs.length - 1] || {};
+        const canonicalKey = [parts[0], parts[1]].sort().join('__');
+        allPairKeys.add(canonicalKey);
+        chatInfoByPair.set(canonicalKey, {
+            msgCount: msgs.length,
+            lastTime: String(lastMsg.dateTime || lastMsg.time || '').trim()
+        });
+    });
+
+    const discrepancies = [];
+    Array.from(allPairKeys).sort().forEach(pk => {
+        const [idA, idB] = pk.split('__');
+        const userA = userMap.get(idA) || null;
+        const userB = userMap.get(idB) || null;
+        const setA = userMatchSets.get(idA) || new Set();
+        const setB = userMatchSets.get(idB) || new Set();
+
+        const aHasB = Boolean(userA && setA.has(idB));
+        const bHasA = Boolean(userB && setB.has(idA));
+        const chatInfo = chatInfoByPair.get(pk) || null;
+        const hasChat = Boolean(chatInfo && chatInfo.msgCount > 0);
+
+        const isConsistent = Boolean(userA && userB && aHasB && bHasA && hasChat);
+        if (isConsistent) return;
+
+        const nameA = userA ? (userA.nickname || `玩家_${idA}`) : `不存在/已刪除玩家_${idA}`;
+        const nameB = userB ? (userB.nickname || `玩家_${idB}`) : `不存在/已刪除玩家_${idB}`;
+
+        let reasonBadge = '';
+        let memberStatusDesc = '';
+        let chatStatusDesc = '';
+
+        if ((aHasB || bHasA) && !hasChat) {
+            if (aHasB && bHasA) {
+                reasonBadge = '⚠️ 會員列表有配對・聊天紀錄無對話';
+                memberStatusDesc = `雙方名單皆有對方（${idA} 有 ${idB}、${idB} 有 ${idA}）`;
+            } else if (aHasB) {
+                reasonBadge = '⚠️ 會員列表僅單方有配對・聊天紀錄無對話';
+                memberStatusDesc = `僅 ${idA} 名單有 ${idB}（${idB} 名單無 ${idA}）`;
+            } else {
+                reasonBadge = '⚠️ 會員列表僅單方有配對・聊天紀錄無對話';
+                memberStatusDesc = `僅 ${idB} 名單有 ${idA}（${idA} 名單無 ${idB}）`;
+            }
+            chatStatusDesc = '無聊天室對話紀錄（0 則訊息）';
+        } else if (hasChat && (aHasB !== bHasA)) {
+            reasonBadge = '⚠️ 會員列表單方遺漏配對・聊天紀錄有對話';
+            memberStatusDesc = aHasB
+                ? `僅 ${idA} 名單有 ${idB}（${idB} 名單遺漏 ${idA}）`
+                : `僅 ${idB} 名單有 ${idA}（${idA} 名單遺漏 ${idB}）`;
+            chatStatusDesc = `有聊天室紀錄（共 ${chatInfo.msgCount} 則${chatInfo.lastTime ? `・最後 ${chatInfo.lastTime}` : ''}）`;
+        } else if (hasChat && !aHasB && !bHasA) {
+            reasonBadge = '⚠️ 會員列表雙方皆無配對・聊天紀錄仍殘留';
+            memberStatusDesc = `雙方名單皆無對方`;
+            chatStatusDesc = `殘留聊天室紀錄（共 ${chatInfo.msgCount} 則${chatInfo.lastTime ? `・最後 ${chatInfo.lastTime}` : ''}）`;
+        } else {
+            reasonBadge = '⚠️ 配對對象不存在於會員列表';
+            memberStatusDesc = `${!userA ? `ID:${idA} 不存在` : ''}${(!userA && !userB) ? '、' : ''}${!userB ? `ID:${idB} 不存在` : ''}`;
+            chatStatusDesc = hasChat ? `有聊天室紀錄（共 ${chatInfo.msgCount} 則）` : '無聊天室紀錄（0 則）';
+        }
+
+        discrepancies.push({
+            pairKey: pk,
+            idA,
+            idB,
+            nameA,
+            nameB,
+            userAExists: Boolean(userA),
+            userBExists: Boolean(userB),
+            aHasB,
+            bHasA,
+            hasChat,
+            msgCount: chatInfo ? chatInfo.msgCount : 0,
+            reasonBadge,
+            memberStatusDesc,
+            chatStatusDesc
+        });
+    });
+
+    return discrepancies;
+}
+
+function runRepairMatchesFromChats(silentWhenClean = false) {
+    const resultEl = document.getElementById('repairMatchesResult');
+    if (!resultEl) return;
+
+    const discrepancies = collectMatchAndChatDiscrepancies();
+    resultEl.classList.remove('hidden');
+
+    if (discrepancies.length === 0) {
+        resultEl.innerHTML = `
+            <div class="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 font-semibold">
+                ✅ 檢查完成：所有「會員列表配對」與「玩家聊天紀錄」數據皆完全一致，沒有異常項目。
+            </div>
+        `;
         return;
     }
 
-    const previousStateStr = JSON.stringify(users);
-    const wasRepaired = CloudSync.reconcileSymmetricMatches(users, false, { includeChatsRepair: true });
+    const cardsHtml = discrepancies.map((item, idx) => {
+        const canRepairBoth = item.userAExists && item.userBExists;
+        return `
+            <div class="p-3 rounded-xl bg-rose-50/65 border border-rose-200 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 text-xs">
+                <div class="min-w-0 flex-1 space-y-1">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="text-[10px] font-mono text-gray-500">#${idx + 1}</span>
+                        <span class="px-2 py-0.5 rounded-full bg-rose-100 border border-rose-300 text-rose-800 text-[11px] font-bold">
+                            ${escapeMaintenanceHtml(item.reasonBadge)}
+                        </span>
+                    </div>
+                    <div class="font-bold text-[#8f4452] text-xs sm:text-sm">
+                        ${escapeMaintenanceHtml(item.nameA)} (ID:${escapeMaintenanceHtml(item.idA)})
+                        <span class="text-pink-400 mx-1">⇄</span>
+                        ${escapeMaintenanceHtml(item.nameB)} (ID:${escapeMaintenanceHtml(item.idB)})
+                    </div>
+                    <div class="text-[11px] text-gray-600 space-y-0.5">
+                        <div>📋 <strong>會員列表：</strong>${escapeMaintenanceHtml(item.memberStatusDesc)}</div>
+                        <div>💬 <strong>聊天紀錄：</strong>${escapeMaintenanceHtml(item.chatStatusDesc)}</div>
+                    </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 shrink-0">
+                    <button type="button" onclick="manualResolveUnmatchPair('${escapeMaintenanceHtml(item.idA)}', '${escapeMaintenanceHtml(item.idB)}')"
+                        class="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold shadow-2xs transition">
+                        💔 解除配對（同步移除）
+                    </button>
+                    ${canRepairBoth ? `
+                        <button type="button" onclick="manualResolveSyncPair('${escapeMaintenanceHtml(item.idA)}', '${escapeMaintenanceHtml(item.idB)}')"
+                            class="px-3 py-1.5 rounded-xl bg-white border border-amber-300 text-amber-900 hover:bg-amber-50 text-[11px] font-semibold transition">
+                            🔄 補齊雙向配對與聊天室
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
 
-    if (!wasRepaired || JSON.stringify(users) === previousStateStr) {
-        if (resultEl) {
-            resultEl.classList.remove('hidden');
-            resultEl.innerHTML = '✅ 檢查完成：所有聊天室與玩家配對資料皆為雙向一致，無需修復。';
+    resultEl.innerHTML = `
+        <div class="p-3 rounded-xl bg-amber-50 border border-amber-300 space-y-2.5">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-xs font-bold text-amber-900">
+                    ⚠️ 共檢查出 ${discrepancies.length} 組「會員列表」與「聊天紀錄」數據不一致的配對，請手動選擇處理方式：
+                </span>
+                ${discrepancies.length > 1 ? `
+                    <button type="button" onclick="manualBatchUnmatchAllDiscrepancies()"
+                        class="px-3 py-1.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-[11px] font-bold shadow-2xs transition">
+                        💔 一鍵全部解除異常配對 (${discrepancies.length} 組)
+                    </button>
+                ` : ''}
+            </div>
+            <div class="space-y-2">
+                ${cardsHtml}
+            </div>
+        </div>
+    `;
+}
+
+function applyUnmatchPairToUsersList(users, idA, idB) {
+    const pidA = String(idA || '').trim();
+    const pidB = String(idB || '').trim();
+    if (!pidA || !pidB) return false;
+
+    let changed = false;
+    users.forEach(u => {
+        if (!u || !u.id) return;
+        const uid = String(u.id).trim();
+        if (uid !== pidA && uid !== pidB) return;
+
+        const partnerId = (uid === pidA) ? pidB : pidA;
+        if (Array.isArray(u.matchedHistory)) {
+            const nextHist = u.matchedHistory.filter(h => String(h.partnerId) !== partnerId);
+            if (nextHist.length !== u.matchedHistory.length) {
+                u.matchedHistory = nextHist;
+                changed = true;
+            }
         }
+        if (String(u.matchedWithId) === partnerId) {
+            const lastItem = (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0)
+                ? u.matchedHistory[u.matchedHistory.length - 1]
+                : null;
+            u.matchedSession = lastItem ? (lastItem.session || null) : null;
+            u.matchedWithId = lastItem ? (lastItem.partnerId || null) : null;
+            u.matchedWithName = lastItem ? (lastItem.partnerName || null) : null;
+            u.matchedAt = lastItem ? (lastItem.matchedAt || null) : null;
+            changed = true;
+        }
+    });
+
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
+        CloudSync.markPairUnmatched(pidA, pidB);
+    }
+    if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+        ChatStore.clearChat(pidA, pidB);
+    } else {
+        const pairKey = [pidA, pidB].sort().join('__');
+        const allChats = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+        if (Object.prototype.hasOwnProperty.call(allChats, pairKey)) {
+            delete allChats[pairKey];
+            localStorage.setItem(CHATS_KEY, JSON.stringify(allChats));
+        }
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.deleteNode(`${CHATS_KEY}/${pairKey}`);
+        }
+    }
+
+    return changed;
+}
+
+function manualResolveUnmatchPair(idA, idB) {
+    const pidA = String(idA || '').trim();
+    const pidB = String(idB || '').trim();
+    if (!pidA || !pidB) return;
+
+    const users = getUsers();
+    const uA = users.find(u => String(u.id) === pidA);
+    const uB = users.find(u => String(u.id) === pidB);
+    const labelA = uA ? `${uA.nickname} (ID:${pidA})` : `ID:${pidA}`;
+    const labelB = uB ? `${uB.nickname} (ID:${pidB})` : `ID:${pidB}`;
+
+    if (!confirm(`確定要手動解除「${labelA}」與「${labelB}」的配對嗎？
+解除後將同步移除雙方會員列表配對紀錄與殘留聊天室，前台好友名單亦會同步更新。`)) {
         return;
     }
 
+    applyUnmatchPairToUsersList(users, pidA, pidB);
+    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+        AdminMemoryCache.invalidate('users');
+        AdminMemoryCache.invalidate('chats');
+    }
     saveUsers(users, { isMatchMutation: true });
+    appendLog(`<span class="text-amber-300">[資料維護解除配對]</span> 管理員已手動解除異常配對 <strong>${labelA}</strong> ⇄ <strong>${labelB}</strong>，雙方名單與聊天紀錄已同步清理。`);
+    runRepairMatchesFromChats(true);
+}
 
-    if (resultEl) {
-        resultEl.classList.remove('hidden');
-        resultEl.innerHTML = `✅ 已掃描現有聊天室紀錄，成功自動補回遺漏的雙向配對並同步雲端！`;
+function manualBatchUnmatchAllDiscrepancies() {
+    const discrepancies = collectMatchAndChatDiscrepancies();
+    if (discrepancies.length === 0) return;
+
+    if (!confirm(`確定要一鍵解除全部 ${discrepancies.length} 組異常配對嗎？
+解除後將同步移除這些組合的會員列表配對與殘留聊天紀錄，此動作無法復原。`)) {
+        return;
     }
-    appendLog(`<span class="text-pink-300">[資料修復]</span> 管理員已執行「以聊天室為基準修復配對資料」，系統已自動補齊玩家雙向配對紀錄。`);
+
+    const users = getUsers();
+    discrepancies.forEach(item => {
+        applyUnmatchPairToUsersList(users, item.idA, item.idB);
+    });
+
+    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+        AdminMemoryCache.invalidate('users');
+        AdminMemoryCache.invalidate('chats');
+    }
+    saveUsers(users, { isMatchMutation: true });
+    appendLog(`<span class="text-amber-300">[資料維護批次解除]</span> 管理員已一鍵解除全部 ${discrepancies.length} 組不一致的配對紀錄。`);
+    runRepairMatchesFromChats(true);
+}
+
+function manualResolveSyncPair(idA, idB) {
+    const pidA = String(idA || '').trim();
+    const pidB = String(idB || '').trim();
+    if (!pidA || !pidB) return;
+
+    const users = getUsers();
+    const uA = users.find(u => String(u.id) === pidA);
+    const uB = users.find(u => String(u.id) === pidB);
+    if (!uA || !uB) {
+        alert('其中一方玩家已不存在於會員列表中，無法補齊雙向配對，請改用「解除配對」。');
+        return;
+    }
+
+    if (!confirm(`確定要保留並補齊「${uA.nickname} (ID:${pidA})」與「${uB.nickname} (ID:${pidB})」的雙向配對與聊天室紀錄嗎？`)) {
+        return;
+    }
+
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
+        CloudSync.clearPairUnmatched(pidA, pidB);
+    }
+
+    const nowTs = Date.now();
+    uA.matchedHistory = Array.isArray(uA.matchedHistory) ? uA.matchedHistory : [];
+    uB.matchedHistory = Array.isArray(uB.matchedHistory) ? uB.matchedHistory : [];
+
+    const existingInA = uA.matchedHistory.find(h => String(h.partnerId) === pidB);
+    const existingInB = uB.matchedHistory.find(h => String(h.partnerId) === pidA);
+    const sharedSession = (existingInA && existingInA.session) || (existingInB && existingInB.session) || uA.matchedSession || uB.matchedSession || '資料維護補齊配對';
+    const sharedMatchedAt = Number((existingInA && existingInA.matchedAt) || (existingInB && existingInB.matchedAt) || nowTs);
+
+    if (!existingInA) {
+        uA.matchedHistory.push({
+            partnerId: pidB,
+            partnerName: uB.nickname || `玩家_${pidB}`,
+            session: sharedSession,
+            matchedAt: sharedMatchedAt,
+            igUnlocked: Boolean(existingInB && existingInB.igUnlocked),
+            continueVotes: []
+        });
+    }
+    if (!existingInB) {
+        uB.matchedHistory.push({
+            partnerId: pidA,
+            partnerName: uA.nickname || `玩家_${pidA}`,
+            session: sharedSession,
+            matchedAt: sharedMatchedAt,
+            igUnlocked: Boolean(existingInA && existingInA.igUnlocked),
+            continueVotes: []
+        });
+    }
+
+    if (!uA.matchedWithId) {
+        uA.matchedWithId = pidB;
+        uA.matchedWithName = uB.nickname || `玩家_${pidB}`;
+        uA.matchedSession = sharedSession;
+        uA.matchedAt = sharedMatchedAt;
+    }
+    if (!uB.matchedWithId) {
+        uB.matchedWithId = pidA;
+        uB.matchedWithName = uA.nickname || `玩家_${pidA}`;
+        uB.matchedSession = sharedSession;
+        uB.matchedAt = sharedMatchedAt;
+    }
+
+    if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
+        ChatStore.ensureThread(pidA, pidB, [{
+            senderId: 'system',
+            text: '🌸 月老已為你們補齊雙向紅線配對紀錄，祝聊天愉快！',
+            ts: nowTs
+        }]);
+    }
+
+    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+        AdminMemoryCache.invalidate('users');
+        AdminMemoryCache.invalidate('chats');
+    }
+    saveUsers(users, { isMatchMutation: true });
+    appendLog(`<span class="text-emerald-300">[資料維護補齊]</span> 管理員已補齊 <strong>${uA.nickname} (ID:${pidA})</strong> ⇄ <strong>${uB.nickname} (ID:${pidB})</strong> 的雙向配對與聊天室紀錄。`);
+    runRepairMatchesFromChats(true);
 }
 
 function adminFillPlayerFullData() {
@@ -988,3 +1362,8 @@ function triggerInstantManualMatch(e) {
         executeInstantManualMatch(idA, idB);
     }
 }
+
+window.runRepairMatchesFromChats = runRepairMatchesFromChats;
+window.manualResolveUnmatchPair = manualResolveUnmatchPair;
+window.manualBatchUnmatchAllDiscrepancies = manualBatchUnmatchAllDiscrepancies;
+window.manualResolveSyncPair = manualResolveSyncPair;

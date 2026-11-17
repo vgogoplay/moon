@@ -158,20 +158,20 @@
             <div>
                 <h2 class="text-base font-bold font-serif-jp text-amber-900">🛡️ 資料維護工具</h2>
             </div>
-            <div class="p-3.5 rounded-xl bg-white border border-amber-200 space-y-2">
+            <div class="p-3.5 rounded-xl bg-white border border-amber-200 space-y-3">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                        <div class="text-xs font-bold text-amber-900">🔄 配對資料一致性檢查（以聊天室紀錄為基準）</div>
+                        <div class="text-xs font-bold text-amber-900">🔍 會員配對與聊天紀錄雙向一致性檢查</div>
                         <p class="text-[11px] text-amber-800/80 mt-0.5">
-                            掃描所有現存聊天室，若發現玩家資料遺漏配對對象（例如 10005 與 20008 有聊天但配對狀態被舊快照覆蓋消失），自動從聊天室提取雙向配對紀錄補回名單中。
+                            交叉比對「會員列表的配對名單」與「玩家聊天紀錄房間」；若發現兩邊數據不一致（例如會員列表有配對但聊天紀錄無此房間，或僅單方有配對），將完整列出明細供管理員手動決定是否解除配對。
                         </p>
                     </div>
                     <button type="button" onclick="runRepairMatchesFromChats()"
                         class="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-2xs transition shrink-0">
-                        🔍 檢查並修復配對資料
+                        🔍 檢查配對與聊天紀錄
                     </button>
                 </div>
-                <div id="repairMatchesResult" class="hidden text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></div>
+                <div id="repairMatchesResult" class="hidden space-y-2.5"></div>
             </div>
         </div>
 
@@ -382,7 +382,7 @@
     <script src="shared/cloud-store.js?v=20261117t"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261117s"></script>
-    <script src="backend/matching.js?v=20261117a"></script>
+    <script src="backend/matching.js?v=20261117z"></script>
     <script src="backend/ops.js?v=20261117t"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261117p"></script>
