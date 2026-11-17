@@ -275,7 +275,8 @@ function saveEditedCustomActivity(e) {
     }
 
     const prevAct = list[actIdx];
-    const isFutureMatchReset = matchTimeTs > Date.now() && Number(prevAct.matchTimeTs || 0) !== matchTimeTs;
+    const prevMatchTs = parseLocalDateTimeTs(prevAct.matchTime || prevAct.matchTimeTs);
+    const isFutureMatchReset = matchTimeTs > Date.now() && prevMatchTs !== matchTimeTs;
 
     const updatedAct = {
         ...prevAct,
@@ -534,6 +535,130 @@ async function runCustomActivityMatch(activityId, isAuto = false) {
     }
 }
 
+function getArchivedRecoverableCustomRegs(act, users) {
+    if (!act || !act.id) return [];
+    const aid = String(act.id).trim();
+    const archiveMap = (typeof ActivityRegArchive !== 'undefined' && typeof ActivityRegArchive.getAllMap === 'function')
+        ? ActivityRegArchive.getAllMap()
+        : (() => {
+            try {
+                const raw = JSON.parse(localStorage.getItem('yuelao_activity_reg_history') || '{}');
+                return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+            } catch (e) {
+                return {};
+            }
+        })();
+
+    const userById = new Map();
+    (Array.isArray(users) ? users : []).forEach(u => {
+        if (u && u.id) userById.set(String(u.id).trim(), u);
+    });
+
+    const recoverable = [];
+    Object.values(archiveMap).forEach(rec => {
+        if (!rec || typeof rec !== 'object') return;
+        if (rec.kind !== 'custom' || String(rec.activityId || '').trim() !== aid) return;
+        const pid = String(rec.playerId || '').trim();
+        if (!pid) return;
+        const liveUser = userById.get(pid);
+        if (!liveUser) return;
+        const alreadyHasLiveReg = Boolean(liveUser.customActivityRegs && liveUser.customActivityRegs[aid]);
+        if (!alreadyHasLiveReg) {
+            recoverable.push({ user: liveUser, archiveRec: rec });
+        }
+    });
+    return recoverable;
+}
+
+async function recoverCustomActivityRegistrationsFromArchive(activityId, autoRunMatchAfter = true) {
+    const list = getCustomActivities();
+    const act = list.find(a => String(a.id) === String(activityId));
+    if (!act) return;
+
+    const users = getUsers();
+    const recoverable = getArchivedRecoverableCustomRegs(act, users);
+
+    if (recoverable.length === 0) {
+        alert(`ℹ️【${act.name}】目前沒有需要從封存紀錄找回的遺失報名名單（所有已封存報名者皆已在目前名單中，或尚無封存紀錄）。`);
+        return;
+    }
+
+    const actionDesc = autoRunMatchAfter
+        ? `將這 ${recoverable.length} 位玩家的報名紀錄與所選號碼／選項全數還原，並立即重新執行【${act.name}】配對`
+        : `僅將這 ${recoverable.length} 位玩家的報名紀錄與所選號碼／選項還原至活動名單（暫不執行配對）`;
+
+    if (!confirm(`確定要從統計封存紀錄找回【${act.name}】的 ${recoverable.length} 位報名玩家嗎？\n\n執行內容：${actionDesc}。`)) {
+        return;
+    }
+
+    const aid = String(act.id).trim();
+    const actType = act.activityType || 'classic';
+    const restoredUsers = [];
+
+    recoverable.forEach(({ user, archiveRec }) => {
+        if (!user.customActivityRegs || typeof user.customActivityRegs !== 'object' || Array.isArray(user.customActivityRegs)) {
+            user.customActivityRegs = {};
+        }
+        const restoredEntry = {
+            activityId: aid,
+            activityName: act.name,
+            activityType: actType,
+            registeredAt: Number(archiveRec.recordedAt || Date.now()),
+            exactMatchCriteria: (archiveRec.exactMatchCriteria && typeof archiveRec.exactMatchCriteria === 'object' && !Array.isArray(archiveRec.exactMatchCriteria))
+                ? { ...archiveRec.exactMatchCriteria }
+                : ((user.exactMatchCriteria && typeof user.exactMatchCriteria === 'object' && !Array.isArray(user.exactMatchCriteria)) ? { ...user.exactMatchCriteria } : {})
+        };
+        if (actType === 'fortune_number' && archiveRec.fortuneNumber) {
+            restoredEntry.fortuneNumber = Number(archiveRec.fortuneNumber) || archiveRec.fortuneNumber;
+        }
+        if (actType === 'two_choice' && archiveRec.twoChoiceValue) {
+            restoredEntry.twoChoiceValue = String(archiveRec.twoChoiceValue).trim();
+        }
+        user.customActivityRegs[aid] = restoredEntry;
+        restoredUsers.push(user);
+    });
+
+    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+        AdminMemoryCache.invalidate('users');
+    }
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+
+    // 清除此活動舊的自動執行鎖，確保可順利重新執行配對
+    const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+    if (matchTs > 0) {
+        const oldLockNodeKey = `${aid}_${Number(matchTs)}`;
+        try { localStorage.removeItem(`yuelao_custom_act_lock_${oldLockNodeKey}`); } catch (e) {}
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.deleteNode(`yuelao_custom_act_locks/${oldLockNodeKey}`);
+        }
+    }
+
+    if (typeof CloudSync !== 'undefined') {
+        await Promise.all(restoredUsers.map(u => CloudSync.upsertUser(u, true)));
+    }
+
+    appendLog(`<span class="text-sky-300">[找回活動報名名單]</span> 已從封存統計紀錄成功還原專屬活動「<strong>${act.name}</strong>」的 <strong>${restoredUsers.length} 位</strong>報名玩家資料！`);
+    renderAdminAll(true);
+
+    if (autoRunMatchAfter) {
+        const res = await executeCustomActivityMatchCore(aid, {
+            isAuto: false,
+            markScheduledDone: true,
+            forceManualOverride: true
+        });
+        renderAdminAll(true);
+        if (res && res.executed) {
+            if (res.pairCount > 0) {
+                alert(`🎉 已成功找回 ${restoredUsers.length} 位報名玩家，並完成【${res.actName}】重新配對！\n\n本次共成功配對 ${res.pairCount} 對${res.unmatchedCount > 0 ? `（${res.unmatchedCount} 人落單未配對）` : ''}，已即時同步至雙方前台好友名單！`);
+            } else {
+                alert(`✅ 已成功找回 ${restoredUsers.length} 位報名玩家！\n\n但本次執行配對結果為 0 對（可能原因：同號碼異性／同選項異性人數不足，或條件未吻合），您可在展開卡片中檢視這 ${restoredUsers.length} 位玩家的號碼與條件。`);
+            }
+        }
+    } else {
+        alert(`✅ 已成功從封存紀錄找回【${act.name}】的 ${restoredUsers.length} 位報名玩家！\n您現在可以在下方「已報名名單」檢視所有人的選項，並隨時點擊「執行配對」。`);
+    }
+}
+
 
 function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
     const customActsList = getCustomActivities();
@@ -555,6 +680,9 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                     ? getCustomActivityMatchedUserIdSet(act, users)
                     : new Set();
                 const regUsers = users.filter(u => u && u.id && u.customActivityRegs && u.customActivityRegs[act.id]);
+                const recoverableArchivedList = (typeof getArchivedRecoverableCustomRegs === 'function')
+                    ? getArchivedRecoverableCustomRegs(act, users)
+                    : [];
                 const regSummary = regUsers.length > 0
                     ? regUsers.map(u => {
                         const regObj = u.customActivityRegs[act.id] || {};
@@ -606,7 +734,17 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                                 ${regSummary}
                             </div>
                         </div>
-                        <div class="flex flex-wrap items-center gap-2 shrink-0 p-3 rounded-xl bg-amber-50/35 border border-amber-200">
+                        <div class="flex flex-col items-stretch lg:items-end justify-center gap-2 shrink-0 p-3 rounded-xl bg-amber-50/35 border border-amber-200 w-full lg:w-auto">
+                            ${recoverableArchivedList.length > 0 ? `
+                                <button type="button" onclick="recoverCustomActivityRegistrationsFromArchive('${act.id}', true)"
+                                    class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow hover:opacity-95 transition">
+                                    🔄 找回名單（${recoverableArchivedList.length}人）並重新配對
+                                </button>
+                                <button type="button" onclick="recoverCustomActivityRegistrationsFromArchive('${act.id}', false)"
+                                    class="px-3.5 py-2 rounded-xl bg-sky-50 border border-sky-300 text-sky-800 text-xs font-bold hover:bg-sky-100 transition">
+                                    📥 僅找回名單（${recoverableArchivedList.length}人）
+                                </button>
+                            ` : ''}
                             <button type="button" onclick="openEditCustomActivityModal('${act.id}')" class="px-3.5 py-2 rounded-xl border border-sky-200 text-xs font-bold transition bg-sky-50 text-sky-700 hover:bg-sky-100">
                                 ✏️ 編輯
                             </button>
@@ -634,6 +772,11 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                                     ${act.isOpen ? '🟢 開啟中' : '⚪ 已關閉'}
                                 </span>
                                 <span class="text-xs md:text-sm font-bold text-[#8f4452] truncate">🎪 ${act.name}</span>
+                                ${recoverableArchivedList.length > 0 ? `
+                                    <span class="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-bold">
+                                        ⚠️ 可找回 ${recoverableArchivedList.length} 位已報名名單重新配對
+                                    </span>
+                                ` : ''}
                             </div>
                             <span class="text-xs font-semibold text-[#c96a7b] shrink-0">
                                 ${isExpanded ? '▴ 收合管理' : '▾ 點開管理活動'}
@@ -650,3 +793,5 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
         renderActivityMatchStatsPanel(users, customActsList, batch, maxDisplayBatch);
     }
 }
+
+window.recoverCustomActivityRegistrationsFromArchive = recoverCustomActivityRegistrationsFromArchive;

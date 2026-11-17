@@ -623,6 +623,7 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
 
 async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, isFrontendCaller = false) {
     const lockNodeKey = makeCustomActLockNodeKey(activityId, matchTs);
+    let claimedSuccessfully = false;
     try {
         // 逾期保護：距離設定配對時間超過 15 分鐘即不再背景自動觸發
         if (Date.now() - Number(matchTs || 0) > CUSTOM_ACT_AUTO_MATCH_GRACE_MS) {
@@ -648,7 +649,7 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
                 fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json`, { method: 'GET', cache: 'no-store' })
             ]);
 
-            // 若查詢雲端鎖失敗（網路逾時或離線），立即中止而不盲目執行配對
+            // 若查詢雲端鎖失敗（網路逾時或離線），允許 12 秒後重試而不永久鎖死
             if (!actRes.ok || !lockRes.ok) {
                 return;
             }
@@ -658,6 +659,8 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
 
             // 若雲端活動已關閉、已標記 autoMatchedDone，或已有其他裝置搶先寫入雲端鎖，立即停止不再執行第二次
             if (!remoteAct || !remoteAct.isOpen || remoteAct.autoMatchedDone || (remoteLock && remoteLock.claimedBy)) {
+                claimedSuccessfully = true;
+                try { localStorage.setItem(lockKey, `DONE_${Date.now()}`); } catch (e) {}
                 if (remoteAct && typeof remoteAct === 'object') {
                     try {
                         const localActs = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
@@ -693,6 +696,8 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
             }
             const verifyLock = await verifyRes.json();
             if (!verifyLock || verifyLock.claimedBy !== claimToken) {
+                claimedSuccessfully = true;
+                try { localStorage.setItem(lockKey, `DONE_${Date.now()}`); } catch (e) {}
                 if (typeof CloudSync.fetchFullTree === 'function') {
                     await CloudSync.fetchFullTree();
                 }
@@ -701,17 +706,30 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
                 return;
             }
 
-            // 確認取得唯一執行權後，先拉取最新完整玩家資料再進行配對
+            claimedSuccessfully = true;
+            try { localStorage.setItem(lockKey, `DONE_${Date.now()}`); } catch (e) {}
+
+            // 等待其他寫入完成後拉取最新完整玩家資料，避免 inFlightWrites > 0 導致 fetchFullTree 跳過
+            let waitTries = 0;
+            while (CloudSync.inFlightWrites > 0 && waitTries < 10) {
+                await new Promise(resolve => setTimeout(resolve, 150));
+                waitTries++;
+            }
             if (typeof CloudSync.fetchFullTree === 'function') {
                 await CloudSync.fetchFullTree();
             }
+        } else {
+            claimedSuccessfully = true;
+            try { localStorage.setItem(lockKey, `DONE_${Date.now()}`); } catch (e) {}
         }
 
         await executeCustomActivityMatchCore(activityId, { isAuto: true, markScheduledDone: true });
     } catch (e) {
-        // 發生網路或同步異常時嚴禁無條件補跑，避免重複配對
-        console.warn('claimAndRunScheduledCustomActivity 異常（已安全中止自動補跑）', e);
+        console.warn('claimAndRunScheduledCustomActivity 異常', e);
     } finally {
+        if (!claimedSuccessfully) {
+            try { localStorage.removeItem(lockKey); } catch (e) {}
+        }
         customActivityAutoLockInFlight.delete(lockKey);
     }
 }
@@ -740,7 +758,15 @@ function checkScheduledCustomActivities(isFrontendCaller = false) {
 
         const lockNodeKey = makeCustomActLockNodeKey(act.id, matchTs);
         const lockKey = `${CUSTOM_ACT_LOCK_PREFIX}${lockNodeKey}`;
-        if (customActivityAutoLockInFlight.has(lockKey) || localStorage.getItem(lockKey)) return;
+        if (customActivityAutoLockInFlight.has(lockKey)) return;
+
+        const existingLockVal = localStorage.getItem(lockKey) || '';
+        if (existingLockVal.startsWith('DONE_')) return;
+        if (existingLockVal) {
+            const attemptTs = Number(existingLockVal) || 0;
+            // 若前一次嘗試超過 12 秒仍未標記 DONE_，允許自動重試，避免暫時網路抖動導致永不執行
+            if (attemptTs > 0 && (nowTs - attemptTs) < 12000) return;
+        }
 
         customActivityAutoLockInFlight.add(lockKey);
         localStorage.setItem(lockKey, String(nowTs));
@@ -780,8 +806,15 @@ function getCustomActivityClearRegsTs(act) {
     const endTs = parseLocalDateTimeTs(act.endTime || act.endTimeTs);
     const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
     const lastMatchedTs = Number(act.lastMatchedTs || 0);
+    const hasCompletedMatch = Boolean(act.autoMatchedDone) || Number(act.matchCount || 0) > 0 || lastMatchedTs > 0;
+
+    // 若活動設有配對時間但尚未完成配對，先保留報名資料 30 分鐘以供補跑或恢復，避免在還沒配對前 3 分鐘就被自動清空
+    if (matchTs > 0 && !hasCompletedMatch) {
+        return matchTs + (30 * 60 * 1000);
+    }
+
     const effectiveEndTs = (matchTs > 0 || endTs > 0)
-        ? Math.max(matchTs, endTs)
+        ? Math.max(matchTs, endTs, lastMatchedTs)
         : (lastMatchedTs > 0 ? lastMatchedTs : 0);
     if (!effectiveEndTs) return 0;
     return effectiveEndTs + POST_ACTIVITY_REG_CLEAR_DELAY_MS;

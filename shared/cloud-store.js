@@ -2057,6 +2057,11 @@ const ActivityRegArchive = {
         const key = this.makeCustomKey(aid, pid);
         if (!key) return null;
         const r = (regObj && typeof regObj === 'object') ? regObj : {};
+        const criteriaObj = (r.exactMatchCriteria && typeof r.exactMatchCriteria === 'object' && !Array.isArray(r.exactMatchCriteria))
+            ? { ...r.exactMatchCriteria }
+            : ((existingEntry && existingEntry.exactMatchCriteria && typeof existingEntry.exactMatchCriteria === 'object' && !Array.isArray(existingEntry.exactMatchCriteria))
+                ? { ...existingEntry.exactMatchCriteria }
+                : {});
         return {
             id: key,
             kind: 'custom',
@@ -2065,6 +2070,7 @@ const ActivityRegArchive = {
             activityType: String(r.activityType || (existingEntry && existingEntry.activityType) || '').trim(),
             fortuneNumber: r.fortuneNumber || (existingEntry && existingEntry.fortuneNumber) || null,
             twoChoiceValue: String(r.twoChoiceValue || (existingEntry && existingEntry.twoChoiceValue) || '').trim(),
+            exactMatchCriteria: criteriaObj,
             playerId: pid,
             nickname: String((user && user.nickname) || (existingEntry && existingEntry.nickname) || '').trim(),
             gender: String((user && user.gender) || (existingEntry && existingEntry.gender) || '').trim(),
