@@ -261,6 +261,20 @@ function sharedMatchesGenderPreference(seeker, candidate, criteria = {}) {
 
 function sharedCheckSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
     if (!candidate) return false;
+    if (key === 'mbti') {
+        const want = String(desiredVal || '').trim();
+        if (!want) return false;
+        const candRaw = String(candidate.mbti || '').trim().toUpperCase();
+        const candGroup = String(
+            candidate.mbtiGroup ||
+            (typeof inferMbtiGroup === 'function' ? inferMbtiGroup(candRaw) : '') ||
+            (candRaw.startsWith('I') ? 'I人' : (candRaw.startsWith('E') ? 'E人' : ''))
+        ).trim();
+        if (want === 'I人' || want === 'E人') {
+            return candGroup === want;
+        }
+        return candRaw === want.toUpperCase();
+    }
     if (key === 'region') {
         const candidateRegion = candidate.region || (typeof inferRegionByCity === 'function' ? inferRegionByCity(candidate.city) : '');
         const regionCities = (typeof REGION_CITIES !== 'undefined' && REGION_CITIES[desiredVal]) ? REGION_CITIES[desiredVal] : [];

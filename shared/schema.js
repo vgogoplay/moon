@@ -89,7 +89,7 @@ const ROMANCE_MOMENTS = [
 
 // 2. 報名時「希望對方哪個欄位要完全吻合」選項（居住地區僅選北部、中部、南部、東部）
 const EXACT_MATCH_OPTIONS = [
-    { key: 'mbti', label: 'MBTI', choices: ['INTJ', 'INTP', 'ENTJ', 'ENTP', 'INFJ', 'INFP', 'ENFJ', 'ENFP', 'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ', 'ISTP', 'ISFP', 'ESTP', 'ESFP'] },
+    { key: 'mbti', label: 'MBTI', choices: ['I人', 'E人'] },
     { key: 'gender', label: '性別', choices: ['男', '女'] },
     { key: 'ageRange', label: '年齡範圍', choices: ['22~25歲', '26~30歲', '31~35歲', '36~40歲'] },
     {
@@ -97,7 +97,7 @@ const EXACT_MATCH_OPTIONS = [
         label: '當前居住地區',
         choices: REGION_OPTIONS
     },
-    { key: 'height', label: '你的身高', choices: ['150cm以上', '155cm以上', '160cm以上', '165cm以上', '170cm以上', '175cm以上', '180cm以上'] },
+    { key: 'height', label: '你的身高(對方)', choices: ['150cm以上', '155cm以上', '160cm以上', '165cm以上', '170cm以上', '175cm以上', '180cm以上'] },
     { key: 'hasPet', label: '是否有養動物 / 寵物', choices: ['沒有養寵物', '狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物'] },
     { key: 'smoking', label: '抽煙', choices: ['不會', '偶爾', '會'] },
     { key: 'drinking', label: '喝酒', choices: ['不喝', '社交場合', '常喝'] },
