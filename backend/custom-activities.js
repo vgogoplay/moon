@@ -591,71 +591,124 @@ async function recoverCustomActivityRegistrationsFromArchive(activityId, autoRun
         return;
     }
 
-    const aid = String(act.id).trim();
-    const actType = act.activityType || 'classic';
-    const restoredUsers = [];
-
-    recoverable.forEach(({ user, archiveRec }) => {
-        if (!user.customActivityRegs || typeof user.customActivityRegs !== 'object' || Array.isArray(user.customActivityRegs)) {
-            user.customActivityRegs = {};
-        }
-        const restoredEntry = {
-            activityId: aid,
-            activityName: act.name,
-            activityType: actType,
-            registeredAt: Number(archiveRec.recordedAt || Date.now()),
-            exactMatchCriteria: (archiveRec.exactMatchCriteria && typeof archiveRec.exactMatchCriteria === 'object' && !Array.isArray(archiveRec.exactMatchCriteria))
-                ? { ...archiveRec.exactMatchCriteria }
-                : ((user.exactMatchCriteria && typeof user.exactMatchCriteria === 'object' && !Array.isArray(user.exactMatchCriteria)) ? { ...user.exactMatchCriteria } : {})
-        };
-        if (actType === 'fortune_number' && archiveRec.fortuneNumber) {
-            restoredEntry.fortuneNumber = Number(archiveRec.fortuneNumber) || archiveRec.fortuneNumber;
-        }
-        if (actType === 'two_choice' && archiveRec.twoChoiceValue) {
-            restoredEntry.twoChoiceValue = String(archiveRec.twoChoiceValue).trim();
-        }
-        user.customActivityRegs[aid] = restoredEntry;
-        restoredUsers.push(user);
-    });
-
-    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
-        AdminMemoryCache.invalidate('users');
-    }
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-
-    // 清除此活動舊的自動執行鎖，確保可順利重新執行配對
-    const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
-    if (matchTs > 0) {
-        const oldLockNodeKey = `${aid}_${Number(matchTs)}`;
-        try { localStorage.removeItem(`yuelao_custom_act_lock_${oldLockNodeKey}`); } catch (e) {}
-        if (typeof CloudSync !== 'undefined') {
-            CloudSync.deleteNode(`yuelao_custom_act_locks/${oldLockNodeKey}`);
-        }
+    if (typeof isCustomActivityRecoveryInProgress !== 'undefined') {
+        isCustomActivityRecoveryInProgress = true;
     }
 
-    if (typeof CloudSync !== 'undefined') {
-        await Promise.all(restoredUsers.map(u => CloudSync.upsertUser(u, true)));
-    }
+    try {
+        const aid = String(act.id).trim();
+        const actType = act.activityType || 'classic';
+        const nowRecoveryTs = Date.now();
+        const restoredUsers = [];
 
-    appendLog(`<span class="text-sky-300">[找回活動報名名單]</span> 已從封存統計紀錄成功還原專屬活動「<strong>${act.name}</strong>」的 <strong>${restoredUsers.length} 位</strong>報名玩家資料！`);
-    renderAdminAll(true);
+        // 1. 標記活動已還原時間戳，防止背景 1 秒定時器在 15 分鐘內再次自動清除報名紀錄
+        act.recoveredAtTs = nowRecoveryTs;
+        if (!autoRunMatchAfter) {
+            act.autoMatchedDone = false;
+        }
+        expandedCustomActivityCards.add(aid);
+        localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(list));
 
-    if (autoRunMatchAfter) {
-        const res = await executeCustomActivityMatchCore(aid, {
-            isAuto: false,
-            markScheduledDone: true,
-            forceManualOverride: true
+        // 2. 還原所有封存報名者的 customActivityRegs 與所選號碼／二選一／條件
+        recoverable.forEach(({ user, archiveRec }) => {
+            if (!user.customActivityRegs || typeof user.customActivityRegs !== 'object' || Array.isArray(user.customActivityRegs)) {
+                user.customActivityRegs = {};
+            }
+            const restoredEntry = {
+                activityId: aid,
+                activityName: act.name,
+                activityType: actType,
+                registeredAt: Number(archiveRec.recordedAt || nowRecoveryTs),
+                recoveredAt: nowRecoveryTs,
+                exactMatchCriteria: (archiveRec.exactMatchCriteria && typeof archiveRec.exactMatchCriteria === 'object' && !Array.isArray(archiveRec.exactMatchCriteria))
+                    ? { ...archiveRec.exactMatchCriteria }
+                    : ((user.exactMatchCriteria && typeof user.exactMatchCriteria === 'object' && !Array.isArray(user.exactMatchCriteria)) ? { ...user.exactMatchCriteria } : {})
+            };
+            if (actType === 'fortune_number' && archiveRec.fortuneNumber) {
+                restoredEntry.fortuneNumber = Number(archiveRec.fortuneNumber) || archiveRec.fortuneNumber;
+            }
+            if (actType === 'two_choice' && archiveRec.twoChoiceValue) {
+                restoredEntry.twoChoiceValue = String(archiveRec.twoChoiceValue).trim();
+            }
+            user.customActivityRegs[aid] = restoredEntry;
+            restoredUsers.push(user);
         });
-        renderAdminAll(true);
-        if (res && res.executed) {
-            if (res.pairCount > 0) {
-                alert(`🎉 已成功找回 ${restoredUsers.length} 位報名玩家，並完成【${res.actName}】重新配對！\n\n本次共成功配對 ${res.pairCount} 對${res.unmatchedCount > 0 ? `（${res.unmatchedCount} 人落單未配對）` : ''}，已即時同步至雙方前台好友名單！`);
-            } else {
-                alert(`✅ 已成功找回 ${restoredUsers.length} 位報名玩家！\n\n但本次執行配對結果為 0 對（可能原因：同號碼異性／同選項異性人數不足，或條件未吻合），您可在展開卡片中檢視這 ${restoredUsers.length} 位玩家的號碼與條件。`);
+
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('users');
+        }
+        localStorage.setItem(USERS_KEY, JSON.stringify(users));
+
+        // 3. 清除此活動舊的自動執行鎖，確保可順利重新執行配對
+        const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+        if (matchTs > 0) {
+            const oldLockNodeKey = `${aid}_${Number(matchTs)}`;
+            try { localStorage.removeItem(`yuelao_custom_act_lock_${oldLockNodeKey}`); } catch (e) {}
+            if (typeof CloudSync !== 'undefined') {
+                CloudSync.deleteNode(`yuelao_custom_act_locks/${oldLockNodeKey}`);
             }
         }
-    } else {
-        alert(`✅ 已成功從封存紀錄找回【${act.name}】的 ${restoredUsers.length} 位報名玩家！\n您現在可以在下方「已報名名單」檢視所有人的選項，並隨時點擊「執行配對」。`);
+
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${aid}`, act);
+        }
+
+        appendLog(`<span class="text-sky-300">[找回活動報名名單]</span> 已從封存統計紀錄成功還原專屬活動「<strong>${act.name}</strong>」的 <strong>${restoredUsers.length} 位</strong>報名玩家資料！`);
+        renderAdminAll(true);
+
+        if (autoRunMatchAfter) {
+            // 4A. 立即以剛還原的完整本地名單執行配對（避免等待多筆網路寫入期間被背景同步覆蓋）
+            const res = await executeCustomActivityMatchCore(aid, {
+                isAuto: false,
+                markScheduledDone: true,
+                forceManualOverride: true
+            });
+
+            // 同步將所有還原玩家的報名欄位寫回雲端
+            if (typeof CloudSync !== 'undefined') {
+                const latestUsersAfterMatch = getUsers();
+                const latestById = new Map(latestUsersAfterMatch.map(u => [String(u.id).trim(), u]));
+                const batchSize = 5;
+                for (let i = 0; i < restoredUsers.length; i += batchSize) {
+                    const chunk = restoredUsers.slice(i, i + batchSize);
+                    await Promise.all(chunk.map(ru => {
+                        const targetU = latestById.get(String(ru.id).trim()) || ru;
+                        return CloudSync.upsertUser(targetU, true, { isMatchMutation: true });
+                    }));
+                }
+            }
+
+            if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+                AdminMemoryCache.invalidate('users');
+            }
+            renderAdminAll(true);
+
+            if (res && res.executed) {
+                if (res.pairCount > 0) {
+                    alert(`🎉 已成功找回 ${restoredUsers.length} 位報名玩家，並完成【${res.actName}】重新配對！\n\n本次共成功配對 ${res.pairCount} 對${res.unmatchedCount > 0 ? `（${res.unmatchedCount} 人落單未配對）` : ''}，已即時同步至雙方前台好友名單！`);
+                } else {
+                    alert(`✅ 已成功找回 ${restoredUsers.length} 位報名玩家！\n\n但本次執行配對結果為 0 對（可能原因：同號碼異性／同選項異性人數不足，或條件未吻合），您可在展開卡片中檢視這 ${restoredUsers.length} 位玩家的號碼與條件。`);
+                }
+            }
+        } else {
+            // 4B. 僅找回名單：分批同步所有還原玩家至雲端並保持名單顯示
+            if (typeof CloudSync !== 'undefined') {
+                const batchSize = 5;
+                for (let i = 0; i < restoredUsers.length; i += batchSize) {
+                    const chunk = restoredUsers.slice(i, i + batchSize);
+                    await Promise.all(chunk.map(u => CloudSync.upsertUser(u, true)));
+                }
+            }
+            if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+                AdminMemoryCache.invalidate('users');
+            }
+            renderAdminAll(true);
+            alert(`✅ 已成功從封存紀錄找回【${act.name}】的 ${restoredUsers.length} 位報名玩家！\n您現在可以在下方「已報名名單」檢視所有人的選項，並隨時點擊「執行配對」。`);
+        }
+    } finally {
+        if (typeof isCustomActivityRecoveryInProgress !== 'undefined') {
+            isCustomActivityRecoveryInProgress = false;
+        }
     }
 }
 

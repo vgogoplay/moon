@@ -780,7 +780,9 @@ function checkScheduledCustomActivities(isFrontendCaller = false) {
 
 // ==================== ⏱️ 活動結束後 3 分鐘自動清除「報名場次」選項（不影響會員已配對紀錄） ====================
 const POST_ACTIVITY_REG_CLEAR_DELAY_MS = 3 * 60 * 1000;
+const RECOVERED_ACT_REG_GRACE_MS = 15 * 60 * 1000;
 let lastRegCleanupCheckTs = 0;
+let isCustomActivityRecoveryInProgress = false;
 
 function getRegularSessionEndTs(sessionStr) {
     const norm = normalizeSessionLabel(sessionStr);
@@ -806,7 +808,17 @@ function getCustomActivityClearRegsTs(act) {
     const endTs = parseLocalDateTimeTs(act.endTime || act.endTimeTs);
     const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
     const lastMatchedTs = Number(act.lastMatchedTs || 0);
+    const recoveredAtTs = Number(act.recoveredAtTs || 0);
     const hasCompletedMatch = Boolean(act.autoMatchedDone) || Number(act.matchCount || 0) > 0 || lastMatchedTs > 0;
+
+    // 若剛透過後台「找回名單」還原報名資料，給予 15 分鐘安全保留期，避免 1 秒後又被自動清理清除
+    if (recoveredAtTs > 0) {
+        const recoveryGraceUntil = recoveredAtTs + RECOVERED_ACT_REG_GRACE_MS;
+        if (lastMatchedTs > recoveredAtTs) {
+            return Math.max(recoveryGraceUntil, lastMatchedTs + POST_ACTIVITY_REG_CLEAR_DELAY_MS);
+        }
+        return recoveryGraceUntil;
+    }
 
     // 若活動設有配對時間但尚未完成配對，先保留報名資料 30 分鐘以供補跑或恢復，避免在還沒配對前 3 分鐘就被自動清空
     if (matchTs > 0 && !hasCompletedMatch) {
@@ -821,6 +833,7 @@ function getCustomActivityClearRegsTs(act) {
 }
 
 function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = Date.now()) {
+    if (isCustomActivityRecoveryInProgress) return false;
     if (typeof USERS_KEY === 'undefined') return false;
     if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return false;
     if (nowTs - lastRegCleanupCheckTs < 1500) return false;
@@ -844,6 +857,10 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
     const expiredCustomActMap = new Map();
     (Array.isArray(customActs) ? customActs : []).forEach(act => {
         if (!act || !act.id) return;
+        const recoveredAtTs = Number(act.recoveredAtTs || 0);
+        if (recoveredAtTs > 0 && (nowTs - recoveredAtTs) < RECOVERED_ACT_REG_GRACE_MS) {
+            return;
+        }
         const clearTs = getCustomActivityClearRegsTs(act);
         const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
         const isClosedAndDone = !act.isOpen && (Boolean(act.autoMatchedDone) || (matchTs > 0 && nowTs >= matchTs));
@@ -903,6 +920,9 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
         // 2. 檢查第 2 種自定義活動（活動結束後經過 3 分鐘自動清除報名選項）
         if (u.customActivityRegs && typeof u.customActivityRegs === 'object' && !Array.isArray(u.customActivityRegs)) {
             Object.keys(u.customActivityRegs).forEach(actId => {
+                const regEntry = u.customActivityRegs[actId];
+                const entryRecoveredAt = Number((regEntry && regEntry.recoveredAt) || 0);
+                if (entryRecoveredAt > 0 && (nowTs - entryRecoveredAt) < RECOVERED_ACT_REG_GRACE_MS) return;
                 const info = expiredCustomActMap.get(String(actId));
                 if (!info) return;
                 const canCleanThis = !isFrontendCaller || uid === currentPlayerId || nowTs >= (info.clearTs + 10000);
