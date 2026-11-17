@@ -203,16 +203,43 @@ const CloudSync = {
         return merged;
     },
 
-    markPairUnmatched(idA, idB, ttlMs = 300000) {
+    markPairUnmatched(idA, idB, ttlMs = 600000) {
         const pk = this.makeUnmatchedPairKey(idA, idB);
-        if (!pk) return;
+        if (!pk) return Promise.resolve();
         const graceUntil = Date.now() + ttlMs;
         const map = this.loadSharedUnmatchedPairs();
         map[pk] = graceUntil;
         this.unmatchedPairs = map;
         try { localStorage.setItem(UNMATCHED_PAIRS_SYNC_KEY, JSON.stringify(map)); } catch (e) {}
         if (this.initialized) {
-            this.putNode(`${UNMATCHED_PAIRS_CLOUD_NODE}/${pk}`, { unmatchedAt: Date.now(), graceUntil });
+            return this.putNode(`${UNMATCHED_PAIRS_CLOUD_NODE}/${pk}`, { unmatchedAt: Date.now(), graceUntil });
+        }
+        return Promise.resolve();
+    },
+
+    async unmatchUsersInCloud(idA, idB, userA, userB) {
+        const pidA = String(idA || '').trim();
+        const pidB = String(idB || '').trim();
+        if (!pidA || !pidB) return;
+
+        // 1. 先將解除配對墓碑寫入本地與 Firebase，確保任何先抵達後台的 SSE 事件都不會誤判為單邊遺漏而復活配對
+        await this.markPairUnmatched(pidA, pidB, 600000);
+
+        // 2. 同步強制寫入雙方最新配對紀錄（isMatchMutation: true）
+        const tasks = [];
+        if (userA && userA.id) {
+            tasks.push(this.upsertUser(userA, true, { isMatchMutation: true }));
+        }
+        if (userB && userB.id) {
+            tasks.push(this.upsertUser(userB, true, { isMatchMutation: true }));
+        }
+        if (tasks.length > 0) {
+            await Promise.all(tasks);
+        }
+
+        // 3. 清除雙方聊天紀錄節點
+        if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+            ChatStore.clearChat(pidA, pidB);
         }
     },
 
@@ -1042,15 +1069,27 @@ const CloudSync = {
         cleanRecord.registeredSessions = Array.from(new Set(
             this.normalizeStringArray(cleanRecord.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
         ));
-        cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory);
+        cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory)
+            .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId));
         if (!isMatchMutation && existingTreeUser) {
-            // 非配對／解除配對異動時，合併雲端與本地配對歷史，絕不以舊快照覆蓋新配對好友
-            const cloudHist = this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory);
-            cleanRecord.matchedHistory = this.normalizeMatchedHistoryList([...cloudHist, ...cleanRecord.matchedHistory]);
-            cleanRecord.matchedSession = existingTreeUser.matchedSession || cleanRecord.matchedSession || null;
-            cleanRecord.matchedWithId = existingTreeUser.matchedWithId || cleanRecord.matchedWithId || null;
-            cleanRecord.matchedWithName = existingTreeUser.matchedWithName || cleanRecord.matchedWithName || null;
-            cleanRecord.matchedAt = existingTreeUser.matchedAt || cleanRecord.matchedAt || null;
+            // 非配對／解除配對異動時，合併雲端與本地配對歷史（排除近期已解除配對的對象），絕不以舊快照覆蓋新配對好友
+            const cloudHist = this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory)
+                .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId));
+            cleanRecord.matchedHistory = this.normalizeMatchedHistoryList([...cloudHist, ...cleanRecord.matchedHistory])
+                .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId));
+            const rawPrimaryId = String(existingTreeUser.matchedWithId || cleanRecord.matchedWithId || '').trim();
+            if (rawPrimaryId && !this.isPairRecentlyUnmatched(pid, rawPrimaryId)) {
+                cleanRecord.matchedSession = existingTreeUser.matchedSession || cleanRecord.matchedSession || null;
+                cleanRecord.matchedWithId = rawPrimaryId;
+                cleanRecord.matchedWithName = existingTreeUser.matchedWithName || cleanRecord.matchedWithName || null;
+                cleanRecord.matchedAt = existingTreeUser.matchedAt || cleanRecord.matchedAt || null;
+            } else {
+                const fallbackPrimary = cleanRecord.matchedHistory[cleanRecord.matchedHistory.length - 1] || null;
+                cleanRecord.matchedSession = fallbackPrimary ? (fallbackPrimary.session || null) : null;
+                cleanRecord.matchedWithId = fallbackPrimary ? (fallbackPrimary.partnerId || null) : null;
+                cleanRecord.matchedWithName = fallbackPrimary ? (fallbackPrimary.partnerName || null) : null;
+                cleanRecord.matchedAt = fallbackPrimary ? (fallbackPrimary.matchedAt || null) : null;
+            }
         }
         cleanRecord.exactMatchCriteria = (cleanRecord.exactMatchCriteria && typeof cleanRecord.exactMatchCriteria === 'object' && !Array.isArray(cleanRecord.exactMatchCriteria))
             ? cleanRecord.exactMatchCriteria
@@ -1573,13 +1612,23 @@ const Store = {
             const existingRecord = idx >= 0 ? { ...cloudTreeRec, ...users[idx] } : { ...cloudTreeRec };
             // 配對歷史與封鎖狀態合併雲端與本地最新紀錄，避免本地或未完成同步的雲端快取覆蓋新配對好友
             const authMatchSource = hasCloudTreeRec ? cloudTreeRec : existingRecord;
+            const isPairUnmatchedCheck = (pidA, pidB) => (
+                typeof CloudSync !== 'undefined' &&
+                typeof CloudSync.isPairRecentlyUnmatched === 'function' &&
+                CloudSync.isPairRecentlyUnmatched(pidA, pidB)
+            );
             const rawCombinedHistory = [
-                ...(Array.isArray(cloudTreeRec.matchedHistory) ? cloudTreeRec.matchedHistory : []),
-                ...(Array.isArray(existingRecord.matchedHistory) ? existingRecord.matchedHistory : [])
+                ...(typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function'
+                    ? CloudSync.normalizeMatchedHistoryList(cloudTreeRec.matchedHistory)
+                    : (Array.isArray(cloudTreeRec.matchedHistory) ? cloudTreeRec.matchedHistory : [])),
+                ...(typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function'
+                    ? CloudSync.normalizeMatchedHistoryList(existingRecord.matchedHistory)
+                    : (Array.isArray(existingRecord.matchedHistory) ? existingRecord.matchedHistory : []))
             ];
-            const preservedMatchedHistory = (typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
+            const preservedMatchedHistory = ((typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
                 ? CloudSync.normalizeMatchedHistoryList(rawCombinedHistory)
-                : rawCombinedHistory;
+                : rawCombinedHistory
+            ).filter(h => !isPairUnmatchedCheck(state.playerId, h && h.partnerId));
 
             const resolvedCity = String(state.profile.city || existingRecord.city || '').trim();
             const resolvedRegion = String(state.profile.region || inferRegionByCity(resolvedCity) || existingRecord.region || '').trim();
@@ -1618,9 +1667,15 @@ const Store = {
                 exactMatchCriteria: state.exactMatchCriteria || {},
                 customActivityRegs: state.isWarnedAccount ? {} : (state.customActivityRegs || {}),
                 matchedHistory: preservedMatchedHistory,
-                matchedSession: authMatchSource.matchedSession || state.matchedSession || null,
-                matchedWithId: authMatchSource.matchedWithId || null,
-                matchedWithName: authMatchSource.matchedWithName || state.friends.map(f => f.nickname).join(', ') || null,
+                matchedSession: (authMatchSource.matchedWithId && !isPairUnmatchedCheck(state.playerId, authMatchSource.matchedWithId))
+                    ? (authMatchSource.matchedSession || state.matchedSession || null)
+                    : (preservedMatchedHistory[preservedMatchedHistory.length - 1]?.session || null),
+                matchedWithId: (authMatchSource.matchedWithId && !isPairUnmatchedCheck(state.playerId, authMatchSource.matchedWithId))
+                    ? authMatchSource.matchedWithId
+                    : (preservedMatchedHistory[preservedMatchedHistory.length - 1]?.partnerId || null),
+                matchedWithName: (authMatchSource.matchedWithId && !isPairUnmatchedCheck(state.playerId, authMatchSource.matchedWithId))
+                    ? (authMatchSource.matchedWithName || state.friends.map(f => f.nickname).join(', ') || null)
+                    : (preservedMatchedHistory[preservedMatchedHistory.length - 1]?.partnerName || null),
                 updatedAt: nowUpdatedStr
             };
             delete record.registeredSession;

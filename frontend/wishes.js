@@ -36,21 +36,24 @@ function togglePublicWishExpand(wishId) {
     renderWishWallTab(true);
 
     if (willExpand && wid) {
-        setTimeout(() => {
-            const cardEl = document.getElementById(`publicWishCard_${wid}`);
-            if (!cardEl) return;
-            const rect = cardEl.getBoundingClientRect();
-            const bottomNavSafeHeight = 96;
-            const visibleBottom = window.innerHeight - bottomNavSafeHeight;
-            if (rect.bottom > visibleBottom) {
-                const maxScrollDown = Math.max(0, rect.top - 84);
-                const neededScroll = rect.bottom - visibleBottom + 20;
-                const delta = Math.min(maxScrollDown, neededScroll);
-                if (delta > 0) {
-                    window.scrollBy({ top: delta, behavior: 'smooth' });
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                const cardEl = document.getElementById(`publicWishCard_${wid}`);
+                if (!cardEl) return;
+                const rect = cardEl.getBoundingClientRect();
+                const topHeaderSafe = 84;
+                const bottomNavSafe = 104;
+                const visibleBottom = window.innerHeight - bottomNavSafe;
+                if (rect.bottom > visibleBottom) {
+                    const maxScrollDown = Math.max(0, rect.top - topHeaderSafe);
+                    const neededScroll = rect.bottom - visibleBottom + 24;
+                    const delta = Math.min(maxScrollDown, neededScroll);
+                    if (delta > 0) {
+                        window.scrollBy({ top: delta, behavior: 'smooth' });
+                    }
                 }
-            }
-        }, 60);
+            }, 40);
+        });
     }
 }
 

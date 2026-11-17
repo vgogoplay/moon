@@ -851,8 +851,9 @@ function unmatchPlayerPair(userId, specificPartnerId = null) {
     }
 
     if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
-        CloudSync.markPairUnmatched(userId, targetPartnerId);
+        CloudSync.markPairUnmatched(userId, targetPartnerId, 600000);
     }
+    saveUsers(users, { isMatchMutation: true });
     if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
         ChatStore.clearChat(userId, targetPartnerId);
     } else {
@@ -866,8 +867,6 @@ function unmatchPlayerPair(userId, specificPartnerId = null) {
             CloudSync.deleteNode(`${CHATS_KEY}/${pairKey}`);
         }
     }
-
-    saveUsers(users, { isMatchMutation: true });
     appendLog(`<span class="text-amber-300">[彈性解除配對]</span> 管理員已解除 <strong>${userA.nickname}</strong> ⇄ <strong>${partnerName}</strong> 的好友關係並清空聊天紀錄，前台名單已同步更新。`);
 }
 

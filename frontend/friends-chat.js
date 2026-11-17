@@ -1493,39 +1493,74 @@ function completeMutualContinuation(friend) {
 function clearMutualFriendship(friend, noticeMsg) {
     const myPid = String(appState.playerId || '').trim();
     const partnerPid = String(friend.id || '').trim();
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-    const touchedUsers = [];
 
-    users.forEach(u => {
-        if (!u || !u.id) return;
-        const uid = String(u.id).trim();
-        if (uid === myPid || uid === partnerPid) {
-            const removeTargetId = (uid === myPid) ? partnerPid : myPid;
-            if (Array.isArray(u.matchedHistory)) {
-                u.matchedHistory = u.matchedHistory.filter(h => String(h.partnerId) !== removeTargetId);
-            }
-            if (String(u.matchedWithId) === removeTargetId) {
-                const fallbackHist = (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0)
-                    ? u.matchedHistory[u.matchedHistory.length - 1]
-                    : null;
-                u.matchedSession = fallbackHist ? (fallbackHist.session || null) : null;
-                u.matchedWithId = fallbackHist ? (fallbackHist.partnerId || null) : null;
-                u.matchedWithName = fallbackHist ? (fallbackHist.partnerName || null) : null;
-                u.matchedAt = fallbackHist ? (fallbackHist.matchedAt || null) : null;
-            }
-            touchedUsers.push(u);
-        }
-    });
-
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    if (typeof CloudSync !== 'undefined') {
-        touchedUsers.forEach(u => {
-            CloudSync.upsertUser(u, true, { isMatchMutation: true });
-        });
+    // 1. 立即寫入解除配對墓碑（本地 + 雲端），防止任何同步快照或單邊補齊復活配對
+    if (myPid && partnerPid && typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
+        CloudSync.markPairUnmatched(myPid, partnerPid, 600000);
     }
 
-    // 直接解除配對時，才清空雙方聊天歷史紀錄
-    if (myPid && partnerPid) {
+    // 2. 合併本地與雲端快取的玩家資料，確保雙方紀錄（即使其中一方尚未寫入本地陣列）都能完整移除彼此
+    let users = [];
+    try {
+        users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        if (!Array.isArray(users)) users = [];
+    } catch (e) {
+        users = [];
+    }
+
+    const ensureUserLoaded = (targetId) => {
+        if (!targetId) return null;
+        let rec = users.find(u => u && String(u.id).trim() === targetId);
+        const cloudRec = (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][targetId])
+            ? CloudSync.tree[USERS_KEY][targetId]
+            : null;
+        if (!rec && cloudRec && typeof cloudRec === 'object') {
+            rec = { ...cloudRec, id: targetId };
+            users.push(rec);
+        } else if (rec && cloudRec && typeof cloudRec === 'object') {
+            // 補齊本地可能缺少的最新雲端欄位，避免覆蓋對方的個人資料
+            Object.assign(rec, { ...cloudRec, ...rec, id: targetId });
+        }
+        return rec || null;
+    };
+
+    const myUserRec = ensureUserLoaded(myPid);
+    const partnerUserRec = ensureUserLoaded(partnerPid);
+
+    const removePartnerFromUserRecord = (u, removeTargetId) => {
+        if (!u || !removeTargetId) return;
+        const normHist = (typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
+            ? CloudSync.normalizeMatchedHistoryList(u.matchedHistory)
+            : (Array.isArray(u.matchedHistory) ? u.matchedHistory : []);
+        u.matchedHistory = normHist.filter(h => String(h.partnerId).trim() !== removeTargetId);
+
+        if (String(u.matchedWithId || '').trim() === removeTargetId) {
+            const fallbackHist = u.matchedHistory.length > 0
+                ? u.matchedHistory[u.matchedHistory.length - 1]
+                : null;
+            u.matchedSession = fallbackHist ? (fallbackHist.session || null) : null;
+            u.matchedWithId = fallbackHist ? (fallbackHist.partnerId || null) : null;
+            u.matchedWithName = fallbackHist ? (fallbackHist.partnerName || null) : null;
+            u.matchedAt = fallbackHist ? (fallbackHist.matchedAt || null) : null;
+        }
+    };
+
+    removePartnerFromUserRecord(myUserRec, partnerPid);
+    removePartnerFromUserRecord(partnerUserRec, myPid);
+
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+
+    // 3. 依序執行雲端同步：先提交解除配對墓碑 -> 再更新雙方會員資料 -> 最後清空雙方聊天室紀錄
+    if (myPid && partnerPid && typeof CloudSync !== 'undefined') {
+        if (typeof CloudSync.unmatchUsersInCloud === 'function') {
+            CloudSync.unmatchUsersInCloud(myPid, partnerPid, myUserRec, partnerUserRec);
+        } else {
+            if (myUserRec) CloudSync.upsertUser(myUserRec, true, { isMatchMutation: true });
+            if (partnerUserRec) CloudSync.upsertUser(partnerUserRec, true, { isMatchMutation: true });
+            ChatStore.clearChat(myPid, partnerPid);
+        }
+        lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
+    } else if (myPid && partnerPid) {
         ChatStore.clearChat(myPid, partnerPid);
         lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
     }
@@ -1542,7 +1577,8 @@ function clearMutualFriendship(friend, noticeMsg) {
         appState.multiFriendSince = null;
         appState.confessionUnlockAt = null;
     }
-    Store.save(appState);
+    // 傳入 skipCloudPush = true，避免重複觸發非配對異動的 upsertUser 覆蓋剛送出的解除配對狀態
+    Store.save(appState, false, true);
     refreshAllUI();
     if (noticeMsg) showMiniNotice('🍃 已解除好友', noticeMsg);
 }
