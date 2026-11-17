@@ -712,10 +712,39 @@ function getAdminWishWallPosts() {
         return arr
             .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
             .filter(Boolean)
-            .sort((a, b) => Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0));
+            .sort((a, b) => (typeof compareWishWallItems === 'function')
+                ? compareWishWallItems(a, b)
+                : (Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0)));
     } catch (e) {
         return [];
     }
+}
+
+function toggleAdminWishWallPin(wishId) {
+    const wid = String(wishId || '').trim();
+    if (!wid) return;
+    const keyName = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+    const wishes = getAdminWishWallPosts();
+    const target = wishes.find(w => String(w.id) === wid);
+    if (!target) return;
+
+    const nextPinned = !Boolean(target.isPinned);
+    const nextPinnedAtTs = nextPinned ? Date.now() : 0;
+    target.isPinned = nextPinned;
+    target.pinnedAtTs = nextPinnedAtTs;
+
+    wishes.sort((a, b) => (typeof compareWishWallItems === 'function')
+        ? compareWishWallItems(a, b)
+        : (Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0)));
+    localStorage.setItem(keyName, JSON.stringify(wishes));
+
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+        CloudSync.patchNode(`${keyName}/${wid}`, {
+            isPinned: nextPinned,
+            pinnedAtTs: nextPinnedAtTs
+        });
+    }
+    renderAdminAll(true);
 }
 
 function adminFastForwardWishExpiry(wishId) {
@@ -929,6 +958,13 @@ async function unlockAdminUI() {
         renderAdminAll();
     });
     checkAutoSchedule2000();
+    if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
+        const purgedOnLoad = ChatStore.purgeInactiveRooms(Date.now());
+        if (purgedOnLoad.length > 0 && typeof AdminMemoryCache !== 'undefined') {
+            AdminMemoryCache.invalidate('chats');
+            AdminMemoryCache.invalidate('users');
+        }
+    }
     renderAdminAll();
 }
 
@@ -1039,15 +1075,20 @@ document.addEventListener('visibilitychange', () => {
     if (!document.hidden) pollSharedStorageChanges();
 });
 
+let lastDailyChatPurgeTickTs = 0;
 setInterval(() => {
     if (!isAdminAuthenticated()) return;
     if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
     checkAutoSchedule2000();
-    if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
-        const purged = ChatStore.purgeInactiveRooms(Date.now());
-        if (purged.length > 0 && typeof AdminMemoryCache !== 'undefined') {
-            AdminMemoryCache.invalidate('chats');
-            AdminMemoryCache.invalidate('users');
+    const nowTickTs = Date.now();
+    if (nowTickTs - lastDailyChatPurgeTickTs >= 60000) {
+        lastDailyChatPurgeTickTs = nowTickTs;
+        if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
+            const purged = ChatStore.purgeInactiveRooms(nowTickTs);
+            if (purged.length > 0 && typeof AdminMemoryCache !== 'undefined') {
+                AdminMemoryCache.invalidate('chats');
+                AdminMemoryCache.invalidate('users');
+            }
         }
     }
     pollSharedStorageChanges();
@@ -1236,10 +1277,21 @@ function renderAdminWishWallList() {
                 }).join('')}
             </div>`;
 
+        const isPinned = Boolean(w.isPinned);
+        const pinnedBadgeHtml = isPinned
+            ? `<span class="px-2 py-0.5 rounded-full bg-rose-600 text-white font-bold shadow-2xs">📌 前台置頂中</span>`
+            : '';
+        const pinActionBtnHtml = isPinned
+            ? `<button type="button" onclick="toggleAdminWishWallPin('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg bg-rose-100 border border-rose-300 text-[#8f4452] font-bold hover:bg-rose-200 transition shadow-sm">📌 取消置頂</button>`
+            : (!isClosedGroup
+                ? `<button type="button" onclick="toggleAdminWishWallPin('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg bg-pink-50 border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-100 transition shadow-sm">📌 置頂顯示</button>`
+                : '');
+
         return `
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-white border ${isClosedGroup ? 'border-gray-200' : 'border-emerald-200'} text-xs transition hover:bg-pink-50/30">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl ${isPinned ? 'bg-rose-50/45 border-2 border-rose-300' : `bg-white border ${isClosedGroup ? 'border-gray-200' : 'border-emerald-200'}`} text-xs transition hover:bg-pink-50/30">
                 <div class="min-w-0 flex-1 space-y-1.5">
                     <div class="flex flex-wrap items-center gap-1.5">
+                        ${pinnedBadgeHtml}
                         ${statusPill}
                         <span class="px-1.5 py-0.5 rounded bg-pink-50 border border-pink-200 text-[11px] font-bold text-[#8f4452]">${gLabel}</span>
                         <span class="font-bold text-[#8f4452]">${escWw(w.authorNickname)} (ID:${escWw(w.authorId)})</span>
@@ -1250,7 +1302,8 @@ function renderAdminWishWallList() {
                     </div>
                     ${respondersDetailHtml}
                 </div>
-                <div class="flex items-center gap-2 shrink-0 sm:self-center self-end pt-1 sm:pt-0">
+                <div class="flex flex-wrap items-center gap-2 shrink-0 sm:self-center self-end pt-1 sm:pt-0">
+                    ${pinActionBtnHtml}
                     ${!isClosedGroup ? `<button type="button" onclick="adminFastForwardWishExpiry('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 font-semibold hover:bg-amber-100 transition shadow-sm">⏩ 推進至到期</button>` : ''}
                     <button type="button" onclick="deleteAdminWishWallEntry('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg text-rose-500 hover:bg-rose-50 font-semibold transition">🗑️ 刪除</button>
                 </div>
@@ -1303,3 +1356,4 @@ function renderAdminWishWallList() {
 
 window.batchDeleteAdminWishWallEntries = batchDeleteAdminWishWallEntries;
 window.renderAdminWishWallList = renderAdminWishWallList;
+window.toggleAdminWishWallPin = toggleAdminWishWallPin;

@@ -968,7 +968,7 @@ function renderWishWallTab(forceRender = false) {
         editMy: isEditingMyActiveWish,
         editMyId: editMyWishId,
         wishes: wishes.map(w => [
-            w.id, w.title, w.authorGender, w.manuallyClosed, w.earlyClosedCanMatch, w.settled, w.matchedAnonNumber,
+            w.id, w.title, Boolean(w.isPinned), Number(w.pinnedAtTs || 0), w.authorGender, w.manuallyClosed, w.earlyClosedCanMatch, w.settled, w.matchedAnonNumber,
             isWishWallEnded(w, nowTs), calcWishRemainingDays(w, nowTs),
             (w.questions || []).map(q => [q.question, q.optionA, q.optionB]),
             (w.responses || []).length
@@ -1459,11 +1459,16 @@ function renderWishWallTab(forceRender = false) {
                 authorIdentityLabel = `匿名(${authorG})(已回答)`;
             }
             const isPubExpanded = expandedPublicWishes.has(String(w.id));
+            const isPinnedWish = Boolean(w.isPinned);
+            const pinnedPillHtml = isPinnedWish
+                ? `<span class="px-2 py-0.5 rounded-full bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-[11px] font-bold shrink-0 whitespace-nowrap shadow-2xs">📌 置頂</span>`
+                : '';
 
             return `
-                <div id="publicWishCard_${escapeWishHtml(w.id)}" class="glass-card rounded-2xl px-4 py-3 border border-pink-200 space-y-3 shadow-2xs transition-all duration-300">
+                <div id="publicWishCard_${escapeWishHtml(w.id)}" class="glass-card rounded-2xl px-4 py-3 ${isPinnedWish ? 'border-2 border-[#c96a7b] bg-gradient-to-r from-rose-50/55 via-white to-pink-50/45 shadow-sm' : 'border border-pink-200 shadow-2xs'} space-y-3 transition-all duration-300">
                     <div class="flex items-center justify-between gap-2 cursor-pointer select-none" onclick="togglePublicWishExpand('${escapeWishHtml(w.id)}')">
                         <div class="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-x-auto">
+                            ${pinnedPillHtml}
                             <h4 class="text-xs sm:text-sm font-bold font-serif-jp text-[#7a3542] truncate">🏮 ${escapeWishHtml(w.title)}</h4>
                             <span class="px-2 py-0.5 rounded-full ${authorBadgeStyle} text-[11px] font-bold shrink-0 whitespace-nowrap">
                                 ${authorIdentityLabel}

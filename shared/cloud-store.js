@@ -779,7 +779,9 @@ const CloudSync = {
             const normWishes = rawWishes
                 .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
                 .filter(Boolean);
-            normWishes.sort((a, b) => Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0));
+            normWishes.sort((a, b) => (typeof compareWishWallItems === 'function')
+                ? compareWishWallItems(a, b)
+                : (Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0)));
             this.writeLocalIfChanged(WISH_WALL_KEY, JSON.stringify(normWishes));
         } else {
             this.writeLocalIfChanged(WISH_WALL_KEY, '[]');
@@ -1361,7 +1363,9 @@ const Store = {
             return arr
                 .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
                 .filter(Boolean)
-                .sort((a, b) => Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0));
+                .sort((a, b) => (typeof compareWishWallItems === 'function')
+                    ? compareWishWallItems(a, b)
+                    : (Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0)));
         } catch (e) {
             return [];
         }
@@ -1889,11 +1893,27 @@ const ChatStore = {
         if (changed) this.saveAll(all);
     },
 
-    // 超過 4 天（96 小時）無更新或無新訊息：刪除聊天紀錄（刪除不保存）並自動解除會員列表雙方好友配對
-    purgeInactiveRooms(nowTs = Date.now(), maxInactiveMs = 4 * 24 * 60 * 60 * 1000) {
+    // 超過 3 天（72 小時）無更新或無新訊息：每日自動檢查一次，刪除聊天紀錄（刪除不保存）並自動解除會員列表雙方好友配對
+    purgeInactiveRooms(nowTs = Date.now(), maxInactiveMs = 3 * 24 * 60 * 60 * 1000, options = {}) {
+        const forceCheck = Boolean(options && options.force);
+        const dailyLockKey = 'yuelao_last_inactive_chat_purge_day';
+        const todayStr = new Date(nowTs).toDateString();
+
+        if (!forceCheck) {
+            try {
+                if (localStorage.getItem(dailyLockKey) === todayStr) {
+                    return [];
+                }
+            } catch (e) {}
+        }
+
         if (typeof CloudSync !== 'undefined' && (!CloudSync.initialized || CloudSync.inFlightWrites > 0)) {
             return [];
         }
+
+        try {
+            localStorage.setItem(dailyLockKey, todayStr);
+        } catch (e) {}
 
         const allChats = this.getAll();
         const expiredPairs = [];

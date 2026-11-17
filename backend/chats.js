@@ -201,7 +201,7 @@ function renderChatsPageSection(users, forceRender = false) {
 
     ensureAdminChatDetailScrollPagination(detailMsgsBox);
 
-    // 檢查並自動清理超過 4 天無更新／無新訊息的聊天室（刪除不保存＋自動解除雙方會員列表好友配對）
+    // 每日一次自動清理超過 3 天無更新／無新訊息的聊天室（刪除不保存＋自動解除雙方會員列表好友配對）
     if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
         const purgedList = ChatStore.purgeInactiveRooms(Date.now());
         if (purgedList.length > 0) {
@@ -277,7 +277,7 @@ function renderChatsPageSection(users, forceRender = false) {
                 const badgeA = r.genderA === '男' ? 'bg-sky-100 text-sky-700' : (r.genderA === '女' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600');
                 const badgeB = r.genderB === '男' ? 'bg-sky-100 text-sky-700' : (r.genderB === '女' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600');
                 const lastTimeStr = formatAdminChatDateTime(r.lastMsg);
-                const remainMs = Math.max(0, (r.lastTs + 4 * 24 * 60 * 60 * 1000) - Date.now());
+                const remainMs = Math.max(0, (r.lastTs + 3 * 24 * 60 * 60 * 1000) - Date.now());
                 const remainHours = Math.ceil(remainMs / (60 * 60 * 1000));
                 const expireHint = r.lastTs > 0
                     ? (remainHours >= 24 ? `剩 ${Math.floor(remainHours / 24)}天${remainHours % 24}時` : `剩 ${remainHours}小時`)

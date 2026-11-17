@@ -1072,6 +1072,8 @@ function normalizeWishWallItem(rawWish) {
     w.matchedAnonNumber = w.matchedAnonNumber ? Number(w.matchedAnonNumber) : null;
     w.matchedResponderId = w.matchedResponderId ? String(w.matchedResponderId).trim() : null;
     w.settledAtTs = Number(w.settledAtTs || 0);
+    w.isPinned = Boolean(rawWish.isPinned);
+    w.pinnedAtTs = w.isPinned ? (Number(rawWish.pinnedAtTs || 0) || Date.now()) : 0;
 
     const rawQs = Array.isArray(w.questions)
         ? w.questions
@@ -1116,6 +1118,19 @@ function normalizeWishWallItem(rawWish) {
     });
 
     return w;
+}
+
+function compareWishWallItems(a, b) {
+    const pinA = Boolean(a && a.isPinned) ? 1 : 0;
+    const pinB = Boolean(b && b.isPinned) ? 1 : 0;
+    if (pinA !== pinB) {
+        return pinB - pinA;
+    }
+    if (pinA === 1 && pinB === 1) {
+        const pinTsDiff = Number(b.pinnedAtTs || 0) - Number(a.pinnedAtTs || 0);
+        if (pinTsDiff !== 0) return pinTsDiff;
+    }
+    return Number((b && b.createdAtTs) || 0) - Number((a && a.createdAtTs) || 0);
 }
 
 // ==================== ✨ 即時緣分動態牆：地區＆年齡＆MBTI 每次刷新動態隨機引擎 ====================
