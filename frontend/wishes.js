@@ -4,6 +4,10 @@ let wishDraftTitle = '';
 let wishDraftOpenDays = 3;
 let expandedPublicWishes = new Set();
 let expandedMyActiveWish = false;
+let isEditingMyActiveWish = false;
+let editMyWishId = '';
+let editMyWishTitle = '';
+let editMyWishQuestions = [];
 let wishPublicListPage = 1;
 let wishPastHistoryPage = 1;
 const WISH_PUBLIC_PER_PAGE = 5;
@@ -32,9 +36,146 @@ function togglePublicWishExpand(wishId) {
 }
 
 function toggleMyActiveWishExpand() {
+    if (isEditingMyActiveWish && expandedMyActiveWish) {
+        return;
+    }
     expandedMyActiveWish = !expandedMyActiveWish;
     lastWishWallRenderSig = '';
     renderWishWallTab(true);
+}
+
+function openEditMyActiveWish(wishId = '') {
+    const myPid = appState && appState.playerId ? String(appState.playerId).trim() : '';
+    if (!myPid) return;
+    const wishes = (typeof Store !== 'undefined' && typeof Store.getWishWallPosts === 'function')
+        ? Store.getWishWallPosts()
+        : [];
+    const nowTs = Date.now();
+    const target = wishes.find(w =>
+        String(w.authorId) === myPid &&
+        !isWishWallEnded(w, nowTs) &&
+        (!wishId || String(w.id) === String(wishId).trim())
+    );
+    if (!target) {
+        showMiniNotice('⏳ 無法編輯', '目前沒有進行中的祈願題目可編輯喔！');
+        return;
+    }
+
+    isEditingMyActiveWish = true;
+    editMyWishId = String(target.id);
+    editMyWishTitle = String(target.title || '');
+    editMyWishQuestions = (target.questions || []).map((q, idx) => ({
+        qIndex: Number(q.qIndex || (idx + 1)),
+        question: String(q.question || ''),
+        optionA: String(q.optionA || ''),
+        optionB: String(q.optionB || '')
+    }));
+    expandedMyActiveWish = true;
+    lastWishWallRenderSig = '';
+    renderWishWallTab(true);
+
+    const card = document.getElementById('myActiveWishCard');
+    if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const firstInput = card.querySelector('input[type="text"]');
+        if (firstInput) {
+            setTimeout(() => firstInput.focus(), 160);
+        }
+    }
+}
+
+function cancelEditMyActiveWish() {
+    isEditingMyActiveWish = false;
+    editMyWishId = '';
+    editMyWishTitle = '';
+    editMyWishQuestions = [];
+    lastWishWallRenderSig = '';
+    renderWishWallTab(true);
+}
+
+function onEditMyWishTitleInput(val) {
+    editMyWishTitle = String(val || '');
+}
+
+function onEditMyWishQuestionFieldInput(idx, field, val) {
+    if (!editMyWishQuestions[idx]) return;
+    if (field !== 'question' && field !== 'optionA' && field !== 'optionB') return;
+    editMyWishQuestions[idx][field] = String(val || '');
+}
+
+async function saveEditedMyActiveWish(e) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+
+    const myPid = appState && appState.playerId ? String(appState.playerId).trim() : '';
+    if (!myPid || !editMyWishId) return;
+
+    const wishes = (typeof Store !== 'undefined' && typeof Store.getWishWallPosts === 'function')
+        ? Store.getWishWallPosts()
+        : [];
+    const target = wishes.find(w => String(w.id) === editMyWishId && String(w.authorId) === myPid);
+    if (!target) {
+        cancelEditMyActiveWish();
+        return;
+    }
+
+    if (isWishWallEnded(target, Date.now())) {
+        showMiniNotice('⏳ 題目已結束', '這則祈願題目已經結束，無法再編輯內容囉！');
+        cancelEditMyActiveWish();
+        return;
+    }
+
+    const updatedQuestions = [];
+    for (let i = 0; i < editMyWishQuestions.length; i++) {
+        const item = editMyWishQuestions[i] || {};
+        const qText = String(item.question || '').trim();
+        const optA = String(item.optionA || '').trim();
+        const optB = String(item.optionB || '').trim();
+        if (!qText || !optA || !optB) {
+            showMiniNotice('✍️ 請填寫完整題目', `請將第 ${i + 1} 題的「題目內容」與「兩個選項」都填寫完整喔！`);
+            return;
+        }
+        if (optA === optB) {
+            showMiniNotice('⚠️ 選項不能相同', `第 ${i + 1} 題的兩個選項不能完全相同喔！`);
+            return;
+        }
+        updatedQuestions.push({
+            qIndex: i + 1,
+            question: qText,
+            optionA: optA,
+            optionB: optB
+        });
+    }
+
+    const nextTitle = String(editMyWishTitle || '').trim() || updatedQuestions[0].question;
+
+    // 禁止關鍵字檢查
+    if (typeof Store !== 'undefined' && typeof Store.checkProfileBanned === 'function') {
+        const combinedCheckText = [nextTitle, ...updatedQuestions.map(q => `${q.question} ${q.optionA} ${q.optionB}`)].join(' ');
+        const hitRule = Store.checkProfileBanned({ bio: combinedCheckText, nickname: nextTitle });
+        if (hitRule) {
+            showMiniNotice('🚫 內容包含受限制字眼', '祈願題目或選項包含系統限制的字眼，請修改後再儲存。');
+            return;
+        }
+    }
+
+    target.title = nextTitle;
+    target.questions = updatedQuestions;
+
+    localStorage.setItem(WISH_WALL_KEY, JSON.stringify(wishes));
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+        await CloudSync.patchNode(`${WISH_WALL_KEY}/${target.id}`, {
+            title: nextTitle,
+            questions: updatedQuestions
+        });
+    }
+
+    isEditingMyActiveWish = false;
+    editMyWishId = '';
+    editMyWishTitle = '';
+    editMyWishQuestions = [];
+    lastWishWallRenderSig = '';
+    renderWishWallTab(true);
+    showMiniNotice('✅ 祈願題目已更新！', '你的祈願文字標題與二選一選項內容已同步更新。');
 }
 
 function goToWishPublicPage(pageNum) {
@@ -446,6 +587,10 @@ async function closeMyWishEarly(wishId) {
     }
 
     expandedMyActiveWish = false;
+    isEditingMyActiveWish = false;
+    editMyWishId = '';
+    editMyWishTitle = '';
+    editMyWishQuestions = [];
     lastWishWallRenderSig = '';
     renderWishWallTab(true);
     updateWishNavBadge();
@@ -798,9 +943,12 @@ function renderWishWallTab(forceRender = false) {
         pastPage: wishPastHistoryPage,
         expPub: Array.from(expandedPublicWishes),
         expMy: expandedMyActiveWish,
+        editMy: isEditingMyActiveWish,
+        editMyId: editMyWishId,
         wishes: wishes.map(w => [
-            w.id, w.authorGender, w.manuallyClosed, w.earlyClosedCanMatch, w.settled, w.matchedAnonNumber,
+            w.id, w.title, w.authorGender, w.manuallyClosed, w.earlyClosedCanMatch, w.settled, w.matchedAnonNumber,
             isWishWallEnded(w, nowTs), calcWishRemainingDays(w, nowTs),
+            (w.questions || []).map(q => [q.question, q.optionA, q.optionB]),
             (w.responses || []).length
         ]),
         creatorOpen: isWishCreatorFormOpen,
@@ -916,9 +1064,18 @@ function renderWishWallTab(forceRender = false) {
         }
 
         if (myActiveWish) {
+            if (isEditingMyActiveWish && editMyWishId !== String(myActiveWish.id)) {
+                isEditingMyActiveWish = false;
+                editMyWishId = '';
+                editMyWishTitle = '';
+                editMyWishQuestions = [];
+            }
+
             const remDays = calcWishRemainingDays(myActiveWish, nowTs);
             const resps = myActiveWish.responses || [];
             const qs = myActiveWish.questions || [];
+            const isEditingThisActive = Boolean(isEditingMyActiveWish && editMyWishId === String(myActiveWish.id));
+
             const livePreviewResps = resps.length === 0
                 ? `<p class="text-xs text-gray-400">目前尚無玩家回覆，開放期間內玩家送出回答後會即時顯示於此。</p>`
                 : resps.map(r => {
@@ -935,6 +1092,74 @@ function renderWishWallTab(forceRender = false) {
                     `;
                 }).join('');
 
+            const editRowsHtml = editMyWishQuestions.map((eq, idx) => `
+                <div class="p-3 rounded-2xl bg-pink-50/55 border border-pink-200 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-[#8f4452]">第 ${idx + 1} 題（二選一・僅可修改文字）</span>
+                    </div>
+                    <input type="text" value="${escapeWishHtml(eq.question)}" oninput="onEditMyWishQuestionFieldInput(${idx}, 'question', this.value)"
+                        placeholder="輸入題目問題..." class="input-jp !py-2 !text-xs" required>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input type="text" value="${escapeWishHtml(eq.optionA)}" oninput="onEditMyWishQuestionFieldInput(${idx}, 'optionA', this.value)"
+                            placeholder="選項 A..." class="input-jp !py-2 !text-xs" required>
+                        <input type="text" value="${escapeWishHtml(eq.optionB)}" oninput="onEditMyWishQuestionFieldInput(${idx}, 'optionB', this.value)"
+                            placeholder="選項 B..." class="input-jp !py-2 !text-xs" required>
+                    </div>
+                </div>
+            `).join('');
+
+            const expandedBodyHtml = isEditingThisActive
+                ? `
+                    <form onsubmit="saveEditedMyActiveWish(event)" class="space-y-3 pt-3 border-t border-emerald-200">
+                        <div class="p-2.5 rounded-xl bg-amber-50/85 border border-amber-200 text-[11px] text-amber-900 font-semibold flex flex-wrap items-center justify-between gap-1">
+                            <span>✏️ 編輯模式：僅可修改「文字標題」與「二選一題目／選項內容」</span>
+                            <span class="text-gray-500 font-normal">開放 ${myActiveWish.openDays} 天（${formatWishShortDateTime(myActiveWish.expiresAtTs)} 截止）・題數固定 ${qs.length} 題</span>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="block text-xs font-bold text-[#8f4452]">祈願主題 / 文字標題（選填，留空則自動帶入第 1 題問題）</label>
+                            <input type="text" value="${escapeWishHtml(editMyWishTitle)}" oninput="onEditMyWishTitleInput(this.value)"
+                                placeholder="輸入祈願標題..." class="input-jp !py-2 !text-xs">
+                        </div>
+                        <div class="space-y-2.5">
+                            ${editRowsHtml}
+                        </div>
+                        <div class="flex items-center justify-end gap-2 pt-1">
+                            <button type="button" onclick="cancelEditMyActiveWish()" class="px-3.5 py-2 rounded-xl border border-gray-300 bg-white text-xs font-semibold text-gray-600 hover:bg-gray-50 transition">
+                                取消
+                            </button>
+                            <button type="submit" class="btn-sakura px-5 py-2 rounded-xl text-xs font-bold shadow-2xs">
+                                💾 儲存文字修改
+                            </button>
+                        </div>
+                    </form>
+                `
+                : `
+                    <div class="space-y-2 pt-2.5 border-t border-emerald-100">
+                        <div class="flex items-center justify-between gap-2">
+                            <p class="text-xs font-bold text-[#8f4452]">📋 我的二選一題目（共 ${qs.length} 題）：</p>
+                            <button type="button" onclick="openEditMyActiveWish('${escapeWishHtml(myActiveWish.id)}')"
+                                class="px-2.5 py-1 rounded-lg bg-pink-50 border border-pink-200 text-[#8f4452] text-[11px] font-bold hover:bg-pink-100 transition">
+                                ✏️ 編輯標題／選項文字
+                            </button>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            ${qs.map(q => `
+                                <div class="p-3 rounded-xl bg-white border border-pink-200 text-xs">
+                                    <p class="font-bold text-[#5e343c]">Q${q.qIndex}. ${escapeWishHtml(q.question)}</p>
+                                    <p class="text-[11px] text-[#c96a7b] mt-1">選項 A：${escapeWishHtml(q.optionA)} ／ 選項 B：${escapeWishHtml(q.optionB)}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="space-y-2 pt-2 border-t border-emerald-100">
+                        <p class="text-xs font-bold text-[#8f4452]">🎭 目前收到的匿名答案預覽（共 ${resps.length} 人已回答，結束後開放挑選配對）：</p>
+                        <div class="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+                            ${livePreviewResps}
+                        </div>
+                    </div>
+                `;
+
             creatorBox.innerHTML = `
                 <div class="space-y-4">
                     ${pendingSelectionHtml}
@@ -948,6 +1173,12 @@ function renderWishWallTab(forceRender = false) {
                                 </span>
                             </div>
                             <div class="flex items-center gap-1.5 shrink-0">
+                                ${!isEditingThisActive ? `
+                                    <button type="button" onclick="event.stopPropagation(); openEditMyActiveWish('${escapeWishHtml(myActiveWish.id)}')"
+                                        class="px-2.5 py-1 rounded-xl bg-white border border-pink-300 hover:bg-pink-50 text-[#8f4452] text-[11px] font-bold shadow-2xs transition whitespace-nowrap">
+                                        ✏️ 編輯題目
+                                    </button>
+                                ` : ''}
                                 <button type="button" onclick="event.stopPropagation(); closeMyWishEarly('${escapeWishHtml(myActiveWish.id)}')"
                                     class="px-2.5 py-1 rounded-xl bg-gray-800 hover:bg-gray-900 text-white text-[11px] font-bold shadow-2xs transition whitespace-nowrap">
                                     🔒 自行關閉題目
@@ -956,26 +1187,7 @@ function renderWishWallTab(forceRender = false) {
                             </div>
                         </div>
 
-                        ${expandedMyActiveWish ? `
-                        <div class="space-y-2 pt-2.5 border-t border-emerald-100">
-                            <p class="text-xs font-bold text-[#8f4452]">📋 我的二選一題目（共 ${qs.length} 題）：</p>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                ${qs.map(q => `
-                                    <div class="p-3 rounded-xl bg-white border border-pink-200 text-xs">
-                                        <p class="font-bold text-[#5e343c]">Q${q.qIndex}. ${escapeWishHtml(q.question)}</p>
-                                        <p class="text-[11px] text-[#c96a7b] mt-1">選項 A：${escapeWishHtml(q.optionA)} ／ 選項 B：${escapeWishHtml(q.optionB)}</p>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-
-                        <div class="space-y-2 pt-2 border-t border-emerald-100">
-                            <p class="text-xs font-bold text-[#8f4452]">🎭 目前收到的匿名答案預覽（共 ${resps.length} 人已回答，結束後開放挑選配對）：</p>
-                            <div class="space-y-2 max-h-60 overflow-y-auto pr-0.5">
-                                ${livePreviewResps}
-                            </div>
-                        </div>
-                        ` : ''}
+                        ${expandedMyActiveWish ? expandedBodyHtml : ''}
                     </div>
                 </div>
             `;
@@ -1174,7 +1386,14 @@ function renderWishWallTab(forceRender = false) {
 
             let actionFooterHtml = '';
             if (isMine) {
-                actionFooterHtml = '';
+                actionFooterHtml = `
+                    <div class="flex items-center justify-end pt-1">
+                        <button type="button" onclick="openEditMyActiveWish('${escapeWishHtml(w.id)}')"
+                            class="px-3.5 py-1.5 rounded-xl bg-pink-50 border border-pink-300 text-[#8f4452] text-xs font-bold hover:bg-pink-100 transition">
+                            ✏️ 編輯我的題目（僅限標題／選項文字）
+                        </button>
+                    </div>
+                `;
             } else if (myResp) {
                 actionFooterHtml = `
                     <div class="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-800 font-semibold">
@@ -1366,3 +1585,6 @@ window.togglePublicWishExpand = togglePublicWishExpand;
 window.toggleMyActiveWishExpand = toggleMyActiveWishExpand;
 window.goToWishPublicPage = goToWishPublicPage;
 window.goToWishPastPage = goToWishPastPage;
+window.openEditMyActiveWish = openEditMyActiveWish;
+window.cancelEditMyActiveWish = cancelEditMyActiveWish;
+window.saveEditedMyActiveWish = saveEditedMyActiveWish;
