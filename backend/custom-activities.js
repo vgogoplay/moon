@@ -317,7 +317,7 @@ function saveEditedCustomActivity(e) {
     appendLog(`<span class="text-sky-300">[編輯自定義活動]</span> 已更新自定義活動「<strong>${actName}</strong>」的設定。`);
 }
 
-function toggleCustomActivityOpen(activityId) {
+async function toggleCustomActivityOpen(activityId) {
     const list = getCustomActivities();
     const act = list.find(a => String(a.id) === String(activityId));
     if (!act) return;
@@ -328,6 +328,35 @@ function toggleCustomActivityOpen(activityId) {
 
     const statusStr = act.isOpen ? '🟢 開啟中（前台首頁已顯示報名按鈕）' : '⚪ 已關閉（前台首頁已隱藏按鈕）';
     appendLog(`<span class="text-amber-300">[活動狀態切換]</span> 自定義活動「<strong>${act.name}</strong>」已切換為：<strong>${statusStr}</strong>。`);
+
+    // 若切換為「關閉」，且該活動已完成配對或已超過配對時間，順便歸檔並清除玩家身上殘留的該活動報名標記，避免日後誤觸發
+    const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+    if (!act.isOpen && (act.autoMatchedDone || (matchTs > 0 && Date.now() >= matchTs))) {
+        const users = getUsers();
+        const affected = [];
+        users.forEach(u => {
+            if (u && u.id && u.customActivityRegs && Object.prototype.hasOwnProperty.call(u.customActivityRegs, act.id)) {
+                if (typeof ActivityRegArchive !== 'undefined') {
+                    ActivityRegArchive.recordCustom(u, act.id, u.customActivityRegs[act.id], true);
+                }
+                delete u.customActivityRegs[act.id];
+                if (Object.keys(u.customActivityRegs).length === 0) {
+                    delete u.customActivityRegs;
+                }
+                affected.push(u);
+            }
+        });
+        if (affected.length > 0) {
+            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+            if (typeof CloudSync !== 'undefined') {
+                for (const u of affected) {
+                    await CloudSync.upsertUser(u, true);
+                    await CloudSync.deleteNode(`${USERS_KEY}/${u.id}/customActivityRegs/${act.id}`);
+                }
+            }
+            renderAdminAll();
+        }
+    }
 }
 
 async function clearCustomActivityRegistrations(activityId) {
@@ -459,12 +488,46 @@ function canPairInCustomActivity(A, B, activityId) {
 }
 
 async function runCustomActivityMatch(activityId, isAuto = false) {
-    const res = await executeCustomActivityMatchCore(activityId, { isAuto, markScheduledDone: isAuto });
-    if (!res || !res.executed) return;
+    const list = getCustomActivities();
+    const act = list.find(a => String(a.id) === String(activityId));
+    if (!act) return;
+
+    let forceManualOverride = false;
+    if (!isAuto) {
+        const nowTs = Date.now();
+        const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+        const matchTimeLabel = matchTs ? formatShortDateTime(matchTs) : '未設定';
+        const isClosedOrExpired = !act.isOpen || Boolean(act.autoMatchedDone) || (matchTs > 0 && nowTs - matchTs > (15 * 60 * 1000));
+
+        if (isClosedOrExpired) {
+            const warnMsg = `⚠️ 注意：活動「${act.name}」目前為【${!act.isOpen ? '已關閉' : '已結束／已執行過配對'}】（設定配對時間：${matchTimeLabel}）。\n\n一般情況下不應再次觸發配對！確定仍要強制手動補跑一次配對嗎？`;
+            if (!confirm(warnMsg)) {
+                return;
+            }
+            forceManualOverride = true;
+        } else {
+            if (!confirm(`確定要立即執行專屬活動「${act.name}」的配對嗎？`)) {
+                return;
+            }
+            forceManualOverride = true;
+        }
+    }
+
+    const res = await executeCustomActivityMatchCore(activityId, {
+        isAuto,
+        markScheduledDone: isAuto,
+        forceManualOverride
+    });
+    if (!res || !res.executed) {
+        if (!isAuto) {
+            alert(`⚠️【${act.name}】未執行配對（活動已關閉或已超過排程時間）。`);
+        }
+        return;
+    }
 
     if (!isAuto) {
         if (res.pairCount > 0) {
-            alert(`🎉【${res.actName}】自動配對完成！\n\n本次共成功配對 ${res.pairCount} 對${res.unmatchedCount > 0 ? `（${res.unmatchedCount} 人落單未配對）` : ''}，已即時同步至雙方前台好友名單！`);
+            alert(`🎉【${res.actName}】配對完成！\n\n本次共成功配對 ${res.pairCount} 對${res.unmatchedCount > 0 ? `（${res.unmatchedCount} 人落單未配對）` : ''}，已即時同步至雙方前台好友名單！`);
         } else {
             alert(`ℹ️【${res.actName}】目前尚無可配對的組合。\n\n（可能原因：同號碼異性／同選項異性待配對人數不足，或報名玩家的指定條件尚未遇到符合對象。）`);
         }
@@ -550,8 +613,8 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                             <button type="button" onclick="toggleCustomActivityOpen('${act.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${act.isOpen ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-emerald-600 text-white hover:bg-emerald-700'}">
                                 ${act.isOpen ? '切換為「關閉」' : '開啟活動（前台顯示）'}
                             </button>
-                            <button type="button" onclick="runCustomActivityMatch('${act.id}')" class="px-4 py-2 rounded-xl bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition">
-                                💘 執行【${act.name}】配對
+                            <button type="button" onclick="runCustomActivityMatch('${act.id}')" class="px-4 py-2 rounded-xl text-xs font-bold transition ${(!act.isOpen || act.autoMatchedDone) ? 'bg-gray-100 border border-gray-300 text-gray-500 hover:bg-gray-200' : 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white shadow hover:opacity-95'}">
+                                ${(!act.isOpen || act.autoMatchedDone) ? `⚠️ 補跑【${act.name}】配對（已關閉/已結算）` : `💘 執行【${act.name}】配對`}
                             </button>
                             <button type="button" onclick="clearCustomActivityRegistrations('${act.id}')" ${regUsers.length === 0 ? 'disabled' : ''} title="清除此活動當前所有已報名玩家，並取消其勾選的活動選項" class="px-3.5 py-2 rounded-xl border text-xs font-bold transition ${regUsers.length === 0 ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'}">
                                 🧹 清除已報名（${regUsers.length}人）

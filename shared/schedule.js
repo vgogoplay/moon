@@ -393,7 +393,7 @@ function getCustomActivityMatchedUserIdSet(act, usersList = null) {
 }
 
 async function executeCustomActivityMatchCore(activityId, options = {}) {
-    const { isAuto = false, markScheduledDone = false } = options;
+    const { isAuto = false, markScheduledDone = false, forceManualOverride = false } = options;
     let acts = [];
     try {
         acts = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
@@ -401,11 +401,22 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
         acts = [];
     }
     const act = Array.isArray(acts) ? acts.find(a => String(a.id) === String(activityId)) : null;
-    if (!act) return { executed: false, pairCount: 0, unmatchedCount: 0 };
+    if (!act) return { executed: false, reason: 'not_found', pairCount: 0, unmatchedCount: 0 };
 
-    // 單次執行保護：若為到點自動配對且活動已關閉或已標記完成，絕不重複執行第二次
-    if (isAuto && (!act.isOpen || act.autoMatchedDone)) {
-        return { executed: false, pairCount: 0, unmatchedCount: 0 };
+    const nowCheckTs = Date.now();
+    const scheduledMatchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+
+    // 嚴格防護：活動已關閉、已標記完成配對，或已超過設定配對時間 15 分鐘以上時，除非明確帶入 forceManualOverride，否則一律中止執行
+    if (!forceManualOverride) {
+        if (!act.isOpen) {
+            return { executed: false, reason: 'closed', actName: act.name, pairCount: 0, unmatchedCount: 0 };
+        }
+        if (Boolean(act.autoMatchedDone)) {
+            return { executed: false, reason: 'already_done', actName: act.name, pairCount: 0, unmatchedCount: 0 };
+        }
+        if (scheduledMatchTs > 0 && (nowCheckTs - scheduledMatchTs) > CUSTOM_ACT_AUTO_MATCH_GRACE_MS) {
+            return { executed: false, reason: 'expired', actName: act.name, pairCount: 0, unmatchedCount: 0 };
+        }
     }
 
     if (isAuto || markScheduledDone) {
@@ -426,7 +437,8 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
 
     const areFriendsFn = (A, B) =>
         (A.matchedHistory || []).some(h => String(h.partnerId) === String(B.id)) ||
-        String(A.matchedWithId) === String(B.id);
+        String(A.matchedWithId) === String(B.id) ||
+        (typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(A.id, B.id));
 
     const acceptsCustomFn = (seeker, candidate) => {
         const reg = seeker.customActivityRegs && seeker.customActivityRegs[act.id];
@@ -800,8 +812,13 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
     (Array.isArray(customActs) ? customActs : []).forEach(act => {
         if (!act || !act.id) return;
         const clearTs = getCustomActivityClearRegsTs(act);
-        if (clearTs > 0 && nowTs >= clearTs) {
-            expiredCustomActMap.set(String(act.id), { name: act.name || String(act.id), clearTs });
+        const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+        const isClosedAndDone = !act.isOpen && (Boolean(act.autoMatchedDone) || (matchTs > 0 && nowTs >= matchTs));
+        if ((clearTs > 0 && nowTs >= clearTs) || isClosedAndDone) {
+            expiredCustomActMap.set(String(act.id), {
+                name: act.name || String(act.id),
+                clearTs: clearTs > 0 ? clearTs : nowTs
+            });
         }
     });
 
