@@ -476,7 +476,10 @@
             </div>
 
             <!-- 已結束祈願歷史紀錄（僅記錄近 10 筆，每頁最多顯示 5 個，第 6 個在第二頁） -->
-            <div id="wishWallPastHistorySection" class="hidden space-y-3 pt-2 pb-16 border-t border-dashed border-pink-200"></div>
+            <div id="wishWallPastHistorySection" class="hidden space-y-3 pt-2 border-t border-dashed border-pink-200"></div>
+
+            <!-- 電腦版與手機版底部安全留白區塊：確保展開長題目時可完整往下捲動，不被下方導航列遮擋 -->
+            <div class="h-24 md:h-28 pointer-events-none" aria-hidden="true"></div>
         </section>
     </main>
 
@@ -834,7 +837,7 @@
     <script src="frontend/state.js?v=20261117e"></script>
     <script src="frontend/profile.js?v=20261115y"></script>
     <script src="frontend/activities.js?v=20261117h"></script>
-    <script src="frontend/friends-chat.js?v=20261116j"></script>
-    <script src="frontend/wishes.js?v=20261117w"></script>
+    <script src="frontend/friends-chat.js?v=20261117y"></script>
+    <script src="frontend/wishes.js?v=20261117x"></script>
 </body>
 </html>
