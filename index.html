@@ -6,7 +6,7 @@
     <title>月老牽線計畫 🌸 戀愛手札與七日紅線</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20261117d">
 </head>
 <body class="pb-24 md:pb-12">
     <!-- 櫻花飄落背景容器 -->
@@ -86,6 +86,28 @@
                         <p id="momentText" class="text-sm text-gray-600 leading-relaxed font-serif-jp">
                             有些相遇不需要太長的開場白，只要在週三或週六的晚上，兩條紅線輕輕交會就夠了。
                         </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 即時緣分動態牆（位於心動時刻下方，以隨機順序跑馬燈呈現，不顯示時間） -->
+            <div id="homeFateWallCard" class="glass-card rounded-2xl px-3.5 py-2.5 md:px-4 md:py-3 border border-pink-200/90 flex items-center gap-2.5 md:gap-3 overflow-hidden shadow-sm">
+                <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-[11px] md:text-xs font-bold shrink-0 shadow-2xs">
+                    <span>✨</span>
+                    <span>即時緣分動態牆</span>
+                </div>
+                <div id="homeFateWallMarqueeBox" class="fate-marquee-viewport flex-1 min-w-0">
+                    <div class="fate-marquee-track" style="--marquee-duration: 18s;">
+                        <div class="fate-marquee-group">
+                            <span class="fate-marquee-item text-xs md:text-sm text-[#6e3a43] font-medium">
+                                🌸 目前尚無最新動態，管理月老隨時會在此分享最新喜訊！
+                            </span>
+                        </div>
+                        <div class="fate-marquee-group" aria-hidden="true">
+                            <span class="fate-marquee-item text-xs md:text-sm text-[#6e3a43] font-medium">
+                                🌸 目前尚無最新動態，管理月老隨時會在此分享最新喜訊！
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -410,23 +432,74 @@
                 </form>
             </div>
         </section>
+
+        <!-- ==================== 分頁 4：紅線祈願牆 ==================== -->
+        <section id="tab-wishes" class="tab-view hidden space-y-6">
+            <!-- 頂部說明橫幅 -->
+            <div class="glass-card rounded-3xl p-6 md:p-7 border border-pink-200 space-y-2.5">
+                <div class="flex flex-wrap items-center justify-between gap-2.5">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">🏮</span>
+                        <div>
+                            <h2 class="text-lg md:text-xl font-bold font-serif-jp text-[#8f4452]">紅線祈願牆・二選一默契問答</h2>
+                            <p class="text-xs text-[#c96a7b] font-medium">男／女玩家皆可發起二選一祈願題目（以每日 20:00 計算天數），男／女玩家皆可匿名回答</p>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 shrink-0">
+                        <span id="wishWallOpenCountBadge" class="text-xs px-3 py-1.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                            開放中 0 則
+                        </span>
+                        <button type="button" id="headerAddWishBtn" onclick="handleHeaderAddWishClick()" class="btn-sakura px-4 py-2 rounded-xl text-xs font-bold shadow-sm inline-flex items-center gap-1.5">
+                            <span>➕</span>
+                            <span>新增祈願題目</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="p-3 rounded-2xl bg-rose-50/70 border border-pink-200/80 text-[11px] md:text-xs text-[#6e3a43] leading-relaxed">
+                    💡 <strong>玩法規則：</strong>男／女玩家每次皆可新增 <strong>1 組祈願題目</strong>（內含 N 題 2 選 1，開放 N 天，<strong>每日 20:00 計算 1 天</strong>），於時間結束後可挑選最心動的匿名答案直接配對成七日好友！
+                </div>
+            </div>
+
+            <!-- 女性玩家專屬：我的祈願管理（新增題目 / 進行中關閉 / 到期後挑選配對） -->
+            <div id="wishWallFemaleCreatorSection"></div>
+
+            <!-- 所有玩家皆可瀏覽與回答的祈願牆列表（每頁最多顯示 5 個，第 6 個在第二頁） -->
+            <div class="space-y-3">
+                <div class="flex items-center justify-between px-1">
+                    <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🎐 祈願牆題目列表（開放回答中）</h3>
+                    <button type="button" onclick="refreshWishWallManual()" class="text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] font-semibold hover:bg-pink-50 transition">
+                        ↻ 重新整理
+                    </button>
+                </div>
+                <div id="wishWallPublicList" class="space-y-2.5"></div>
+                <div id="wishWallPublicPaginationBar" class="hidden pt-1 flex flex-wrap items-center justify-between gap-2 text-xs"></div>
+            </div>
+
+            <!-- 已結束祈願歷史紀錄（僅記錄近 10 筆，每頁最多顯示 5 個，第 6 個在第二頁） -->
+            <div id="wishWallPastHistorySection" class="hidden space-y-3 pt-2 pb-16 border-t border-dashed border-pink-200"></div>
+        </section>
     </main>
 
     <!-- 底部導航列 -->
-    <nav class="fixed bottom-0 inset-x-0 z-30 glass-header border-t border-pink-200/80 px-4 py-2">
-        <div class="max-w-md mx-auto grid grid-cols-3 gap-2">
+    <nav class="fixed bottom-0 inset-x-0 z-30 glass-header border-t border-pink-200/80 px-2 sm:px-4 py-2">
+        <div class="max-w-lg mx-auto grid grid-cols-4 gap-1.5 sm:gap-2">
             <button type="button" onclick="switchTab('home')" data-tab-btn="home" class="nav-btn active">
                 <span class="text-lg">🌸</span>
-                <span class="text-xs font-medium">緣分首頁</span>
+                <span class="text-[11px] sm:text-xs font-medium">緣分首頁</span>
+            </button>
+            <button type="button" onclick="switchTab('wishes')" data-tab-btn="wishes" class="nav-btn relative">
+                <span class="text-lg">🏮</span>
+                <span class="text-[11px] sm:text-xs font-medium">紅線祈願牆</span>
+                <span id="navWishDot" class="hidden absolute top-1.5 right-4 sm:right-6 w-2 h-2 rounded-full bg-rose-500"></span>
             </button>
             <button type="button" onclick="switchTab('friends')" data-tab-btn="friends" class="nav-btn relative">
                 <span class="text-lg">💌</span>
-                <span class="text-xs font-medium">好友名單</span>
-                <span id="navFriendDot" class="hidden absolute top-1.5 right-6 w-2 h-2 rounded-full bg-rose-500"></span>
+                <span class="text-[11px] sm:text-xs font-medium">好友名單</span>
+                <span id="navFriendDot" class="hidden absolute top-1.5 right-4 sm:right-6 w-2 h-2 rounded-full bg-rose-500"></span>
             </button>
             <button type="button" onclick="switchTab('profile')" data-tab-btn="profile" class="nav-btn">
                 <span class="text-lg">🔐</span>
-                <span class="text-xs font-medium">個人與隱私</span>
+                <span class="text-[11px] sm:text-xs font-medium">個人與隱私</span>
             </button>
         </div>
     </nav>
@@ -754,13 +827,14 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261117a"></script>
+    <script src="shared/schedule.js?v=20261117h"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261116m"></script>
+    <script src="shared/cloud-store.js?v=20261117t"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/state.js?v=20261116c"></script>
+    <script src="frontend/state.js?v=20261117e"></script>
     <script src="frontend/profile.js?v=20261115y"></script>
-    <script src="frontend/activities.js?v=20261116b"></script>
+    <script src="frontend/activities.js?v=20261117h"></script>
     <script src="frontend/friends-chat.js?v=20261116j"></script>
+    <script src="frontend/wishes.js?v=20261117t"></script>
 </body>
 </html>

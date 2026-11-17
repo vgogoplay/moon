@@ -62,23 +62,21 @@ function renderAdminSharedShell() {
             href: 'backend-activities.html',
             icon: '🎪',
             label: '活動管理與人數統計',
-            sub: '第2種活動・報名與配對統計',
-            badgeId: 'sidebarCustomActBadge'
+            sub: '第2種活動・報名與配對統計'
         },
         {
             key: 'chats',
             href: 'backend-chats.html',
             icon: '💬',
             label: '玩家聊天紀錄查詢',
-            sub: '配對房間・對話內容查核',
-            badgeId: 'sidebarChatRoomsBadge'
+            sub: '配對房間・對話內容查核'
         },
         {
             key: 'ops',
             href: 'backend-ops.html',
             icon: '✉️',
-            label: '信件・回報與測試',
-            sub: '問題回報・發信・禁止規則',
+            label: '信件・動態牆與測試',
+            sub: '動態牆・發信・回報・測試',
             badgeId: 'sidebarPendingReportsBadge'
         },
         {

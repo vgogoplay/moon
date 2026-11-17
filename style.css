@@ -401,3 +401,49 @@ body {
     box-shadow: 0 4px 12px rgba(201, 106, 123, 0.16);
     transform: translateY(-1px);
 }
+
+/* ==================== ✨ 即時緣分動態牆跑馬燈 ==================== */
+.fate-marquee-viewport {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    mask-image: linear-gradient(to right, transparent 0%, #000 2%, #000 98%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 2%, #000 98%, transparent 100%);
+}
+
+.fate-marquee-track {
+    display: flex;
+    align-items: center;
+    width: max-content;
+    animation: fateMarqueeScroll var(--marquee-duration, 22s) linear infinite;
+    will-change: transform;
+}
+
+.fate-marquee-viewport:hover .fate-marquee-track,
+.fate-marquee-viewport:active .fate-marquee-track {
+    animation-play-state: paused;
+}
+
+.fate-marquee-group {
+    display: flex;
+    align-items: center;
+    gap: 1.75rem;
+    padding-right: 1.75rem;
+    flex-shrink: 0;
+}
+
+.fate-marquee-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+}
+
+@keyframes fateMarqueeScroll {
+    0% {
+        transform: translate3d(0, 0, 0);
+    }
+    100% {
+        transform: translate3d(-50%, 0, 0);
+    }
+}

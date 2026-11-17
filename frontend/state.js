@@ -57,6 +57,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (typeof CloudSync !== 'undefined') {
         await CloudSync.init(() => {
             syncFromSharedStorage();
+            if (typeof renderHomeFateWall === 'function') renderHomeFateWall();
+            if (typeof updateWishNavBadge === 'function') updateWishNavBadge();
+            if (!document.getElementById('tab-wishes')?.classList.contains('hidden') && typeof renderWishWallTab === 'function') {
+                renderWishWallTab();
+            }
             updateMailboxBadge();
     if (typeof updateFriendUnreadDot === 'function') updateFriendUnreadDot();
     const currentReportsRaw = localStorage.getItem(REPORTS_KEY) || '[]';
@@ -83,6 +88,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         appState = Store.load();
     }
     syncFromSharedStorage();
+    if (typeof renderHomeFateWall === 'function') renderHomeFateWall(true);
+    if (typeof updateWishNavBadge === 'function') updateWishNavBadge();
+    if (typeof renderWishWallTab === 'function') renderWishWallTab(true);
     renderProfileForm();
     refreshAllUI();
     updateMailboxBadge();
@@ -95,7 +103,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateNextMatchCountdown();
 
     window.addEventListener('storage', (e) => {
-        if ([USERS_KEY, SYSTEM_STATE_KEY, CUSTOM_ACTIVITIES_KEY, BANNED_RULES_KEY, MAILBOX_KEY, REPORTS_KEY, CHATS_KEY, 'yuelao_test_event'].includes(e.key)) {
+        const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+        const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+        if ([USERS_KEY, SYSTEM_STATE_KEY, CUSTOM_ACTIVITIES_KEY, BANNED_RULES_KEY, MAILBOX_KEY, REPORTS_KEY, CHATS_KEY, fwKey, wwKey, 'yuelao_test_event'].includes(e.key)) {
+            if (e.key === fwKey && typeof renderHomeFateWall === 'function') {
+                renderHomeFateWall(true);
+            }
+            if (e.key === wwKey) {
+                if (typeof updateWishNavBadge === 'function') updateWishNavBadge();
+                if (!document.getElementById('tab-wishes')?.classList.contains('hidden') && typeof renderWishWallTab === 'function') {
+                    renderWishWallTab(true);
+                }
+            }
             syncFromSharedStorage();
             updateMailboxBadge();
             if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
@@ -511,6 +530,15 @@ function syncFromSharedStorage() {
             Store.save(appState, false, true);
             if (typeof updateFriendUnreadDot === 'function') updateFriendUnreadDot();
         }
+        if (typeof renderHomeFateWall === 'function') {
+            renderHomeFateWall();
+        }
+        if (typeof updateWishNavBadge === 'function') {
+            updateWishNavBadge();
+        }
+        if (!document.getElementById('tab-wishes')?.classList.contains('hidden') && typeof renderWishWallTab === 'function') {
+            renderWishWallTab();
+        }
         const curUsersRaw = localStorage.getItem(USERS_KEY) || '[]';
         if (curUsersRaw !== lastUsersStatsSnapshot) {
             renderHomeStatsCharts();
@@ -699,6 +727,10 @@ function switchTab(tabName) {
         btn.classList.toggle('active', btn.dataset.tabBtn === tabName);
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (tabName === 'wishes' && typeof renderWishWallTab === 'function') {
+        renderWishWallTab(true);
+    }
 
     if (tabName === 'friends') {
         shouldScrollChatToLatest = true;

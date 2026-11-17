@@ -14,6 +14,8 @@ let lastReportsSnapshot = '';
 let lastSystemSnapshot = '';
 let lastChatsAdminSnapshot = '';
 let lastMatchLogsAdminSnapshot = '';
+let lastFateWallAdminSnapshot = '';
+let lastWishWallAdminSnapshot = '';
 let lastOverviewRenderSig = '';
 let rosterPageSize = '5';
 let currentRosterPage = 1;
@@ -49,6 +51,8 @@ const AdminMemoryCache = {
     system: null,
     mailboxRaw: null,
     mailbox: null,
+    fateWallRaw: null,
+    fateWall: null,
     bannedRulesRaw: null,
     bannedRules: null,
     forceRulesRaw: null,
@@ -59,8 +63,8 @@ const AdminMemoryCache = {
     regHistory: null,
     invalidate(key) {
         if (!key) {
-            this.usersRaw = this.reportsRaw = this.systemRaw = this.mailboxRaw = this.bannedRulesRaw = this.forceRulesRaw = this.chatsRaw = this.regHistoryRaw = null;
-            this.users = this.reports = this.system = this.mailbox = this.bannedRules = this.forceRules = this.chats = this.regHistory = null;
+            this.usersRaw = this.reportsRaw = this.systemRaw = this.mailboxRaw = this.fateWallRaw = this.bannedRulesRaw = this.forceRulesRaw = this.chatsRaw = this.regHistoryRaw = null;
+            this.users = this.reports = this.system = this.mailbox = this.fateWall = this.bannedRules = this.forceRules = this.chats = this.regHistory = null;
             return;
         }
         this[key + 'Raw'] = null;
@@ -139,7 +143,8 @@ function getSystemConfig() {
         registrationOpen: sys.registrationOpen !== undefined ? Boolean(sys.registrationOpen) : true,
         profileLocked: sys.profileLocked !== undefined ? Boolean(sys.profileLocked) : false,
         genderLimitEnabled: sys.genderLimitEnabled !== undefined ? Boolean(sys.genderLimitEnabled) : false,
-        genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30
+        genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30,
+        wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true
     };
 }
 
@@ -206,6 +211,17 @@ function updateGenderLimitMax() {
     setSystemConfig({ genderLimitMax: validMax });
     appendLog(`<span class="text-pink-300">[男生人數上限更新]</span> 男生人數上限已調整為 <strong>${validMax} 人</strong>（女生不限人數）。`);
     renderAdminAll();
+}
+
+function toggleWishEarlyCloseCanMatch() {
+    const cfg = getSystemConfig();
+    const nextVal = !cfg.wishEarlyCloseCanMatch;
+    setSystemConfig({ wishEarlyCloseCanMatch: nextVal });
+    const label = nextVal
+        ? '🟢 可進行好友配對（玩家提前結束題目後，仍可挑選匿名答案配對成好友）'
+        : '🚫 不可進行好友配對（玩家提前結束題目後，直接結束本輪不開放配對）';
+    appendLog(`<span class="text-pink-300">[紅線祈願牆設定]</span> 前台提前結束配對權限已切換為：<strong>${label}</strong>`);
+    renderAdminAll(true);
 }
 
 
@@ -484,6 +500,328 @@ function deleteMailboxMessage(mailId) {
     CloudSync.deleteNode(`${MAILBOX_KEY}/${mailId}`);
 }
 
+function getFateWallPosts() {
+    const keyName = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+    const raw = localStorage.getItem(keyName) || '[]';
+    if (raw === AdminMemoryCache.fateWallRaw && Array.isArray(AdminMemoryCache.fateWall)) {
+        return AdminMemoryCache.fateWall;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) parsed = [];
+    } catch (e) {
+        parsed = [];
+    }
+    parsed.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+    AdminMemoryCache.fateWallRaw = raw;
+    AdminMemoryCache.fateWall = parsed;
+    return parsed;
+}
+
+function saveFateWallPosts(posts) {
+    const keyName = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+    const sorted = (Array.isArray(posts) ? posts : []).sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+    const nextRaw = JSON.stringify(sorted);
+    AdminMemoryCache.fateWallRaw = nextRaw;
+    AdminMemoryCache.fateWall = sorted;
+    localStorage.setItem(keyName, nextRaw);
+    renderAdminAll(true);
+}
+
+function insertFateWallToken(inputId, tokenStr) {
+    const inputEl = document.getElementById(inputId);
+    if (!inputEl) return;
+    const start = typeof inputEl.selectionStart === 'number' ? inputEl.selectionStart : inputEl.value.length;
+    const end = typeof inputEl.selectionEnd === 'number' ? inputEl.selectionEnd : inputEl.value.length;
+    const before = inputEl.value.slice(0, start);
+    const after = inputEl.value.slice(end);
+    inputEl.value = before + tokenStr + after;
+    inputEl.focus();
+    const nextPos = start + tokenStr.length;
+    if (typeof inputEl.setSelectionRange === 'function') {
+        inputEl.setSelectionRange(nextPos, nextPos);
+    }
+    if (inputId === 'fateWallContentInput') {
+        previewAdminFateWallInput(true);
+    }
+}
+
+function fillFateWallRandomTemplate(inputId) {
+    const inputEl = document.getElementById(inputId);
+    if (!inputEl) return;
+    inputEl.value = '{地區} {年齡} 歲 {MBTI} 女生與{地區} {年齡} 歲 {MBTI} 男生好友配對成功';
+    inputEl.focus();
+    if (inputId === 'fateWallContentInput') {
+        previewAdminFateWallInput(true);
+    }
+}
+
+function previewAdminFateWallInput(silentIfEmpty = false) {
+    const inputEl = document.getElementById('fateWallContentInput');
+    const previewEl = document.getElementById('fateWallLiveRandomPreview');
+    if (!inputEl || !previewEl) return;
+    const raw = inputEl.value.trim();
+    if (!raw) {
+        previewEl.classList.add('hidden');
+        previewEl.textContent = '';
+        if (!silentIfEmpty) {
+            alert('請先輸入動態內容或點擊「✨ 填入配對範本」再預覽喔！');
+        }
+        return;
+    }
+    const sample = (typeof resolveFateWallDynamicText === 'function')
+        ? resolveFateWallDynamicText(raw)
+        : raw;
+    previewEl.textContent = `🎲 前台刷新隨機顯示範例：${sample}`;
+    previewEl.classList.remove('hidden');
+}
+
+function addAdminFateWallEntry() {
+    const tagSel = document.getElementById('fateWallTagSelect');
+    const contentInput = document.getElementById('fateWallContentInput');
+    if (!contentInput) return;
+
+    const tag = (tagSel ? tagSel.value.trim() : '') || '🌸 月老動態';
+    const content = contentInput.value.trim();
+    if (!content) {
+        alert('請輸入動態牆文字內容！');
+        contentInput.focus();
+        return;
+    }
+
+    const keyName = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+    const nowTs = Date.now();
+    const newPost = {
+        id: 'FW_' + nowTs + '_' + Math.random().toString(36).slice(2, 6),
+        tag: tag,
+        content: content,
+        ts: nowTs,
+        createdAt: new Date(nowTs).toLocaleString('zh-TW', { hour12: false })
+    };
+
+    const posts = getFateWallPosts();
+    posts.unshift(newPost);
+    saveFateWallPosts(posts);
+    if (typeof CloudSync !== 'undefined') {
+        CloudSync.putNode(`${keyName}/${newPost.id}`, newPost);
+    }
+
+    contentInput.value = '';
+    const previewEl = document.getElementById('fateWallLiveRandomPreview');
+    if (previewEl) {
+        previewEl.classList.add('hidden');
+        previewEl.textContent = '';
+    }
+    appendLog(`<span class="text-pink-300">[即時緣分動態牆]</span> 已發布新動態「<strong>${content}</strong>」，並同步顯示於前台首頁。`);
+}
+
+function openEditAdminFateWallModal(postId) {
+    const pid = String(postId || '').trim();
+    if (!pid) return;
+    const target = getFateWallPosts().find(p => String(p.id) === pid);
+    if (!target) return;
+
+    const modal = document.getElementById('editFateWallModal');
+    const idInput = document.getElementById('editFateWallTargetId');
+    const tagSel = document.getElementById('editFateWallTagSelect');
+    const contentInput = document.getElementById('editFateWallContentInput');
+    if (!modal || !idInput || !contentInput) return;
+
+    idInput.value = pid;
+    const curTag = String(target.tag || '🌸 月老動態').trim();
+    if (tagSel) {
+        if (!Array.from(tagSel.options).some(opt => opt.value === curTag)) {
+            const extraOpt = document.createElement('option');
+            extraOpt.value = curTag;
+            extraOpt.textContent = curTag;
+            tagSel.appendChild(extraOpt);
+        }
+        tagSel.value = curTag;
+    }
+    contentInput.value = String(target.content || '');
+    modal.classList.remove('hidden');
+    setTimeout(() => {
+        contentInput.focus();
+        contentInput.select();
+    }, 40);
+}
+
+function closeEditAdminFateWallModal() {
+    const modal = document.getElementById('editFateWallModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function saveEditedAdminFateWallEntry(e) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    const pid = String(document.getElementById('editFateWallTargetId')?.value || '').trim();
+    const tagSel = document.getElementById('editFateWallTagSelect');
+    const contentInput = document.getElementById('editFateWallContentInput');
+    if (!pid || !contentInput) return;
+
+    const nextTag = (tagSel ? tagSel.value.trim() : '') || '🌸 月老動態';
+    const nextContent = contentInput.value.trim();
+    if (!nextContent) {
+        alert('請輸入動態牆文字內容！');
+        contentInput.focus();
+        return;
+    }
+
+    const posts = getFateWallPosts();
+    const idx = posts.findIndex(p => String(p.id) === pid);
+    if (idx < 0) {
+        closeEditAdminFateWallModal();
+        return;
+    }
+
+    posts[idx] = {
+        ...posts[idx],
+        tag: nextTag,
+        content: nextContent
+    };
+    saveFateWallPosts(posts);
+
+    const keyName = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+    if (typeof CloudSync !== 'undefined') {
+        if (CloudSync.initialized && typeof CloudSync.patchNode === 'function') {
+            CloudSync.patchNode(`${keyName}/${pid}`, { tag: nextTag, content: nextContent });
+        } else {
+            CloudSync.putNode(`${keyName}/${pid}`, posts[idx]);
+        }
+    }
+
+    closeEditAdminFateWallModal();
+    appendLog(`<span class="text-sky-300">[編輯緣分動態牆]</span> 已更新動態牆內容為「<strong>${nextContent}</strong>」，並同步至前台首頁。`);
+}
+
+function deleteAdminFateWallEntry(postId) {
+    const pid = String(postId || '').trim();
+    if (!pid) return;
+    const keyName = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+    saveFateWallPosts(getFateWallPosts().filter(p => String(p.id) !== pid));
+    if (typeof CloudSync !== 'undefined') {
+        CloudSync.deleteNode(`${keyName}/${pid}`);
+    }
+}
+
+function getAdminWishWallPosts() {
+    const keyName = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+    try {
+        const arr = JSON.parse(localStorage.getItem(keyName) || '[]');
+        if (!Array.isArray(arr)) return [];
+        return arr
+            .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
+            .filter(Boolean)
+            .sort((a, b) => Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0));
+    } catch (e) {
+        return [];
+    }
+}
+
+function adminFastForwardWishExpiry(wishId) {
+    const wid = String(wishId || '').trim();
+    if (!wid) return;
+    const keyName = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+    const wishes = getAdminWishWallPosts();
+    const target = wishes.find(w => String(w.id) === wid);
+    if (!target) return;
+
+    const pastTs = Date.now() - 1000;
+    target.expiresAtTs = pastTs;
+    localStorage.setItem(keyName, JSON.stringify(wishes));
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+        CloudSync.patchNode(`${keyName}/${wid}`, { expiresAtTs: pastTs });
+    }
+    renderAdminAll(true);
+    alert(`⏩ 已將祈願「${target.title}」推進至到期狀態！\n發起人「${target.authorNickname} (ID:${target.authorId})」現在可在前台選擇喜歡的匿名答案並配對成好友。`);
+}
+
+function deleteAdminWishWallEntry(wishId) {
+    const wid = String(wishId || '').trim();
+    if (!wid) return;
+    if (!confirm('確定要刪除此則祈願題目嗎？')) return;
+    const keyName = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+    const remaining = getAdminWishWallPosts().filter(w => String(w.id) !== wid);
+    localStorage.setItem(keyName, JSON.stringify(remaining));
+    if (typeof CloudSync !== 'undefined') {
+        CloudSync.deleteNode(`${keyName}/${wid}`);
+    }
+    renderAdminAll(true);
+}
+
+function batchDeleteAdminWishWallEntries() {
+    const filterSel = document.getElementById('adminWishWallFilter');
+    const filterVal = (filterSel && filterSel.value) ? filterSel.value : '';
+
+    if (!filterVal) {
+        alert('請先在左側「狀態過濾」選擇要刪除的狀態（例如：🏁 已結束、🟢 開放中 或 全部狀態）！');
+        if (filterSel) filterSel.focus();
+        return;
+    }
+
+    const allWishes = (typeof getAdminWishWallPosts === 'function') ? getAdminWishWallPosts() : [];
+    const nowTs = Date.now();
+    const openWishes = [];
+    const endedWishes = [];
+
+    allWishes.forEach(w => {
+        const timeEnded = (typeof isWishWallEnded === 'function') ? isWishWallEnded(w, nowTs) : false;
+        const isClosedStatus = timeEnded || Boolean(w.settled);
+        if (isClosedStatus) {
+            endedWishes.push(w);
+        } else {
+            openWishes.push(w);
+        }
+    });
+
+    let targetsToDelete = [];
+    let remainingWishes = [];
+    let confirmMsg = '';
+
+    if (filterVal === 'ENDED') {
+        if (endedWishes.length === 0) {
+            alert('目前沒有「🏁 已結束」的祈願紀錄可刪除！');
+            return;
+        }
+        targetsToDelete = endedWishes;
+        remainingWishes = openWishes;
+        confirmMsg = `確定要一鍵刪除全部 ${endedWishes.length} 則「🏁 已結束」的祈願紀錄嗎？\n（「🟢 開放中」的題目將會完整保留，不會被刪除，此動作無法復原。）`;
+    } else if (filterVal === 'OPEN') {
+        if (openWishes.length === 0) {
+            alert('目前沒有「🟢 開放中」的祈願紀錄可刪除！');
+            return;
+        }
+        targetsToDelete = openWishes;
+        remainingWishes = endedWishes;
+        confirmMsg = `確定要一鍵刪除全部 ${openWishes.length} 則「🟢 開放中」的祈願紀錄嗎？\n（「🏁 已結束」的紀錄將會完整保留，不會被刪除，此動作無法復原。）`;
+    } else if (filterVal === 'ALL') {
+        if (allWishes.length === 0) {
+            alert('目前沒有任何祈願紀錄可刪除！');
+            return;
+        }
+        targetsToDelete = allWishes;
+        remainingWishes = [];
+        confirmMsg = `確定要一鍵刪除全部 ${allWishes.length} 則祈願紀錄（包含開放中與已結束）嗎？\n此動作無法復原。`;
+    } else {
+        return;
+    }
+
+    if (!confirm(confirmMsg)) return;
+
+    const keyName = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+    localStorage.setItem(keyName, JSON.stringify(remainingWishes));
+
+    if (typeof CloudSync !== 'undefined') {
+        targetsToDelete.forEach(w => {
+            if (w && w.id) {
+                CloudSync.deleteNode(`${keyName}/${String(w.id).trim()}`);
+            }
+        });
+    }
+
+    renderAdminAll(true);
+}
+
 function getBannedRules() {
     const raw = localStorage.getItem(BANNED_RULES_KEY);
     if (!raw) {
@@ -676,8 +1014,12 @@ function pollSharedStorageChanges() {
     const curSys = localStorage.getItem(SYSTEM_STATE_KEY) || '';
     const curChats = localStorage.getItem(CHATS_KEY) || '';
     const curMatchLogs = localStorage.getItem(MATCH_LOGS_KEY) || '';
+    const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+    const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+    const curFateWall = localStorage.getItem(fwKey) || '';
+    const curWishWall = localStorage.getItem(wwKey) || '';
     const curBatch = getCurrentBatch();
-    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curMatchLogs !== lastMatchLogsAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
+    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curMatchLogs !== lastMatchLogsAdminSnapshot || curFateWall !== lastFateWallAdminSnapshot || curWishWall !== lastWishWallAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
         renderAdminAll(false);
     }
 }
@@ -685,7 +1027,9 @@ function pollSharedStorageChanges() {
 window.addEventListener('storage', (e) => {
     if (!isAdminAuthenticated()) return;
     if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
-    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, CHATS_KEY, REG_HISTORY_KEY, 'yuelao_admin_login_logs', MATCH_LOGS_KEY].includes(e.key)) {
+    const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+    const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, CHATS_KEY, REG_HISTORY_KEY, 'yuelao_admin_login_logs', MATCH_LOGS_KEY, fwKey, wwKey].includes(e.key)) {
         renderAdminAll(false);
     }
 });
@@ -699,6 +1043,13 @@ setInterval(() => {
     if (!isAdminAuthenticated()) return;
     if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
     checkAutoSchedule2000();
+    if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
+        const purged = ChatStore.purgeInactiveRooms(Date.now());
+        if (purged.length > 0 && typeof AdminMemoryCache !== 'undefined') {
+            AdminMemoryCache.invalidate('chats');
+            AdminMemoryCache.invalidate('users');
+        }
+    }
     pollSharedStorageChanges();
 }, 1000);
 
@@ -711,6 +1062,8 @@ function renderAdminSharedOverview(forceUpdate = false) {
     lastSystemSnapshot = localStorage.getItem(SYSTEM_STATE_KEY) || '';
     lastChatsAdminSnapshot = localStorage.getItem(CHATS_KEY) || '';
     lastMatchLogsAdminSnapshot = localStorage.getItem(MATCH_LOGS_KEY) || '';
+    lastFateWallAdminSnapshot = localStorage.getItem((typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall') || '';
+    lastWishWallAdminSnapshot = localStorage.getItem((typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall') || '';
 
     const sysCfg = getSystemConfig();
     const batch = sysCfg.currentBatch;
@@ -718,19 +1071,13 @@ function renderAdminSharedOverview(forceUpdate = false) {
     const currentSched = getBatchScheduleInfo(batch);
     const users = getUsers();
     const reports = getReports();
-    const chatsMap = getAdminChatsMap();
-    const customActsList = (typeof getCustomActivities === 'function')
-        ? getCustomActivities()
-        : JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
 
     const regCount = users.filter(u => (Array.isArray(u.registeredSessions) && u.registeredSessions.length > 0) || (u.customActivityRegs && Object.keys(u.customActivityRegs).length > 0)).length;
     const totalHistoryLinks = users.reduce((acc, u) => acc + (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0 ? u.matchedHistory.length : (u.matchedWithId ? 1 : 0)), 0);
     const matchedPairs = Math.floor(totalHistoryLinks / 2);
-    const openCustomActs = customActsList.filter(a => Boolean(a && a.isOpen)).length;
     const pendingReps = reports.filter(r => r && r.status === '待處理').length;
-    const activeChatRooms = Object.keys(chatsMap).filter(k => Array.isArray(chatsMap[k]) && chatsMap[k].length > 0).length;
 
-    const overviewSig = `${currentSched.batchPrefix}|${users.length}|${regCount}|${matchedPairs}|${reports.length}|${customActsList.length}|${openCustomActs}|${pendingReps}|${activeChatRooms}`;
+    const overviewSig = `${currentSched.batchPrefix}|${users.length}|${regCount}|${matchedPairs}|${reports.length}|${pendingReps}`;
     if (!forceUpdate && overviewSig === lastOverviewRenderSig) {
         return;
     }
@@ -754,26 +1101,6 @@ function renderAdminSharedOverview(forceUpdate = false) {
     if (statRepEl) statRepEl.textContent = `${reports.length} 則`;
 
     // Update Sidebar badges
-    const customBadge = document.getElementById('sidebarCustomActBadge');
-    if (customBadge) {
-        if (customActsList.length > 0) {
-            customBadge.textContent = openCustomActs > 0 ? `${openCustomActs} 開啟` : `${customActsList.length}`;
-            customBadge.classList.remove('hidden');
-        } else {
-            customBadge.classList.add('hidden');
-        }
-    }
-
-    const chatBadge = document.getElementById('sidebarChatRoomsBadge');
-    if (chatBadge) {
-        if (activeChatRooms > 0) {
-            chatBadge.textContent = `${activeChatRooms}`;
-            chatBadge.classList.remove('hidden');
-        } else {
-            chatBadge.classList.add('hidden');
-        }
-    }
-
     const repBadge = document.getElementById('sidebarPendingReportsBadge');
     if (repBadge) {
         if (pendingReps > 0) {
@@ -827,3 +1154,152 @@ function renderAdminAll(forceUpdate = false) {
         renderLogsPageSection();
     }
 }
+
+function renderAdminWishWallList() {
+    const wishWallListBox = document.getElementById('adminWishWallList');
+    const wishWallBadge = document.getElementById('adminWishWallCountBadge');
+    const filterSel = document.getElementById('adminWishWallFilter');
+    if (!wishWallListBox) return;
+
+    const allWishes = (typeof getAdminWishWallPosts === 'function') ? getAdminWishWallPosts() : [];
+    const nowTs = Date.now();
+    const filterVal = (filterSel && filterSel.value) ? filterSel.value : '';
+
+    const openWishes = [];
+    const endedWishes = [];
+    allWishes.forEach(w => {
+        const timeEnded = (typeof isWishWallEnded === 'function') ? isWishWallEnded(w, nowTs) : false;
+        const isClosedStatus = timeEnded || Boolean(w.settled);
+        if (isClosedStatus) {
+            endedWishes.push(w);
+        } else {
+            openWishes.push(w);
+        }
+    });
+
+    if (wishWallBadge) {
+        wishWallBadge.textContent = `開放中 ${openWishes.length} 則 ／ 已結束 ${endedWishes.length} 則`;
+    }
+
+    const batchDelBtn = document.getElementById('batchDeleteWishWallBtn');
+    if (batchDelBtn) {
+        if (filterVal === 'ENDED') {
+            batchDelBtn.textContent = `🗑️ 一鍵刪除已結束 (${endedWishes.length} 則)`;
+        } else if (filterVal === 'OPEN') {
+            batchDelBtn.textContent = `🗑️ 一鍵刪除開放中 (${openWishes.length} 則)`;
+        } else if (filterVal === 'ALL') {
+            batchDelBtn.textContent = `🗑️ 一鍵刪除全部 (${allWishes.length} 則)`;
+        } else {
+            batchDelBtn.textContent = `🗑️ 一鍵刪除`;
+        }
+    }
+
+    if (!filterVal) {
+        wishWallListBox.innerHTML = ``;
+        return;
+    }
+
+    const escWw = (str) => String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const renderWishCard = (w, isClosedGroup) => {
+        const resps = Array.isArray(w.responses) ? w.responses : [];
+        const gLabel = String(w.authorGender || '').trim() === '男' ? '🚹 男' : '🚺 女';
+        let statusPill = `<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">🟢 開放中（剩 ${typeof calcWishRemainingDays === 'function' ? calcWishRemainingDays(w, nowTs) : '?'} 天）</span>`;
+
+        if (isClosedGroup) {
+            if (w.settled && w.matchedAnonNumber) {
+                statusPill = `<span class="px-2 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">🏁 已結束・💘 已選匿名${w.matchedAnonNumber}號配對</span>`;
+            } else if (w.settled && w.settledWithoutMatch) {
+                statusPill = `<span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-semibold">🏁 已結束（未選配對）</span>`;
+            } else {
+                statusPill = `<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">🏁 已結束・待題主選擇</span>`;
+            }
+        }
+
+        const respondersDetailHtml = resps.length === 0
+            ? `<div class="text-[11px] text-gray-400">💭 尚無玩家回覆</div>`
+            : `<div class="flex flex-wrap gap-1.5 pt-0.5">
+                ${resps.map(r => {
+                    const rG = String(r.responderGender || '').trim();
+                    const rTag = rG ? `（${rG}）` : '';
+                    const ansSummary = (r.answers || []).map(a => `Q${a.qIndex}:${escWw(a.chosenText)}`).join(' / ');
+                    const isPicked = w.matchedAnonNumber && Number(w.matchedAnonNumber) === Number(r.anonNumber);
+                    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] ${isPicked ? 'bg-rose-100 border border-rose-300 text-[#8f4452] font-bold' : 'bg-pink-50/80 border border-pink-200 text-gray-700'}">
+                        <span>${isPicked ? '💘' : '🎭'} 匿名${r.anonNumber}號：${escWw(r.responderNickname || r.responderId)}${rTag} (ID:${escWw(r.responderId)})</span>
+                        ${ansSummary ? `<span class="text-gray-500">[${ansSummary}]</span>` : ''}
+                    </span>`;
+                }).join('')}
+            </div>`;
+
+        return `
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-white border ${isClosedGroup ? 'border-gray-200' : 'border-emerald-200'} text-xs transition hover:bg-pink-50/30">
+                <div class="min-w-0 flex-1 space-y-1.5">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        ${statusPill}
+                        <span class="px-1.5 py-0.5 rounded bg-pink-50 border border-pink-200 text-[11px] font-bold text-[#8f4452]">${gLabel}</span>
+                        <span class="font-bold text-[#8f4452]">${escWw(w.authorNickname)} (ID:${escWw(w.authorId)})</span>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-1.5 text-gray-600">
+                        <span class="font-semibold text-[#5e464a]">🏮 「${escWw(w.title)}」</span>
+                        <span class="text-[11px] text-gray-400">（${(w.questions || []).length}題・開放${w.openDays}天・${resps.length}人已答）</span>
+                    </div>
+                    ${respondersDetailHtml}
+                </div>
+                <div class="flex items-center gap-2 shrink-0 sm:self-center self-end pt-1 sm:pt-0">
+                    ${!isClosedGroup ? `<button type="button" onclick="adminFastForwardWishExpiry('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 font-semibold hover:bg-amber-100 transition shadow-sm">⏩ 推進至到期</button>` : ''}
+                    <button type="button" onclick="deleteAdminWishWallEntry('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg text-rose-500 hover:bg-rose-50 font-semibold transition">🗑️ 刪除</button>
+                </div>
+            </div>
+        `;
+    };
+
+    const sections = [];
+
+    if (filterVal === 'ALL' || filterVal === 'OPEN') {
+        const openBodyHtml = openWishes.length === 0
+            ? `<div class="p-3.5 text-center text-xs text-gray-400 bg-white/80 rounded-xl border border-dashed border-emerald-200">目前沒有「開放中」的祈願題目。</div>`
+            : `<div class="space-y-2">${openWishes.map(w => renderWishCard(w, false)).join('')}</div>`;
+        sections.push(`
+            <div class="rounded-2xl border border-emerald-200 bg-emerald-50/35 p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+                        <span>🟢 開放中</span>
+                    </span>
+                    <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                        ${openWishes.length} 則
+                    </span>
+                </div>
+                ${openBodyHtml}
+            </div>
+        `);
+    }
+
+    if (filterVal === 'ALL' || filterVal === 'ENDED') {
+        const endedBodyHtml = endedWishes.length === 0
+            ? `<div class="p-3.5 text-center text-xs text-gray-400 bg-white/80 rounded-xl border border-dashed border-gray-300">目前沒有「已結束」的祈願紀錄。</div>`
+            : `<div class="space-y-2">${endedWishes.map(w => renderWishCard(w, true)).join('')}</div>`;
+        sections.push(`
+            <div class="rounded-2xl border border-gray-200 bg-gray-50/60 p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-gray-700 flex items-center gap-1.5">
+                        <span>🏁 已結束</span>
+                    </span>
+                    <span class="text-[11px] px-2 py-0.5 rounded-full bg-gray-200/80 text-gray-700 font-bold">
+                        ${endedWishes.length} 則
+                    </span>
+                </div>
+                ${endedBodyHtml}
+            </div>
+        `);
+    }
+
+    wishWallListBox.innerHTML = sections.join('');
+}
+
+window.batchDeleteAdminWishWallEntries = batchDeleteAdminWishWallEntries;
+window.renderAdminWishWallList = renderAdminWishWallList;

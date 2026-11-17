@@ -201,6 +201,23 @@ function renderChatsPageSection(users, forceRender = false) {
 
     ensureAdminChatDetailScrollPagination(detailMsgsBox);
 
+    // 檢查並自動清理超過 4 天無更新／無新訊息的聊天室（刪除不保存＋自動解除雙方會員列表好友配對）
+    if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
+        const purgedList = ChatStore.purgeInactiveRooms(Date.now());
+        if (purgedList.length > 0) {
+            if (purgedList.some(p => p.pairKey === selectedAdminChatPairKey)) {
+                selectedAdminChatPairKey = '';
+                activeAdminChatDetailPairKey = '';
+            }
+            if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+                AdminMemoryCache.invalidate('chats');
+                AdminMemoryCache.invalidate('users');
+            }
+            users = typeof getUsers === 'function' ? getUsers() : users;
+            forceRender = true;
+        }
+    }
+
     const chatsMap = typeof getAdminChatsMap === 'function'
         ? getAdminChatsMap()
         : JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
@@ -260,6 +277,11 @@ function renderChatsPageSection(users, forceRender = false) {
                 const badgeA = r.genderA === '男' ? 'bg-sky-100 text-sky-700' : (r.genderA === '女' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600');
                 const badgeB = r.genderB === '男' ? 'bg-sky-100 text-sky-700' : (r.genderB === '女' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600');
                 const lastTimeStr = formatAdminChatDateTime(r.lastMsg);
+                const remainMs = Math.max(0, (r.lastTs + 4 * 24 * 60 * 60 * 1000) - Date.now());
+                const remainHours = Math.ceil(remainMs / (60 * 60 * 1000));
+                const expireHint = r.lastTs > 0
+                    ? (remainHours >= 24 ? `剩 ${Math.floor(remainHours / 24)}天${remainHours % 24}時` : `剩 ${remainHours}小時`)
+                    : '';
 
                 return `
                     <button type="button" onclick="selectAdminChatRoom('${escapeChatAdminHtml(r.pairKey)}')" class="w-full p-3.5 text-left transition block ${isSelected ? 'bg-pink-50/95 border-l-4 border-l-[#c96a7b]' : 'hover:bg-pink-50/35'}">
@@ -278,7 +300,7 @@ function renderChatsPageSection(users, forceRender = false) {
                         </div>
                         <div class="flex items-center justify-between gap-2 mt-1.5 text-[11px] text-gray-500">
                             <p class="truncate flex-1">${highlightChatKeywordHtml(r.lastMsg.text || '', adminChatSearchKeyword)}</p>
-                            <span class="text-[10px] text-gray-400 shrink-0">${escapeChatAdminHtml(lastTimeStr)}</span>
+                            <span class="text-[10px] text-gray-400 shrink-0">${escapeChatAdminHtml(lastTimeStr)}${expireHint ? `（${expireHint}）` : ''}</span>
                         </div>
                     </button>
                 `;

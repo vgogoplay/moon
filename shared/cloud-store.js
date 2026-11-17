@@ -3,6 +3,7 @@
 const STORAGE_KEY = 'yuelao_romance_app_v2';
 const USERS_KEY = 'yuelao_users';
 const REPORTS_KEY = 'yuelao_reports';
+const REPORTS_MAX_COUNT = 15;
 const ID_COUNTER_KEY = 'yuelao_id_counters';
 const SYSTEM_STATE_KEY = 'yuelao_system_batch';
 const BANNED_RULES_KEY = 'yuelao_banned_rules';
@@ -21,6 +22,8 @@ const UNMATCHED_PAIRS_SYNC_KEY = 'yuelao_unmatched_pairs_sync';
 const UNMATCHED_PAIRS_CLOUD_NODE = 'yuelao_unmatched_pairs';
 const MATCH_LOGS_KEY = 'yuelao_match_logs';
 const MATCH_LOGS_MAX_COUNT = 30;
+const FATE_WALL_KEY = 'yuelao_fate_wall';
+const WISH_WALL_KEY = 'yuelao_wish_wall';
 
 const FIREBASE_DB_URL = 'https://moon-8b627-default-rtdb.asia-southeast1.firebasedatabase.app';
 
@@ -645,10 +648,26 @@ const CloudSync = {
         mailsArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
         this.writeLocalIfChanged(MAILBOX_KEY, JSON.stringify(mailsArr));
 
-        // 5. 問題回報（依時間新到舊排序）
+        // 5. 問題回報（依時間新到舊排序，最多保留最新 15 則，超過自動刪除最舊紀錄）
         const reportsArr = this.mapToArray(t[REPORTS_KEY]);
-        reportsArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
-        this.writeLocalIfChanged(REPORTS_KEY, JSON.stringify(reportsArr));
+        reportsArr.sort((a, b) => {
+            const diff = Number(b.ts || 0) - Number(a.ts || 0);
+            if (diff !== 0) return diff;
+            return String((b && b.id) || '').localeCompare(String((a && a.id) || ''));
+        });
+        const keptReportsArr = reportsArr.slice(0, REPORTS_MAX_COUNT);
+        const overflowReportsArr = reportsArr.slice(REPORTS_MAX_COUNT);
+        if (overflowReportsArr.length > 0 && t[REPORTS_KEY] && typeof t[REPORTS_KEY] === 'object') {
+            overflowReportsArr.forEach(oldRep => {
+                if (oldRep && oldRep.id) {
+                    delete t[REPORTS_KEY][oldRep.id];
+                    if (this.initialized && this.inFlightWrites === 0) {
+                        this.deleteNode(`${REPORTS_KEY}/${oldRep.id}`);
+                    }
+                }
+            });
+        }
+        this.writeLocalIfChanged(REPORTS_KEY, JSON.stringify(keptReportsArr));
 
         // 6. 禁止字眼規則
         if (t[BANNED_RULES_KEY] !== undefined) {
@@ -716,6 +735,27 @@ const CloudSync = {
                     } catch (e) {}
                 }
             });
+        }
+
+        // 13. 即時緣分動態牆同步（依時間新到舊排序，供前台訪問時即時顯示）
+        if (t[FATE_WALL_KEY] !== undefined) {
+            const fateWallArr = this.mapToArray(t[FATE_WALL_KEY]).filter(item => item && typeof item === 'object' && item.content);
+            fateWallArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+            this.writeLocalIfChanged(FATE_WALL_KEY, JSON.stringify(fateWallArr));
+        } else {
+            this.writeLocalIfChanged(FATE_WALL_KEY, '[]');
+        }
+
+        // 14. 紅線祈願牆（女性發起 2 選 1 題目、男女回覆匿名編號、到期後女方選擇配對）
+        if (t[WISH_WALL_KEY] !== undefined) {
+            const rawWishes = this.mapToArray(t[WISH_WALL_KEY]);
+            const normWishes = rawWishes
+                .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
+                .filter(Boolean);
+            normWishes.sort((a, b) => Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0));
+            this.writeLocalIfChanged(WISH_WALL_KEY, JSON.stringify(normWishes));
+        } else {
+            this.writeLocalIfChanged(WISH_WALL_KEY, '[]');
         }
     },
 
@@ -1147,7 +1187,8 @@ const Store = {
                 registrationOpen: sys.registrationOpen !== undefined ? Boolean(sys.registrationOpen) : true,
                 profileLocked: sys.profileLocked !== undefined ? Boolean(sys.profileLocked) : false,
                 genderLimitEnabled: sys.genderLimitEnabled !== undefined ? Boolean(sys.genderLimitEnabled) : false,
-                genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30
+                genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30,
+                wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true
             };
         } catch (e) {
             return {
@@ -1157,7 +1198,8 @@ const Store = {
                 registrationOpen: true,
                 profileLocked: false,
                 genderLimitEnabled: false,
-                genderLimitMax: 30
+                genderLimitMax: 30,
+                wishEarlyCloseCanMatch: true
             };
         }
     },
@@ -1256,6 +1298,31 @@ const Store = {
     getMailbox() {
         try {
             return JSON.parse(localStorage.getItem(MAILBOX_KEY) || '[]');
+        } catch (e) {
+            return [];
+        }
+    },
+
+    getFateWallPosts() {
+        try {
+            const arr = JSON.parse(localStorage.getItem(FATE_WALL_KEY) || '[]');
+            if (!Array.isArray(arr)) return [];
+            return arr
+                .filter(item => item && typeof item === 'object' && String(item.content || '').trim() !== '')
+                .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+        } catch (e) {
+            return [];
+        }
+    },
+
+    getWishWallPosts() {
+        try {
+            const arr = JSON.parse(localStorage.getItem(WISH_WALL_KEY) || '[]');
+            if (!Array.isArray(arr)) return [];
+            return arr
+                .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
+                .filter(Boolean)
+                .sort((a, b) => Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0));
         } catch (e) {
             return [];
         }
@@ -1602,8 +1669,9 @@ const Store = {
 
     addIssueReport(report) {
         const reports = this.getReports();
+        const nowTs = Date.now();
         const newRep = {
-            id: 'R' + Date.now().toString().slice(-6),
+            id: 'R' + nowTs.toString().slice(-6) + '_' + Math.random().toString(36).slice(2, 4),
             playerId: report.playerId ? String(report.playerId).trim() : '',
             category: report.category,
             contact: report.contact || '匿名玩家',
@@ -1611,12 +1679,31 @@ const Store = {
             status: '待處理',
             adminReply: '',
             repliedAt: '',
-            ts: Date.now(),
-            createdAt: new Date().toLocaleString('zh-TW')
+            ts: nowTs,
+            createdAt: new Date(nowTs).toLocaleString('zh-TW')
         };
         reports.unshift(newRep);
-        localStorage.setItem(REPORTS_KEY, JSON.stringify(reports));
-        if (typeof CloudSync !== 'undefined') CloudSync.putNode(`${REPORTS_KEY}/${newRep.id}`, newRep);
+        reports.sort((a, b) => {
+            const diff = Number(b.ts || 0) - Number(a.ts || 0);
+            if (diff !== 0) return diff;
+            return String((b && b.id) || '').localeCompare(String((a && a.id) || ''));
+        });
+
+        const keptReports = reports.slice(0, REPORTS_MAX_COUNT);
+        const removedOldestReports = reports.slice(REPORTS_MAX_COUNT);
+
+        localStorage.setItem(REPORTS_KEY, JSON.stringify(keptReports));
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.putNode(`${REPORTS_KEY}/${newRep.id}`, newRep);
+            removedOldestReports.forEach(oldRep => {
+                if (oldRep && oldRep.id) {
+                    if (CloudSync.tree && CloudSync.tree[REPORTS_KEY] && typeof CloudSync.tree[REPORTS_KEY] === 'object') {
+                        delete CloudSync.tree[REPORTS_KEY][oldRep.id];
+                    }
+                    CloudSync.deleteNode(`${REPORTS_KEY}/${oldRep.id}`);
+                }
+            });
+        }
         return newRep;
     }
 };
@@ -1745,6 +1832,106 @@ const ChatStore = {
             }
         });
         if (changed) this.saveAll(all);
+    },
+
+    // 超過 4 天（96 小時）無更新或無新訊息：刪除聊天紀錄（刪除不保存）並自動解除會員列表雙方好友配對
+    purgeInactiveRooms(nowTs = Date.now(), maxInactiveMs = 4 * 24 * 60 * 60 * 1000) {
+        if (typeof CloudSync !== 'undefined' && (!CloudSync.initialized || CloudSync.inFlightWrites > 0)) {
+            return [];
+        }
+
+        const allChats = this.getAll();
+        const expiredPairs = [];
+
+        Object.keys(allChats || {}).forEach(pairKey => {
+            const rawThread = allChats[pairKey];
+            const msgs = Array.isArray(rawThread)
+                ? rawThread.filter(m => m && typeof m === 'object')
+                : (rawThread && typeof rawThread === 'object'
+                    ? Object.values(rawThread).filter(m => m && typeof m === 'object')
+                    : []);
+            if (msgs.length === 0) return;
+
+            msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+            const lastMsg = msgs[msgs.length - 1] || {};
+            const lastTs = Number(lastMsg.ts || 0);
+            if (lastTs <= 0) return;
+
+            if (nowTs >= lastTs + maxInactiveMs) {
+                const parts = String(pairKey).split('__');
+                if (parts.length === 2 && parts[0] && parts[1]) {
+                    expiredPairs.push({
+                        pairKey,
+                        idA: String(parts[0]).trim(),
+                        idB: String(parts[1]).trim(),
+                        lastTs,
+                        msgCount: msgs.length
+                    });
+                }
+            }
+        });
+
+        if (expiredPairs.length === 0) return [];
+
+        let users = [];
+        try {
+            users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            if (!Array.isArray(users)) users = [];
+        } catch (e) {
+            users = [];
+        }
+
+        const touchedUsersMap = new Map();
+
+        expiredPairs.forEach(item => {
+            const { idA, idB } = item;
+            // 1. 刪除聊天紀錄（不保存）並標記近期解除配對防止舊快照回補
+            this.clearChat(idA, idB);
+
+            // 2. 會員列表雙方自動解除配對
+            users.forEach(u => {
+                if (!u || !u.id) return;
+                const uid = String(u.id).trim();
+                if (uid !== idA && uid !== idB) return;
+
+                const partnerId = (uid === idA) ? idB : idA;
+                let modified = false;
+
+                if (Array.isArray(u.matchedHistory)) {
+                    const nextHist = u.matchedHistory.filter(h => String(h.partnerId) !== partnerId);
+                    if (nextHist.length !== u.matchedHistory.length) {
+                        u.matchedHistory = nextHist;
+                        modified = true;
+                    }
+                }
+
+                if (String(u.matchedWithId) === partnerId) {
+                    const fallbackHist = (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0)
+                        ? u.matchedHistory[u.matchedHistory.length - 1]
+                        : null;
+                    u.matchedSession = fallbackHist ? (fallbackHist.session || null) : null;
+                    u.matchedWithId = fallbackHist ? (fallbackHist.partnerId || null) : null;
+                    u.matchedWithName = fallbackHist ? (fallbackHist.partnerName || null) : null;
+                    u.matchedAt = fallbackHist ? (fallbackHist.matchedAt || null) : null;
+                    modified = true;
+                }
+
+                if (modified) {
+                    touchedUsersMap.set(uid, u);
+                }
+            });
+        });
+
+        if (touchedUsersMap.size > 0) {
+            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+            if (typeof CloudSync !== 'undefined') {
+                touchedUsersMap.forEach(u => {
+                    CloudSync.upsertUser(u, true, { isMatchMutation: true });
+                });
+            }
+        }
+
+        return expiredPairs;
     }
 };
 

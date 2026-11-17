@@ -56,7 +56,7 @@
                             待處理 0 則 ／ 已解決 0 則
                         </span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-0.5">自動將「⏳ 待處理」排在最前面並依最新時間排序；點擊標題即可展開查看與回覆</p>
+                    <p class="text-xs text-gray-500 mt-0.5">自動將「⏳ 待處理」排在最前面並依最新時間排序（最多保留最新 15 則，超過將自動刪除最舊紀錄）；點擊標題即可展開查看與回覆</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 text-xs">
                     <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
@@ -83,7 +83,77 @@
             <div id="reportsPaginationBar" class="pt-3 border-t border-pink-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
-        <!-- ==================== 3. 🛡️ 資料維護工具 ==================== -->
+        <!-- ==================== 3. ✨ 即時緣分動態牆管理（即時同步顯示於前台首頁） ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-pink-200 bg-gradient-to-r from-white to-pink-50/45 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">✨ 即時緣分動態牆管理（地區＆年齡＆MBTI 每次前台刷新皆隨機顯示）</h2>
+                    <p class="text-xs text-gray-500">句中的「地區（北部/中部/南部/東部）、年齡（22~36歲）、MBTI（16型人格）」或 <code class="px-1 py-0.5 rounded bg-pink-100 text-[#8f4452] font-mono">{地區}</code> <code class="px-1 py-0.5 rounded bg-pink-100 text-[#8f4452] font-mono">{年齡}</code> <code class="px-1 py-0.5 rounded bg-pink-100 text-[#8f4452] font-mono">{MBTI}</code>，每次玩家刷新前台都會自動隨機顯示不同內容！</p>
+                </div>
+                <span id="adminFateWallCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                    共 0 則動態
+                </span>
+            </div>
+
+            <form onsubmit="event.preventDefault(); addAdminFateWallEntry();" class="grid grid-cols-1 md:grid-cols-12 gap-3 items-stretch">
+                <div class="md:col-span-3 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 動態標籤</label>
+                    <select id="fateWallTagSelect" class="w-full p-2.5 admin-input-box text-xs font-bold text-[#8f4452]">
+                        <option value="🌸 月老動態" selected>🌸 月老動態</option>
+                        <option value="💘 牽線喜訊">💘 牽線喜訊</option>
+                        <option value="🎉 活動快報">🎉 活動快報</option>
+                        <option value="💌 幸福牆">💌 幸福牆</option>
+                    </select>
+                </div>
+                <div class="md:col-span-7 admin-field-box space-y-2">
+                    <div class="flex flex-wrap items-center justify-between gap-1.5">
+                        <label class="block text-xs font-bold text-[#8f4452]">2. 動態文字內容 <span class="text-rose-500">*</span></label>
+                        <div class="flex flex-wrap items-center gap-1 text-[11px]">
+                            <button type="button" onclick="insertFateWallToken('fateWallContentInput', '{地區}')" class="px-2 py-0.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-800 font-bold hover:bg-sky-100 transition">+ {地區}</button>
+                            <button type="button" onclick="insertFateWallToken('fateWallContentInput', '{年齡}')" class="px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 font-bold hover:bg-amber-100 transition">+ {年齡}</button>
+                            <button type="button" onclick="insertFateWallToken('fateWallContentInput', '{MBTI}')" class="px-2 py-0.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-800 font-bold hover:bg-indigo-100 transition">+ {MBTI}</button>
+                            <button type="button" onclick="fillFateWallRandomTemplate('fateWallContentInput')" class="px-2 py-0.5 rounded-lg bg-pink-100 border border-pink-300 text-[#8f4452] font-bold hover:bg-pink-200 transition">✨ 填入配對範本</button>
+                            <button type="button" onclick="previewAdminFateWallInput()" class="px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold hover:bg-emerald-100 transition">🎲 隨機預覽</button>
+                        </div>
+                    </div>
+                    <input type="text" id="fateWallContentInput" oninput="previewAdminFateWallInput(true)" placeholder="例如：{地區} {年齡} 歲 {MBTI} 女生與{地區} {年齡} 歲 {MBTI} 男生好友配對成功" class="w-full p-2.5 admin-input-box text-xs" required>
+                    <p id="fateWallLiveRandomPreview" class="hidden text-[11px] text-emerald-700 bg-emerald-50/80 border border-emerald-200 rounded-lg px-2.5 py-1 font-medium"></p>
+                </div>
+                <div class="md:col-span-2 admin-field-box flex flex-col justify-end">
+                    <label class="block text-[11px] font-semibold text-gray-500 mb-1.5">發布至前台</label>
+                    <button type="submit" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition shadow">
+                        ➕ 新增動態
+                    </button>
+                </div>
+            </form>
+
+            <div id="adminFateWallList" class="space-y-1.5 pt-1"></div>
+        </div>
+
+                <!-- ==================== 3. 🏮 紅線祈願牆設定 ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🏮 紅線祈願牆設定（前台提前結束配對權限）</h2>
+                    <p class="text-xs text-gray-500">此處僅供切換系統權限開關；祈願牆的發布紀錄與回覆明細，已移至左側選單「🛡️ 安全防護日誌」內統一管理</p>
+                </div>
+            </div>
+
+            <!-- 前台提前結束 可/否 進行好友配對開關 -->
+            <div class="p-3.5 rounded-2xl bg-white border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div>
+                    <p class="text-xs font-bold text-[#8f4452]">⚙️ 前台點擊「自行關閉題目（提前結束）」配對權限設定</p>
+                    <p id="wishEarlyCloseMatchDesc" class="text-[11px] text-emerald-600 font-semibold mt-0.5">
+                        目前狀態：🟢 可進行好友配對（提前結束後仍可挑選匿名答案配對）
+                    </p>
+                </div>
+                <button type="button" id="toggleWishEarlyCloseMatchBtn" onclick="toggleWishEarlyCloseCanMatch()" class="px-4 py-2 rounded-xl text-xs font-bold shadow-2xs transition shrink-0 bg-rose-600 text-white hover:bg-rose-700">
+                    切換為「不可進行好友配對」
+                </button>
+            </div>
+        </div>
+
+<!-- ==================== 4. 🛡️ 資料維護工具 ==================== -->
         <div class="card-jp rounded-2xl p-5 bg-amber-50/50 border-2 border-amber-200 space-y-4">
             <div>
                 <h2 class="text-base font-bold font-serif-jp text-amber-900">🛡️ 資料維護工具</h2>
@@ -259,15 +329,62 @@
         </div>
     </div>
 
+    <!-- ✏️ 編輯即時緣分動態牆 Modal -->
+    <div id="editFateWallModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 md:p-7 shadow-2xl border-2 border-pink-200 space-y-4">
+            <div class="flex items-center justify-between border-b border-pink-100 pb-3">
+                <div>
+                    <h3 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">✏️ 編輯即時緣分動態牆</h3>
+                    <p class="text-xs text-gray-500">修改後按下「保存修改並同步」，前台首頁跑馬燈將立即更新</p>
+                </div>
+                <button type="button" onclick="closeEditAdminFateWallModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+
+            <form id="adminEditFateWallForm" onsubmit="saveEditedAdminFateWallEntry(event)" class="space-y-3.5">
+                <input type="hidden" id="editFateWallTargetId">
+                <div class="admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 動態標籤</label>
+                    <select id="editFateWallTagSelect" class="w-full p-2.5 admin-input-box text-xs font-bold text-[#8f4452]">
+                        <option value="🌸 月老動態">🌸 月老動態</option>
+                        <option value="💘 牽線喜訊">💘 牽線喜訊</option>
+                        <option value="🎉 活動快報">🎉 活動快報</option>
+                        <option value="💌 幸福牆">💌 幸福牆</option>
+                    </select>
+                </div>
+                <div class="admin-field-box space-y-2">
+                    <div class="flex flex-wrap items-center justify-between gap-1.5">
+                        <label class="block text-xs font-bold text-[#8f4452]">2. 動態文字內容 <span class="text-rose-500">*</span></label>
+                        <div class="flex flex-wrap items-center gap-1 text-[11px]">
+                            <button type="button" onclick="insertFateWallToken('editFateWallContentInput', '{地區}')" class="px-2 py-0.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-800 font-bold hover:bg-sky-100 transition">+ {地區}</button>
+                            <button type="button" onclick="insertFateWallToken('editFateWallContentInput', '{年齡}')" class="px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 font-bold hover:bg-amber-100 transition">+ {年齡}</button>
+                            <button type="button" onclick="insertFateWallToken('editFateWallContentInput', '{MBTI}')" class="px-2 py-0.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-800 font-bold hover:bg-indigo-100 transition">+ {MBTI}</button>
+                            <button type="button" onclick="fillFateWallRandomTemplate('editFateWallContentInput')" class="px-2 py-0.5 rounded-lg bg-pink-100 border border-pink-300 text-[#8f4452] font-bold hover:bg-pink-200 transition">✨ 填入配對範本</button>
+                        </div>
+                    </div>
+                    <input type="text" id="editFateWallContentInput" placeholder="請輸入要顯示在前台首頁跑馬燈的內容..." class="w-full p-2.5 admin-input-box text-xs" required>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t border-pink-100">
+                    <button type="button" onclick="closeEditAdminFateWallModal()" class="px-4 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-5 py-2 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition">
+                        💾 保存修改並同步前台
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261117a"></script>
+    <script src="shared/schedule.js?v=20261117h"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261116m"></script>
+    <script src="shared/cloud-store.js?v=20261117t"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261116d"></script>
+    <script src="backend/state.js?v=20261117s"></script>
     <script src="backend/matching.js?v=20261117a"></script>
-    <script src="backend/ops.js?v=20261116a"></script>
+    <script src="backend/ops.js?v=20261117t"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261116c"></script>
+    <script src="backend/layout.js?v=20261117p"></script>
 </body>
 </html>

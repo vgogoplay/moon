@@ -907,3 +907,247 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
 
     return true;
 }
+
+
+// ==================== 🏮 紅線祈願牆：以每日 20:00 計算天數、男生每日3位限額與狀態判斷 ====================
+const WISH_MALE_DAILY_LIMIT = 3;
+
+function getWishNext2000ResetTs(nowTs = Date.now()) {
+    const d = new Date(Number(nowTs) || Date.now());
+    d.setHours(20, 0, 0, 0);
+    if (d.getTime() <= Number(nowTs)) {
+        d.setDate(d.getDate() + 1);
+    }
+    return d.getTime();
+}
+
+function getWishCurrent2000CycleWindow(nowTs = Date.now()) {
+    const nextResetTs = getWishNext2000ResetTs(nowTs);
+    const cycleStartTs = nextResetTs - 24 * 60 * 60 * 1000;
+    return { cycleStartTs, nextResetTs };
+}
+
+function getMaleWishDailyQuotaStatus(wishesList = [], nowTs = Date.now()) {
+    const { cycleStartTs, nextResetTs } = getWishCurrent2000CycleWindow(nowTs);
+    const list = Array.isArray(wishesList) ? wishesList : [];
+    const maleWishesToday = list.filter(w => {
+        if (!w || typeof w !== 'object') return false;
+        const g = String(w.authorGender || '').trim();
+        const inferredG = (g === '男' || g === '女')
+            ? g
+            : (String(w.authorId || '').startsWith('1') ? '男' : (String(w.authorId || '').startsWith('2') ? '女' : ''));
+        if (inferredG !== '男') return false;
+        const cTs = Number(w.createdAtTs || 0);
+        return cTs >= cycleStartTs && cTs < nextResetTs;
+    });
+    const usedCount = maleWishesToday.length;
+    const remaining = Math.max(0, WISH_MALE_DAILY_LIMIT - usedCount);
+    return {
+        limit: WISH_MALE_DAILY_LIMIT,
+        usedCount,
+        remaining,
+        isFull: usedCount >= WISH_MALE_DAILY_LIMIT,
+        cycleStartTs,
+        resetAtTs: nextResetTs
+    };
+}
+
+function calcWishExpiresAtTs(createdAtTs, openDays = 1) {
+    const baseTs = Number(createdAtTs) || Date.now();
+    const days = Math.max(1, Math.min(30, parseInt(openDays, 10) || 1));
+    const first2000 = new Date(baseTs);
+    first2000.setHours(20, 0, 0, 0);
+    if (first2000.getTime() <= baseTs) {
+        first2000.setDate(first2000.getDate() + 1);
+    }
+    return first2000.getTime() + (days - 1) * 24 * 60 * 60 * 1000;
+}
+
+function isWishWallEnded(wish, nowTs = Date.now()) {
+    if (!wish || typeof wish !== 'object') return true;
+    if (wish.manuallyClosed) return true;
+    const expTs = Number(wish.expiresAtTs || 0);
+    if (expTs > 0 && nowTs >= expTs) return true;
+    return false;
+}
+
+function calcWishRemainingDays(wish, nowTs = Date.now()) {
+    if (isWishWallEnded(wish, nowTs)) return 0;
+    const expTs = Number(wish.expiresAtTs || 0);
+    if (!expTs || expTs <= nowTs) return 0;
+    const dayMs = 24 * 60 * 60 * 1000;
+    return Math.max(1, Math.ceil((expTs - nowTs) / dayMs));
+}
+
+function normalizeWishWallItem(rawWish) {
+    if (!rawWish || typeof rawWish !== 'object' || !rawWish.id) return null;
+    const w = { ...rawWish };
+    w.id = String(w.id).trim();
+    w.authorId = String(w.authorId || '').trim();
+    w.authorNickname = String(w.authorNickname || '').trim();
+    const rawG = String(w.authorGender || '').trim();
+    w.authorGender = (rawG === '男' || rawG === '女')
+        ? rawG
+        : (w.authorId.startsWith('1') ? '男' : (w.authorId.startsWith('2') ? '女' : '女'));
+    w.authorCity = String(w.authorCity || '').trim();
+    w.authorMbti = String(w.authorMbti || '').trim();
+    w.title = String(w.title || '').trim();
+    w.openDays = Math.max(1, Math.min(30, parseInt(w.openDays, 10) || 1));
+    w.createdAtTs = Number(w.createdAtTs || 0) || Date.now();
+    w.expiresAtTs = Number(w.expiresAtTs || 0) || calcWishExpiresAtTs(w.createdAtTs, w.openDays);
+    w.manuallyClosed = Boolean(w.manuallyClosed);
+    w.closedAtTs = Number(w.closedAtTs || 0);
+    w.settled = Boolean(w.settled);
+    w.settledWithoutMatch = Boolean(w.settledWithoutMatch);
+    w.matchedAnonNumber = w.matchedAnonNumber ? Number(w.matchedAnonNumber) : null;
+    w.matchedResponderId = w.matchedResponderId ? String(w.matchedResponderId).trim() : null;
+    w.settledAtTs = Number(w.settledAtTs || 0);
+
+    const rawQs = Array.isArray(w.questions)
+        ? w.questions
+        : (w.questions && typeof w.questions === 'object' ? Object.values(w.questions) : []);
+    w.questions = rawQs
+        .filter(q => q && typeof q === 'object' && String(q.question || '').trim() !== '')
+        .map((q, idx) => ({
+            qIndex: idx + 1,
+            question: String(q.question || '').trim(),
+            optionA: String(q.optionA || '').trim() || '選項 A',
+            optionB: String(q.optionB || '').trim() || '選項 B'
+        }));
+
+    const rawResps = Array.isArray(w.responses)
+        ? w.responses
+        : (w.responses && typeof w.responses === 'object' ? Object.values(w.responses) : []);
+    const validResps = rawResps
+        .filter(r => r && typeof r === 'object' && String(r.responderId || '').trim() !== '')
+        .sort((a, b) => {
+            const diff = Number(a.createdAtTs || 0) - Number(b.createdAtTs || 0);
+            if (diff !== 0) return diff;
+            return String(a.responderId).localeCompare(String(b.responderId));
+        });
+
+    w.responses = validResps.map((r, idx) => {
+        const rawAns = Array.isArray(r.answers)
+            ? r.answers
+            : (r.answers && typeof r.answers === 'object' ? Object.values(r.answers) : []);
+        return {
+            anonNumber: idx + 1,
+            responderId: String(r.responderId || '').trim(),
+            responderNickname: String(r.responderNickname || '').trim(),
+            responderGender: String(r.responderGender || '').trim(),
+            answers: rawAns.filter(a => a && typeof a === 'object').map((a, aIdx) => ({
+                qIndex: Number(a.qIndex || (aIdx + 1)),
+                chosenOption: String(a.chosenOption || '').trim(),
+                chosenText: String(a.chosenText || '').trim()
+            })),
+            note: String(r.note || '').trim(),
+            createdAtTs: Number(r.createdAtTs || 0) || Date.now()
+        };
+    });
+
+    return w;
+}
+
+// ==================== ✨ 即時緣分動態牆：地區＆年齡＆MBTI 每次刷新動態隨機引擎 ====================
+const FATE_WALL_REGIONS = ['北部', '中部', '南部', '東部'];
+const FATE_WALL_MBTI_ALL = [
+    'INTJ', 'INTP', 'ENTJ', 'ENTP',
+    'INFJ', 'INFP', 'ENFJ', 'ENFP',
+    'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ',
+    'ISTP', 'ISFP', 'ESTP', 'ESFP'
+];
+const FATE_WALL_MBTI_I = ['INTJ', 'INTP', 'INFJ', 'INFP', 'ISTJ', 'ISFJ', 'ISTP', 'ISFP'];
+const FATE_WALL_MBTI_E = ['ENTJ', 'ENTP', 'ENFJ', 'ENFP', 'ESTJ', 'ESFJ', 'ESTP', 'ESFP'];
+
+function pickRandomFromArray(arr, excludeVal = '') {
+    if (!Array.isArray(arr) || arr.length === 0) return '';
+    if (arr.length === 1) return arr[0];
+    const filtered = excludeVal ? arr.filter(item => String(item) !== String(excludeVal)) : arr;
+    const pool = filtered.length > 0 ? filtered : arr;
+    return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function rollRandomFateWallAge(excludeAge = null) {
+    // 單身適婚熱門年齡區間：22～36 歲
+    const minAge = 22;
+    const maxAge = 36;
+    let picked = minAge + Math.floor(Math.random() * (maxAge - minAge + 1));
+    if (excludeAge !== null && Number(excludeAge) === picked) {
+        picked = minAge + ((picked - minAge + 1 + Math.floor(Math.random() * (maxAge - minAge))) % (maxAge - minAge + 1));
+    }
+    return picked;
+}
+
+function hasFateWallDynamicFields(rawText) {
+    const str = String(rawText || '');
+    if (!str) return false;
+    if (/\{(?:地區|年齡|MBTI|I人MBTI|E人MBTI)\}/i.test(str)) return true;
+    if (/(北部|中部|南部|東部)/.test(str)) return true;
+    if (/(\d{2})\s*歲/.test(str)) return true;
+    if (/\b(?:INTJ|INTP|ENTJ|ENTP|INFJ|INFP|ENFJ|ENFP|ISTJ|ISFJ|ESTJ|ESFJ|ISTP|ISFP|ESTP|ESFP)\b/i.test(str)) return true;
+    return false;
+}
+
+function resolveFateWallDynamicText(rawText) {
+    let text = String(rawText || '');
+    if (!text) return '';
+
+    let lastRegion = '';
+    let lastAge = null;
+    let lastMbti = '';
+
+    // 1. 先替換明確佔位符：{地區}、{年齡}、{MBTI}、{I人MBTI}、{E人MBTI}
+    text = text.replace(/\{地區\}/g, () => {
+        const nextReg = pickRandomFromArray(FATE_WALL_REGIONS, lastRegion);
+        lastRegion = nextReg;
+        return nextReg;
+    });
+
+    text = text.replace(/\{年齡\}/g, () => {
+        const nextAge = rollRandomFateWallAge(lastAge);
+        lastAge = nextAge;
+        return String(nextAge);
+    });
+
+    text = text.replace(/\{I人MBTI\}/gi, () => {
+        const nextM = pickRandomFromArray(FATE_WALL_MBTI_I, lastMbti);
+        lastMbti = nextM;
+        return nextM;
+    });
+
+    text = text.replace(/\{E人MBTI\}/gi, () => {
+        const nextM = pickRandomFromArray(FATE_WALL_MBTI_E, lastMbti);
+        lastMbti = nextM;
+        return nextM;
+    });
+
+    text = text.replace(/\{MBTI\}/gi, () => {
+        const nextM = pickRandomFromArray(FATE_WALL_MBTI_ALL, lastMbti);
+        lastMbti = nextM;
+        return nextM;
+    });
+
+    // 2. 若管理者直接輸入具體文字（例如「北部 26 歲 INFP 女生與中部 28 歲 ENTJ 男生好友配對成功」），
+    //    每次前台刷新時同樣自動隨機替換其中的 地區、年齡 與 MBTI
+    text = text.replace(/(北部|中部|南部|東部)/g, (matchedReg) => {
+        const nextReg = pickRandomFromArray(FATE_WALL_REGIONS, lastRegion || matchedReg);
+        lastRegion = nextReg;
+        return nextReg;
+    });
+
+    text = text.replace(/(\d{2})(\s*歲)/g, (_, numStr, suffix) => {
+        const origAge = parseInt(numStr, 10);
+        const nextAge = rollRandomFateWallAge(lastAge !== null ? lastAge : origAge);
+        lastAge = nextAge;
+        return `${nextAge}${suffix}`;
+    });
+
+    text = text.replace(/\b(INTJ|INTP|ENTJ|ENTP|INFJ|INFP|ENFJ|ENFP|ISTJ|ISFJ|ESTJ|ESFJ|ISTP|ISFP|ESTP|ESFP)\b/gi, (matchedMbti) => {
+        const upperOrig = String(matchedMbti).toUpperCase();
+        const nextM = pickRandomFromArray(FATE_WALL_MBTI_ALL, lastMbti || upperOrig);
+        lastMbti = nextM;
+        return nextM;
+    });
+
+    return text;
+}

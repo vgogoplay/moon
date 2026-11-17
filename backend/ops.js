@@ -116,7 +116,34 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 
-    const sortedReports = getSortedAdminReports(getReports());
+    const maxReportsLimit = (typeof REPORTS_MAX_COUNT !== 'undefined') ? REPORTS_MAX_COUNT : 15;
+    let rawReports = getReports();
+    if (rawReports.length > maxReportsLimit) {
+        const byTimeDesc = [...rawReports].sort((a, b) => {
+            const diff = Number((b && b.ts) || 0) - Number((a && a.ts) || 0);
+            if (diff !== 0) return diff;
+            return String((b && b.id) || '').localeCompare(String((a && a.id) || ''));
+        });
+        const keptReports = byTimeDesc.slice(0, maxReportsLimit);
+        const removedOldest = byTimeDesc.slice(maxReportsLimit);
+        localStorage.setItem(REPORTS_KEY, JSON.stringify(keptReports));
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('reports');
+        }
+        if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+            removedOldest.forEach(oldRep => {
+                if (oldRep && oldRep.id) {
+                    if (CloudSync.tree && CloudSync.tree[REPORTS_KEY] && typeof CloudSync.tree[REPORTS_KEY] === 'object') {
+                        delete CloudSync.tree[REPORTS_KEY][oldRep.id];
+                    }
+                    CloudSync.deleteNode(`${REPORTS_KEY}/${oldRep.id}`);
+                }
+            });
+        }
+        rawReports = keptReports;
+    }
+
+    const sortedReports = getSortedAdminReports(rawReports);
     const pendingTotal = sortedReports.filter(r => r && r.status !== '已解決').length;
     const resolvedTotal = sortedReports.length - pendingTotal;
 
@@ -327,6 +354,65 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
             `).join('');
         }
     }
+
+    const fateWallListBox = document.getElementById('adminFateWallList');
+    const fateWallCountBadge = document.getElementById('adminFateWallCountBadge');
+    if (fateWallListBox) {
+        const posts = (typeof getFateWallPosts === 'function') ? getFateWallPosts() : [];
+        if (fateWallCountBadge) {
+            fateWallCountBadge.textContent = `共 ${posts.length} 則動態`;
+        }
+        if (posts.length === 0) {
+            fateWallListBox.innerHTML = `<p class="text-xs text-gray-400">尚未新增任何緣分動態牆內容，新增後將即時顯示於前台首頁。</p>`;
+        } else {
+            const escFw = (str) => String(str ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            fateWallListBox.innerHTML = posts.map(p => {
+                const isDynamic = (typeof hasFateWallDynamicFields === 'function') && hasFateWallDynamicFields(p.content);
+                const dynamicBadge = isDynamic
+                    ? `<span class="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold shrink-0">🎲 地區・年齡・MBTI 每次刷新隨機</span>`
+                    : '';
+                return `
+                <div class="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-white border border-pink-200 text-xs">
+                    <div class="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
+                        <span class="px-2 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold shrink-0">${escFw(p.tag || '🌸 月老動態')}</span>
+                        <span class="font-semibold text-[#5e464a] break-all">${escFw(p.content)}</span>
+                        ${dynamicBadge}
+                        <span class="text-[10px] font-mono text-gray-400 ml-1">(${escFw(p.createdAt || '')})</span>
+                    </div>
+                    <div class="flex items-center gap-2.5 shrink-0">
+                        <button type="button" onclick="openEditAdminFateWallModal('${escFw(p.id)}')" class="text-sky-600 hover:underline font-semibold">✏️ 編輯</button>
+                        <button type="button" onclick="deleteAdminFateWallEntry('${escFw(p.id)}')" class="text-rose-500 hover:underline font-semibold">🗑️ 刪除</button>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+    }
+
+    const earlyCloseDescEl = document.getElementById('wishEarlyCloseMatchDesc');
+    const earlyCloseBtnEl = document.getElementById('toggleWishEarlyCloseMatchBtn');
+    if (earlyCloseDescEl && earlyCloseBtnEl) {
+        const sysCfg = (typeof getSystemConfig === 'function') ? getSystemConfig() : { wishEarlyCloseCanMatch: true };
+        const canMatch = Boolean(sysCfg.wishEarlyCloseCanMatch);
+        if (canMatch) {
+            earlyCloseDescEl.className = 'text-[11px] text-emerald-600 font-semibold mt-0.5';
+            earlyCloseDescEl.textContent = '目前狀態：🟢 可進行好友配對（玩家提前結束題目後，仍可挑選匿名答案配對成好友）';
+            earlyCloseBtnEl.className = 'px-4 py-2 rounded-xl text-xs font-bold shadow-2xs transition shrink-0 bg-gray-700 text-white hover:bg-gray-800';
+            earlyCloseBtnEl.textContent = '切換為「提前結束不可配對」';
+        } else {
+            earlyCloseDescEl.className = 'text-[11px] text-rose-600 font-semibold mt-0.5';
+            earlyCloseDescEl.textContent = '目前狀態：🚫 不可進行好友配對（玩家提前結束題目後，直接結束本輪不開放配對）';
+            earlyCloseBtnEl.className = 'px-4 py-2 rounded-xl text-xs font-bold shadow-2xs transition shrink-0 bg-emerald-600 text-white hover:bg-emerald-700';
+            earlyCloseBtnEl.textContent = '切換為「提前結束可進行配對」';
+        }
+    }
+
+    if (typeof renderLinkedMockFriendsList === 'function') {}
 
     if (typeof renderLinkedMockFriendsList === 'function') {
         renderLinkedMockFriendsList();

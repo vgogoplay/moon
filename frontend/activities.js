@@ -1,4 +1,168 @@
-/* frontend/activities.js - 前台首頁即時統計圖表、常規場次報名與第 2 種專屬活動報名 */
+/* frontend/activities.js - 前台首頁即時緣分動態牆、即時統計圖表、常規場次報名與第 2 種專屬活動報名 */
+
+let lastHomeFateWallContentSig = '';
+let sessionShuffledFateWallOrder = [];
+const LAST_FATE_WALL_ORDER_SESSION_KEY = 'yuelao_last_fate_wall_order_sig';
+const LAST_FATE_WALL_RENDERED_TEXT_KEY = 'yuelao_last_fate_wall_rendered_text';
+
+function escapeFateWallHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function buildRandomizedFateWallVisitList(posts) {
+    const list = Array.isArray(posts) ? [...posts] : [];
+    if (list.length === 0) return [];
+
+    let prevOrderSig = '';
+    let prevRenderedSig = '';
+    try {
+        prevOrderSig = sessionStorage.getItem(LAST_FATE_WALL_ORDER_SESSION_KEY) || '';
+        prevRenderedSig = sessionStorage.getItem(LAST_FATE_WALL_RENDERED_TEXT_KEY) || '';
+    } catch (e) {}
+
+    const doFisherYates = (arr) => {
+        const copy = [...arr];
+        for (let i = copy.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+    };
+
+    const resolveItem = (item) => {
+        const rawContent = String(item.content || '').trim();
+        const resolvedContent = (typeof resolveFateWallDynamicText === 'function')
+            ? resolveFateWallDynamicText(rawContent)
+            : rawContent;
+        return {
+            ...item,
+            resolvedContent
+        };
+    };
+
+    let shuffled = doFisherYates(list);
+    if (list.length > 1) {
+        for (let attempt = 0; attempt < 6; attempt++) {
+            const orderSig = shuffled.map(p => String(p.id || p.content)).join('|');
+            if (!prevOrderSig || orderSig !== prevOrderSig) {
+                break;
+            }
+            shuffled = doFisherYates(list);
+        }
+    }
+
+    let resolvedList = shuffled.map(resolveItem);
+    // 確保每次前台重新刷新時，生成的地區／年齡／MBTI 與文案內容皆與上一次不同
+    for (let attempt = 0; attempt < 8; attempt++) {
+        const renderedSig = resolvedList.map(p => `${p.tag || ''}:${p.resolvedContent}`).join('||');
+        if (!prevRenderedSig || renderedSig !== prevRenderedSig) {
+            break;
+        }
+        shuffled = doFisherYates(list);
+        resolvedList = shuffled.map(resolveItem);
+    }
+
+    try {
+        const finalOrderSig = resolvedList.map(p => String(p.id || p.content)).join('|');
+        const finalRenderedSig = resolvedList.map(p => `${p.tag || ''}:${p.resolvedContent}`).join('||');
+        sessionStorage.setItem(LAST_FATE_WALL_ORDER_SESSION_KEY, finalOrderSig);
+        sessionStorage.setItem(LAST_FATE_WALL_RENDERED_TEXT_KEY, finalRenderedSig);
+    } catch (e) {}
+
+    return resolvedList;
+}
+
+function renderHomeFateWall(forceRender = false) {
+    const marqueeBox = document.getElementById('homeFateWallMarqueeBox');
+    if (!marqueeBox) return;
+
+    const keyName = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+    const rawStr = localStorage.getItem(keyName) || '[]';
+
+    let posts = [];
+    try {
+        const parsed = JSON.parse(rawStr);
+        if (Array.isArray(parsed)) {
+            posts = parsed
+                .filter(item => item && typeof item === 'object' && String(item.content || '').trim() !== '');
+        }
+    } catch (e) {
+        posts = [];
+    }
+
+    // 每次網頁刷新載入時 lastHomeFateWallContentSig 為空，會重新洗牌並隨機產生新的地區/年齡/MBTI；
+    // 同一趟瀏覽期間若後台未修改清單，則維持該趟已隨機出的內容，避免跑馬燈每秒重繪跳動
+    const contentSig = JSON.stringify(
+        posts
+            .map(p => [String(p.id || ''), String(p.tag || ''), String(p.content || '')])
+            .sort((a, b) => a[0].localeCompare(b[0]))
+    );
+
+    if (contentSig !== lastHomeFateWallContentSig || sessionShuffledFateWallOrder.length !== posts.length) {
+        lastHomeFateWallContentSig = contentSig;
+        sessionShuffledFateWallOrder = buildRandomizedFateWallVisitList(posts);
+        forceRender = true;
+    }
+
+    if (!forceRender && marqueeBox.dataset.rendered === '1') {
+        return;
+    }
+    marqueeBox.dataset.rendered = '1';
+
+    if (sessionShuffledFateWallOrder.length === 0) {
+        marqueeBox.innerHTML = `
+            <div class="fate-marquee-track" style="--marquee-duration: 18s;">
+                <div class="fate-marquee-group">
+                    <span class="fate-marquee-item text-xs md:text-sm text-[#6e3a43] font-medium">
+                        🌸 目前尚無最新動態，管理月老隨時會在此分享最新喜訊！
+                    </span>
+                </div>
+                <div class="fate-marquee-group" aria-hidden="true">
+                    <span class="fate-marquee-item text-xs md:text-sm text-[#6e3a43] font-medium">
+                        🌸 目前尚無最新動態，管理月老隨時會在此分享最新喜訊！
+                    </span>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    let totalChars = 0;
+    const itemsHtml = sessionShuffledFateWallOrder.map(item => {
+        const tagText = String(item.tag || '🌸 月老動態').trim();
+        const contentText = String(item.resolvedContent || item.content || '').trim();
+        totalChars += tagText.length + contentText.length + 4;
+        return `
+            <span class="fate-marquee-item">
+                <span class="px-2 py-0.5 rounded-full bg-rose-100/90 border border-pink-200 text-[#8f4452] text-[11px] font-bold">
+                    ${escapeFateWallHtml(tagText)}
+                </span>
+                <span class="text-xs md:text-sm text-[#5e343c] font-semibold">
+                    ${escapeFateWallHtml(contentText)}
+                </span>
+                <span class="text-pink-300 text-xs mx-1">✦</span>
+            </span>
+        `;
+    }).join('');
+
+    const durationSec = Math.max(12, Math.min(90, Math.round(totalChars * 0.34)));
+
+    marqueeBox.innerHTML = `
+        <div class="fate-marquee-track" style="--marquee-duration: ${durationSec}s;">
+            <div class="fate-marquee-group">
+                ${itemsHtml}
+            </div>
+            <div class="fate-marquee-group" aria-hidden="true">
+                ${itemsHtml}
+            </div>
+        </div>
+    `;
+}
 
 // ==================== 前台首頁：即時男女比例與 I人 / E人 / 不知道・沒測過 統計圖表 ====================
 function renderHomeStatsCharts() {
@@ -1007,6 +1171,9 @@ function refreshAllUI() {
         updateFriendUnreadDot();
     } else {
         document.getElementById('navFriendDot').classList.toggle('hidden', appState.friends.length === 0);
+    }
+    if (typeof renderHomeFateWall === 'function') {
+        renderHomeFateWall();
     }
     renderHomeStatsCharts();
     renderFriendsSection();

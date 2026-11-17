@@ -76,17 +76,42 @@
                 </table>
             </div>
         </div>
+
+        <!-- ==================== 2. 🏮 紅線祈願牆題目監控（分「開放中」與「已結束」二種狀態） ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-4 mt-6">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🏮 紅線祈願牆發布與回覆紀錄</h2>
+                    <p class="text-xs text-gray-500">依「🟢 開放中」與「🏁 已結束」二種狀態分類顯示前台玩家發布的祈願題目與匿名回覆進度</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <select id="adminWishWallFilter" onchange="renderAdminWishWallList()" class="p-2 border border-pink-200 rounded-xl text-xs font-bold text-[#8f4452] bg-white">
+                        <option value="" disabled selected hidden>狀態過濾</option>
+                        <option value="ALL">全部狀態（開放中＋已結束）</option>
+                        <option value="OPEN">🟢 開放中</option>
+                        <option value="ENDED">🏁 已結束</option>
+                    </select>
+                    <button type="button" id="batchDeleteWishWallBtn" onclick="batchDeleteAdminWishWallEntries()" class="text-xs px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-50 transition shadow-sm">
+                        🗑️ 一鍵刪除
+                    </button>
+                    <span id="adminWishWallCountBadge" class="text-xs px-2.5 py-1.5 rounded-xl bg-rose-100 text-[#8f4452] font-bold">
+                        開放中 0 則 ／ 已結束 0 則
+                    </span>
+                </div>
+            </div>
+            <div id="adminWishWallList" class="space-y-4 pt-1"></div>
+        </div>
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261117a"></script>
+    <script src="shared/schedule.js?v=20261117h"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261116m"></script>
+    <script src="shared/cloud-store.js?v=20261117t"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261116d"></script>
+    <script src="backend/state.js?v=20261117u"></script>
     <script src="backend/matching.js?v=20261117a"></script>
-    <script src="backend/logs.js?v=20261116c"></script>
+    <script src="backend/logs.js?v=20261117s"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261116c"></script>
+    <script src="backend/layout.js?v=20261117p"></script>
 </body>
 </html>
