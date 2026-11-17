@@ -38,13 +38,14 @@
 
         <!-- 雙欄式聊天室查詢工作區（左側房間列表 ／ 右側對話內容） -->
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-            <!-- 左側：配對聊天房間列表 -->
+            <!-- 左側：配對聊天房間列表（每頁 10 間） -->
             <div class="lg:col-span-5 card-jp rounded-2xl border-2 border-pink-200 overflow-hidden">
                 <div class="px-4 py-3 bg-pink-50/70 border-b border-pink-200 flex items-center justify-between">
-                    <span class="text-xs font-bold text-[#8f4452]">💞 配對聊天室列表</span>
+                    <span class="text-xs font-bold text-[#8f4452]">💞 配對聊天室列表（每頁 10 間）</span>
                     <span id="filteredChatRoomsCountText" class="text-[11px] text-gray-500">共 0 間</span>
                 </div>
-                <div id="adminChatRoomsList" class="divide-y divide-pink-100 max-h-[600px] overflow-y-auto bg-white"></div>
+                <div id="adminChatRoomsList" class="divide-y divide-pink-100 bg-white"></div>
+                <div id="adminChatRoomsPaginationBar" class="px-3.5 py-2.5 bg-pink-50/50 border-t border-pink-200 flex flex-wrap items-center justify-between gap-2 text-[11px]"></div>
             </div>
 
             <!-- 右側：選中房間的對話紀錄明細 -->
@@ -66,13 +67,13 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261116d"></script>
+    <script src="shared/schedule.js?v=20261116e"></script>
     <script src="shared/schema.js?v=20261115l"></script>
-    <script src="shared/cloud-store.js?v=20261116j"></script>
+    <script src="shared/cloud-store.js?v=20261116l"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261116b"></script>
-    <script src="backend/matching.js?v=20261116c"></script>
-    <script src="backend/chats.js?v=20261116d"></script>
+    <script src="backend/state.js?v=20261116d"></script>
+    <script src="backend/matching.js?v=20261116h"></script>
+    <script src="backend/chats.js?v=20261116e"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261116c"></script>
 </body>

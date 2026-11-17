@@ -595,6 +595,11 @@ function recordPairMatch(userA, userB, targetSession, nowTs, activityId = null, 
     userB.matchedWithId = String(userA.id);
     userB.matchedWithName = userA.nickname;
     userB.matchedAt = nowTs;
+
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.recordMatchLog === 'function') {
+        const srcLabel = matchDetail || (String(targetSession).includes('強制') ? '管理員手動配對' : '場次配對');
+        CloudSync.recordMatchLog(userA, userB, targetSession, nowTs, srcLabel);
+    }
 }
 
 function runSessionMatch(isAuto = false) {

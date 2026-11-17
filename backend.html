@@ -22,6 +22,11 @@
                         <span>⚡</span><span>新增配對</span>
                     </button>
                     <div class="admin-field-box h-[46px] !py-1.5 !px-3.5 inline-flex items-center gap-2 shrink-0">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">🔍 搜尋：</span>
+                        <input type="text" id="rosterSearchInput" oninput="onRosterSearchInput(this.value)" placeholder="搜尋 ID、暱稱、IG、居住地、場次或配對..." class="h-8 w-44 sm:w-56 px-2.5 admin-input-box text-xs text-[#8f4452]">
+                        <button type="button" id="clearRosterSearchBtn" onclick="clearRosterSearch()" title="清除搜尋" class="hidden text-gray-400 hover:text-rose-600 font-bold px-1">✕</button>
+                    </div>
+                    <div class="admin-field-box h-[46px] !py-1.5 !px-3.5 inline-flex items-center gap-2 shrink-0">
                         <span class="font-bold text-[#8f4452] whitespace-nowrap">每頁顯示：</span>
                         <select id="rosterPageSizeSelect" onchange="onRosterPageSizeChange(this.value)" class="h-8 px-2.5 admin-input-box font-bold text-[#8f4452]">
                             <option value="5" selected>5 人（預設）</option>
@@ -67,7 +72,7 @@
         <div class="card-jp rounded-2xl p-5 border-2 border-pink-200 bg-gradient-to-r from-white to-pink-50/60 space-y-3">
             <div>
                 <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🎛️ 前台系統開關控制（即時連動前台畫面狀態）</h2>
-                <p class="text-xs text-gray-500">可即時控制活動報名開關、個人資料鎖定開關，以及男女生人數限制開關（男/女各自計算上限）</p>
+                <p class="text-xs text-gray-500">可即時控制活動報名開關、個人資料鎖定開關，以及男生人數限制開關（僅限制男生上限，女生不限人數）</p>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
@@ -91,24 +96,24 @@
                     </button>
                 </div>
 
-                <!-- 3. 男女生人數限制開關 -->
+                <!-- 3. 男女生人數限制開關（僅限制男生上限，女生不限人數） -->
                 <div class="md:col-span-2 p-4 rounded-2xl bg-white border-2 border-pink-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <div class="space-y-1">
                         <div class="flex flex-wrap items-center gap-2">
-                            <p class="text-xs font-bold text-[#8f4452]">3. 前台男女生人數限制開關</p>
+                            <p class="text-xs font-bold text-[#8f4452]">3. 前台男女生人數限制開關（僅限男生上限・女生不限）</p>
                             <span id="genderQuotaLiveCount" class="text-[11px] px-2.5 py-0.5 rounded-full bg-pink-50 border border-pink-300 text-[#8f4452] font-semibold">
-                                目前玩家人數：男生 0 人 ／ 女生 0 人
+                                目前玩家人數：男生 0 人 ／ 女生 0 人（女生不限）
                             </span>
                         </div>
-                        <p id="genderLimitSwitchDesc" class="text-[11px] text-gray-500 font-semibold">目前狀態：⚪ 未開啟（不限制男女生人數）</p>
-                        <p class="text-[11px] text-gray-400">開啟後：若男、女生皆達設定上限，未填寫資料的新玩家將顯示「男/女人數已滿」；若僅單一性別額滿，則禁止選取該性別並提示人數已滿。</p>
+                        <p id="genderLimitSwitchDesc" class="text-[11px] text-gray-500 font-semibold">目前狀態：⚪ 未開啟（男女生皆不限制人數）</p>
+                        <p class="text-[11px] text-gray-400">開啟後：僅限制男生註冊上限，當男生人數達上限時前台將禁止選取「男生」並提示已滿；女生則完全不設上限，隨時可正常填寫與報名。</p>
                     </div>
                     <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2 shrink-0">
-                        <label class="text-xs font-bold text-[#5e464a]">男 / 女各自上限：</label>
+                        <label class="text-xs font-bold text-[#5e464a]">男生人數上限：</label>
                         <input type="number" id="genderLimitMaxInput" min="1" value="30" onchange="updateGenderLimitMax()" class="w-20 p-2 admin-input-box text-xs font-mono font-bold text-center text-[#8f4452]">
-                        <span class="text-xs font-semibold text-gray-600 mr-1">人</span>
+                        <span class="text-xs font-semibold text-gray-600 mr-1">人（女生不限）</span>
                         <button id="toggleGenderLimitBtn" onclick="toggleGenderLimitSwitch()" class="px-4 py-2 rounded-xl text-xs font-bold shadow transition bg-[#c96a7b] text-white hover:opacity-95">
-                            開啟「男女生人數限制」
+                            開啟「男生人數限制」
                         </button>
                     </div>
                 </div>
@@ -301,13 +306,13 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261116d"></script>
+    <script src="shared/schedule.js?v=20261116e"></script>
     <script src="shared/schema.js?v=20261115l"></script>
-    <script src="shared/cloud-store.js?v=20261116j"></script>
+    <script src="shared/cloud-store.js?v=20261116l"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261116b"></script>
-    <script src="backend/matching.js?v=20261116c"></script>
-    <script src="backend/roster.js?v=20261116b"></script>
+    <script src="backend/state.js?v=20261116d"></script>
+    <script src="backend/matching.js?v=20261116h"></script>
+    <script src="backend/roster.js?v=20261116d"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261116c"></script>
 </body>

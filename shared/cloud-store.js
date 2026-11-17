@@ -19,6 +19,8 @@ const PENDING_USERS_SYNC_KEY = 'yuelao_pending_users_sync';
 const DELETED_USERS_SYNC_KEY = 'yuelao_deleted_users_sync';
 const UNMATCHED_PAIRS_SYNC_KEY = 'yuelao_unmatched_pairs_sync';
 const UNMATCHED_PAIRS_CLOUD_NODE = 'yuelao_unmatched_pairs';
+const MATCH_LOGS_KEY = 'yuelao_match_logs';
+const MATCH_LOGS_MAX_COUNT = 30;
 
 const FIREBASE_DB_URL = 'https://moon-8b627-default-rtdb.asia-southeast1.firebasedatabase.app';
 
@@ -33,6 +35,8 @@ const CloudSync = {
     lastPushedUsersJson: {},
     inFlightWrites: 0,
     writeEpoch: 0,
+    isOnline: true,
+    beforeUnloadBound: false,
     pendingUsers: {},
     deletedUsers: {},
     unmatchedPairs: {},
@@ -231,6 +235,66 @@ const CloudSync = {
         if (!pk) return false;
         const map = this.loadSharedUnmatchedPairs();
         return Boolean(map[pk] && Date.now() <= Number(map[pk] || 0));
+    },
+
+    recordMatchLog(userA, userB, sessionLabel = '', matchTs = Date.now(), sourceLabel = '') {
+        if (!userA || !userB || !userA.id || !userB.id) return null;
+        const tsNum = Number(matchTs) || Date.now();
+        const d = new Date(tsNum);
+        const matchedAtStr = Number.isNaN(d.getTime())
+            ? new Date().toLocaleString('zh-TW', { hour12: false })
+            : d.toLocaleString('zh-TW', { hour12: false });
+
+        const entry = {
+            id: 'ML_' + tsNum + '_' + Math.random().toString(36).slice(2, 6),
+            idA: String(userA.id).trim(),
+            nameA: String(userA.nickname || `玩家_${userA.id}`).trim(),
+            genderA: String(userA.gender || '').trim(),
+            idB: String(userB.id).trim(),
+            nameB: String(userB.nickname || `玩家_${userB.id}`).trim(),
+            genderB: String(userB.gender || '').trim(),
+            session: String(sessionLabel || '').trim(),
+            source: String(sourceLabel || '').trim(),
+            ts: tsNum,
+            matchedAtStr
+        };
+
+        let logs = [];
+        try {
+            const raw = JSON.parse(localStorage.getItem(MATCH_LOGS_KEY) || '[]');
+            if (Array.isArray(raw)) logs = raw;
+        } catch (e) {}
+
+        logs.unshift(entry);
+        logs.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+        const removedLogs = logs.length > MATCH_LOGS_MAX_COUNT ? logs.slice(MATCH_LOGS_MAX_COUNT) : [];
+        const keptLogs = logs.slice(0, MATCH_LOGS_MAX_COUNT);
+
+        try {
+            localStorage.setItem(MATCH_LOGS_KEY, JSON.stringify(keptLogs));
+        } catch (e) {}
+
+        if (this.tree && typeof this.tree === 'object') {
+            if (!this.tree[MATCH_LOGS_KEY] || typeof this.tree[MATCH_LOGS_KEY] !== 'object') {
+                this.tree[MATCH_LOGS_KEY] = {};
+            }
+            this.tree[MATCH_LOGS_KEY][entry.id] = { ...entry };
+            removedLogs.forEach(oldItem => {
+                if (oldItem && oldItem.id && Object.prototype.hasOwnProperty.call(this.tree[MATCH_LOGS_KEY], oldItem.id)) {
+                    delete this.tree[MATCH_LOGS_KEY][oldItem.id];
+                }
+            });
+        }
+
+        if (this.initialized) {
+            this.putNode(`${MATCH_LOGS_KEY}/${entry.id}`, entry);
+            removedLogs.forEach(oldItem => {
+                if (oldItem && oldItem.id) {
+                    this.deleteNode(`${MATCH_LOGS_KEY}/${oldItem.id}`);
+                }
+            });
+        }
+        return entry;
     },
 
     mapToArray(raw) {
@@ -598,6 +662,11 @@ const CloudSync = {
         if (t[AUTO_RUN_LOG_KEY] && typeof t[AUTO_RUN_LOG_KEY] === 'object') {
             this.writeLocalIfChanged(AUTO_RUN_LOG_KEY, JSON.stringify(t[AUTO_RUN_LOG_KEY]));
         }
+        if (t[MATCH_LOGS_KEY] !== undefined) {
+            const matchLogsArr = this.mapToArray(t[MATCH_LOGS_KEY]);
+            matchLogsArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+            this.writeLocalIfChanged(MATCH_LOGS_KEY, JSON.stringify(matchLogsArr.slice(0, MATCH_LOGS_MAX_COUNT)));
+        }
 
         // 8. ID 計數器
         if (t[ID_COUNTER_KEY] && typeof t[ID_COUNTER_KEY] === 'object') {
@@ -661,16 +730,26 @@ const CloudSync = {
         }
     },
 
-    updateCloudBadge(isOnline) {
+    refreshCloudBadge() {
         const badge = document.getElementById('cloudStatusBadge');
         if (!badge) return;
-        if (isOnline) {
+        if (this.inFlightWrites > 0) {
+            badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-800 font-semibold animate-pulse';
+            badge.textContent = `⏳ 正在同步至雲端（${this.inFlightWrites} 筆寫入中）...`;
+            return;
+        }
+        if (this.isOnline) {
             badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-700 font-semibold';
             badge.textContent = '☁️ Firebase 雲端已即時同步';
         } else {
             badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-700 font-semibold';
             badge.textContent = '⚠️ 雲端重連中（暫用本地快取）';
         }
+    },
+
+    updateCloudBadge(isOnline) {
+        this.isOnline = Boolean(isOnline);
+        this.refreshCloudBadge();
     },
 
     async fetchFullTree() {
@@ -752,8 +831,18 @@ const CloudSync = {
             this.pollTimer = null;
         }
 
+        if (!this.beforeUnloadBound && typeof window !== 'undefined') {
+            this.beforeUnloadBound = true;
+            window.addEventListener('beforeunload', (e) => {
+                if (this.inFlightWrites > 0) {
+                    e.preventDefault();
+                    e.returnValue = '';
+                }
+            });
+        }
+
         document.addEventListener('visibilitychange', async () => {
-            if (!document.hidden) {
+            if (!document.hidden && this.inFlightWrites === 0) {
                 const ok = await this.fetchFullTree();
                 if (ok && typeof this.onUpdateCallback === 'function') {
                     this.onUpdateCallback();
@@ -770,6 +859,7 @@ const CloudSync = {
         this.applyStreamPatch(path, value);
         this.inFlightWrites++;
         this.writeEpoch++;
+        this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
             await fetch(`${this.dbUrl}/${encoded}.json`, {
@@ -782,12 +872,20 @@ const CloudSync = {
         } finally {
             this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
             this.writeEpoch++;
+            this.refreshCloudBadge();
         }
     },
 
     async patchNode(path, patchObj) {
+        if (!patchObj || typeof patchObj !== 'object') return;
+        const cleanBase = String(path || '').replace(/^\/+|\/+$/g, '');
+        Object.entries(patchObj).forEach(([k, v]) => {
+            const subPath = cleanBase ? `${cleanBase}/${k}` : k;
+            this.applyStreamPatch(subPath, v);
+        });
         this.inFlightWrites++;
         this.writeEpoch++;
+        this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
             await fetch(`${this.dbUrl}/${encoded}.json`, {
@@ -800,7 +898,45 @@ const CloudSync = {
         } finally {
             this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
             this.writeEpoch++;
+            this.refreshCloudBadge();
         }
+    },
+
+    async patchUserFields(playerId, patchFields, updatedUserRecord = null) {
+        const pid = String(playerId || '').trim();
+        if (!pid || !patchFields || typeof patchFields !== 'object') return;
+        if (this.isUserDeleted(pid)) return;
+
+        const firebasePatch = {};
+        const localPatch = {};
+        Object.entries(patchFields).forEach(([k, v]) => {
+            if (v === undefined) return;
+            localPatch[k] = v;
+            if (Array.isArray(v) && v.length === 0) {
+                firebasePatch[k] = null;
+            } else if (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) {
+                firebasePatch[k] = null;
+            } else {
+                firebasePatch[k] = v;
+            }
+        });
+
+        if (Object.keys(firebasePatch).length === 0) return;
+
+        const existingTreeUser = (this.tree && this.tree[USERS_KEY] && this.tree[USERS_KEY][pid] && typeof this.tree[USERS_KEY][pid] === 'object')
+            ? this.tree[USERS_KEY][pid]
+            : {};
+        const mergedRecord = {
+            ...(updatedUserRecord && typeof updatedUserRecord === 'object' ? updatedUserRecord : {}),
+            ...existingTreeUser,
+            ...localPatch,
+            id: pid
+        };
+        delete mergedRecord.registeredSession;
+        this.lastPushedUsersJson[pid] = JSON.stringify(mergedRecord);
+        this.setSharedPendingUser(pid, mergedRecord, 18000);
+
+        await this.patchNode(`${USERS_KEY}/${pid}`, firebasePatch);
     },
 
     async deleteNode(path) {
@@ -812,6 +948,7 @@ const CloudSync = {
         }
         this.inFlightWrites++;
         this.writeEpoch++;
+        this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
             await fetch(`${this.dbUrl}/${encoded}.json`, {
@@ -822,6 +959,7 @@ const CloudSync = {
         } finally {
             this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
             this.writeEpoch++;
+            this.refreshCloudBadge();
         }
     },
 
@@ -1042,8 +1180,8 @@ const Store = {
         const limit = Math.max(1, Number(cfg.genderLimitMax || 30));
         const enabled = Boolean(cfg.genderLimitEnabled);
         const maleFull = enabled && counts.male >= limit;
-        const femaleFull = enabled && counts.female >= limit;
-        const bothFull = enabled && maleFull && femaleFull;
+        const femaleFull = false; // 女生不限制人數上限
+        const bothFull = false;   // 女生不限制上限，不會出現男女皆滿鎖定
         return {
             enabled,
             limit,

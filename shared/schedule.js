@@ -323,6 +323,10 @@ function sharedRecordCustomPairMatch(userA, userB, targetSession, nowTs, activit
     userB.matchedWithId = String(userA.id);
     userB.matchedWithName = userA.nickname;
     userB.matchedAt = nowTs;
+
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.recordMatchLog === 'function') {
+        CloudSync.recordMatchLog(userA, userB, targetSession, nowTs, matchDetail || '專屬活動配對');
+    }
 }
 
 const CUSTOM_ACT_LOCK_PREFIX = 'yuelao_custom_act_lock_';

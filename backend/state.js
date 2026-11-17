@@ -13,9 +13,31 @@ let lastUsersSnapshot = '';
 let lastReportsSnapshot = '';
 let lastSystemSnapshot = '';
 let lastChatsAdminSnapshot = '';
+let lastMatchLogsAdminSnapshot = '';
 let lastOverviewRenderSig = '';
 let rosterPageSize = '5';
 let currentRosterPage = 1;
+let rosterSearchKeyword = '';
+
+function onRosterSearchInput(val) {
+    rosterSearchKeyword = String(val || '').trim();
+    const clearBtn = document.getElementById('clearRosterSearchBtn');
+    if (clearBtn) {
+        clearBtn.classList.toggle('hidden', rosterSearchKeyword === '');
+    }
+    currentRosterPage = 1;
+    renderAdminAll();
+}
+
+function clearRosterSearch() {
+    rosterSearchKeyword = '';
+    const inputEl = document.getElementById('rosterSearchInput');
+    if (inputEl) inputEl.value = '';
+    const clearBtn = document.getElementById('clearRosterSearchBtn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    currentRosterPage = 1;
+    renderAdminAll();
+}
 
 // ==================== ⚡ 後台記憶體快取（減少重複 JSON.parse 負擔） ====================
 const AdminMemoryCache = {
@@ -128,7 +150,13 @@ function setSystemConfig(patch) {
     AdminMemoryCache.systemRaw = serialized;
     AdminMemoryCache.system = updated;
     localStorage.setItem(SYSTEM_STATE_KEY, serialized);
-    CloudSync.putNode(SYSTEM_STATE_KEY, updated);
+    if (typeof CloudSync !== 'undefined') {
+        if (CloudSync.initialized && typeof CloudSync.patchNode === 'function') {
+            CloudSync.patchNode(SYSTEM_STATE_KEY, patch);
+        } else {
+            CloudSync.putNode(SYSTEM_STATE_KEY, updated);
+        }
+    }
     return updated;
 }
 
@@ -165,9 +193,9 @@ function toggleGenderLimitSwitch() {
     const nextEnabled = !cfg.genderLimitEnabled;
     setSystemConfig({ genderLimitEnabled: nextEnabled, genderLimitMax: inputVal });
     const label = nextEnabled
-        ? `🟢 已開啟男女生人數限制（男上限 ${inputVal} 人 / 女上限 ${inputVal} 人）`
-        : '⚪ 已關閉男女生人數限制';
-    appendLog(`<span class="text-pink-300">[男女生人數限制]</span> ${label}`);
+        ? `🟢 已開啟男生人數限制（男生上限 ${inputVal} 人 ／ 女生不限人數）`
+        : '⚪ 已關閉男生人數限制（男女生皆不限制）';
+    appendLog(`<span class="text-pink-300">[男生人數限制]</span> ${label}`);
     renderAdminAll();
 }
 
@@ -176,7 +204,7 @@ function updateGenderLimitMax() {
     const validMax = (!isNaN(rawVal) && rawVal >= 1) ? rawVal : 30;
     document.getElementById('genderLimitMaxInput').value = validMax;
     setSystemConfig({ genderLimitMax: validMax });
-    appendLog(`<span class="text-pink-300">[男女生人數上限更新]</span> 男 / 女各自上限人數已調整為 <strong>${validMax} 人</strong>。`);
+    appendLog(`<span class="text-pink-300">[男生人數上限更新]</span> 男生人數上限已調整為 <strong>${validMax} 人</strong>（女生不限人數）。`);
     renderAdminAll();
 }
 
@@ -249,26 +277,28 @@ function getUsers() {
     }
 
     let migrated = false;
+    const migratedUsersMap = new Map();
     users.forEach(u => {
         if (!u || typeof u !== 'object') return;
+        let userMigrated = false;
         if (Array.isArray(u.registeredSessions)) {
             const norm = Array.from(new Set(u.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
             if (JSON.stringify(norm) !== JSON.stringify(u.registeredSessions)) {
                 u.registeredSessions = norm;
-                migrated = true;
+                userMigrated = true;
             }
         } else {
             u.registeredSessions = [];
         }
         if (Object.prototype.hasOwnProperty.call(u, 'registeredSession')) {
             delete u.registeredSession;
-            migrated = true;
+            userMigrated = true;
         }
         if (u.matchedSession) {
             const normMatched = normalizeSessionLabel(u.matchedSession);
             if (normMatched !== u.matchedSession) {
                 u.matchedSession = normMatched;
-                migrated = true;
+                userMigrated = true;
             }
         }
         if (Array.isArray(u.matchedHistory)) {
@@ -277,19 +307,21 @@ function getUsers() {
                     const normHist = normalizeSessionLabel(h.session);
                     if (normHist !== h.session) {
                         h.session = normHist;
-                        migrated = true;
+                        userMigrated = true;
                     }
                 }
             });
         }
-    });
-    users.forEach(u => {
-        if (u && u.id) {
+        if (u.id) {
             const expectedCode = generatePlayerBackupCode(u, users);
             if (expectedCode && u.backupCode !== expectedCode) {
                 u.backupCode = expectedCode;
-                migrated = true;
+                userMigrated = true;
             }
+        }
+        if (userMigrated) {
+            migrated = true;
+            if (u.id) migratedUsersMap.set(String(u.id), u);
         }
     });
     if (migrated) {
@@ -297,8 +329,12 @@ function getUsers() {
         AdminMemoryCache.usersRaw = nextRaw;
         AdminMemoryCache.users = users;
         localStorage.setItem(USERS_KEY, nextRaw);
-        if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
-            CloudSync.syncUsersArray(users);
+        if (typeof CloudSync !== 'undefined' && CloudSync.initialized && CloudSync.inFlightWrites === 0) {
+            migratedUsersMap.forEach(mu => {
+                if (!CloudSync.isUserDeleted(mu.id)) {
+                    CloudSync.upsertUser(mu, false, { isMatchMutation: false });
+                }
+            });
         }
     } else {
         AdminMemoryCache.usersRaw = raw;
@@ -328,6 +364,22 @@ function saveUsers(users, options = { isMatchMutation: false }) {
     AdminMemoryCache.users = users;
     localStorage.setItem(USERS_KEY, nextRaw);
     CloudSync.syncUsersArray(users, options);
+    renderAdminAll(true);
+}
+
+function saveSingleUserPatch(users, targetUser, patchFields) {
+    if (!targetUser || !targetUser.id) return;
+    targetUser.backupCode = generatePlayerBackupCode(targetUser, users);
+    const fullPatch = { ...patchFields, backupCode: targetUser.backupCode };
+    const nextRaw = JSON.stringify(users);
+    AdminMemoryCache.usersRaw = nextRaw;
+    AdminMemoryCache.users = users;
+    localStorage.setItem(USERS_KEY, nextRaw);
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.patchUserFields === 'function') {
+        CloudSync.patchUserFields(targetUser.id, fullPatch, targetUser);
+    } else if (typeof CloudSync !== 'undefined') {
+        CloudSync.upsertUser(targetUser, false, { isMatchMutation: false });
+    }
     renderAdminAll(true);
 }
 
@@ -618,19 +670,22 @@ function logoutAdmin() {
 
 function pollSharedStorageChanges() {
     if (!isAdminAuthenticated()) return;
+    if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
     const curUsers = localStorage.getItem(USERS_KEY) || '';
     const curReports = localStorage.getItem(REPORTS_KEY) || '';
     const curSys = localStorage.getItem(SYSTEM_STATE_KEY) || '';
     const curChats = localStorage.getItem(CHATS_KEY) || '';
+    const curMatchLogs = localStorage.getItem(MATCH_LOGS_KEY) || '';
     const curBatch = getCurrentBatch();
-    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
+    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curMatchLogs !== lastMatchLogsAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
         renderAdminAll(false);
     }
 }
 
 window.addEventListener('storage', (e) => {
     if (!isAdminAuthenticated()) return;
-    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, CHATS_KEY, REG_HISTORY_KEY, 'yuelao_admin_login_logs'].includes(e.key)) {
+    if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
+    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, CHATS_KEY, REG_HISTORY_KEY, 'yuelao_admin_login_logs', MATCH_LOGS_KEY].includes(e.key)) {
         renderAdminAll(false);
     }
 });
@@ -642,6 +697,7 @@ document.addEventListener('visibilitychange', () => {
 
 setInterval(() => {
     if (!isAdminAuthenticated()) return;
+    if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
     checkAutoSchedule2000();
     pollSharedStorageChanges();
 }, 1000);
@@ -654,6 +710,7 @@ function renderAdminSharedOverview(forceUpdate = false) {
     lastReportsSnapshot = localStorage.getItem(REPORTS_KEY) || '';
     lastSystemSnapshot = localStorage.getItem(SYSTEM_STATE_KEY) || '';
     lastChatsAdminSnapshot = localStorage.getItem(CHATS_KEY) || '';
+    lastMatchLogsAdminSnapshot = localStorage.getItem(MATCH_LOGS_KEY) || '';
 
     const sysCfg = getSystemConfig();
     const batch = sysCfg.currentBatch;

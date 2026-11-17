@@ -10,6 +10,42 @@
 </head>
 <body data-admin-page="logs">
     <div id="adminLayoutMount" class="space-y-6">
+        <!-- 新增：玩家配對成功日誌（保留最近 30 筆） -->
+        <div class="card-jp rounded-2xl overflow-hidden border-2 border-pink-200">
+            <div class="p-5 border-b border-pink-200 flex flex-wrap items-center justify-between bg-pink-50/50 gap-3">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">💘 玩家配對成功日誌</h2>
+                        <span id="matchLogsCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                            近 0 / 30 筆
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-0.5">每次 A 與 B 配對成功後自動紀錄雙方玩家與配對時間，保留最近 30 筆紀錄</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="clearAdminMatchLogs()" class="text-xs px-3 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-bold hover:bg-pink-50 transition shadow-sm">
+                        🗑️ 清空配對日誌
+                    </button>
+                    <button type="button" onclick="renderAdminAll(true)" class="text-xs px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
+                        ↻ 重新整理
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-x-auto p-3 bg-white">
+                <table class="admin-grid-table text-left text-xs md:text-sm">
+                    <thead>
+                        <tr class="text-xs">
+                            <th class="p-3.5 w-44">配對時間</th>
+                            <th class="p-3.5">配對玩家 A</th>
+                            <th class="p-3.5">配對玩家 B</th>
+                            <th class="p-3.5">配對場次 / 來源</th>
+                        </tr>
+                    </thead>
+                    <tbody id="matchLogsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- 登入失敗日誌清單 -->
         <div class="card-jp rounded-2xl overflow-hidden border-2 border-rose-200">
             <div class="p-5 border-b border-rose-200 flex flex-wrap items-center justify-between bg-rose-50/40 gap-3">
@@ -43,13 +79,13 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261116d"></script>
+    <script src="shared/schedule.js?v=20261116e"></script>
     <script src="shared/schema.js?v=20261115l"></script>
-    <script src="shared/cloud-store.js?v=20261116j"></script>
+    <script src="shared/cloud-store.js?v=20261116l"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261116b"></script>
-    <script src="backend/matching.js?v=20261116c"></script>
-    <script src="backend/logs.js?v=20261116b"></script>
+    <script src="backend/state.js?v=20261116d"></script>
+    <script src="backend/matching.js?v=20261116h"></script>
+    <script src="backend/logs.js?v=20261116c"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261116c"></script>
 </body>

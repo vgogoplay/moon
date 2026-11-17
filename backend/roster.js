@@ -20,7 +20,15 @@ function clearPlayerRegularSession(playerId, sessionLabel) {
     if (typeof ActivityRegArchive !== 'undefined') {
         ActivityRegArchive.removeRegular(normTarget, target.id);
     }
-    saveUsers(users);
+    if (typeof saveSingleUserPatch === 'function') {
+        saveSingleUserPatch(users, target, {
+            registeredSessions: target.registeredSessions,
+            registeredSession: null,
+            exactMatchCriteria: target.exactMatchCriteria || {}
+        });
+    } else {
+        saveUsers(users);
+    }
     appendLog(`<span class="text-amber-300">[取消場次報名]</span> 已取消玩家 <strong>${target.nickname} (ID:${target.id})</strong> 在「<strong>${normTarget}</strong>」的報名，並同步至前台。`);
 }
 
@@ -107,7 +115,11 @@ function executeTogglePlayerMatchBan(playerId) {
     if (!target) return;
 
     target.isMatchBanned = !target.isMatchBanned;
-    saveUsers(users);
+    if (typeof saveSingleUserPatch === 'function') {
+        saveSingleUserPatch(users, target, { isMatchBanned: target.isMatchBanned });
+    } else {
+        saveUsers(users);
+    }
     refreshDetailModalIfOpen(playerId);
 
     if (target.isMatchBanned) {
@@ -131,7 +143,11 @@ function executeTogglePlayerChatBan(playerId) {
     if (!target) return;
 
     target.isChatBanned = !target.isChatBanned;
-    saveUsers(users);
+    if (typeof saveSingleUserPatch === 'function') {
+        saveSingleUserPatch(users, target, { isChatBanned: target.isChatBanned });
+    } else {
+        saveUsers(users);
+    }
     refreshDetailModalIfOpen(playerId);
 
     if (target.isChatBanned) {
@@ -402,7 +418,8 @@ function saveAdminEditedPlayer(e) {
     const idx = users.findIndex(u => String(u.id) === String(targetId));
     if (idx < 0) return;
 
-    const u = { ...users[idx] };
+    const prevUser = users[idx];
+    const u = { ...prevUser };
     const nextPrivacy = { ...(u.privacy || {}) };
 
     ADMIN_EDIT_SECTIONS.forEach(sec => {
@@ -461,7 +478,22 @@ function saveAdminEditedPlayer(e) {
     u.backupCode = (typeof deriveFixedBackupCode === 'function') ? deriveFixedBackupCode(u.id) : (typeof generatePlayerBackupCode === 'function' ? generatePlayerBackupCode(u, users) : u.backupCode);
 
     users[idx] = u;
-    saveUsers(users);
+    const patchFields = {};
+    const skipPatchKeys = new Set([
+        'id', 'matchedHistory', 'matchedSession', 'matchedWithId', 'matchedWithName', 'matchedAt',
+        'registeredSessions', 'registeredSession', 'exactMatchCriteria', 'customActivityRegs'
+    ]);
+    Object.keys(u).forEach(k => {
+        if (skipPatchKeys.has(k)) return;
+        if (JSON.stringify(u[k]) !== JSON.stringify(prevUser[k])) {
+            patchFields[k] = u[k];
+        }
+    });
+    if (typeof saveSingleUserPatch === 'function') {
+        saveSingleUserPatch(users, u, patchFields);
+    } else {
+        saveUsers(users);
+    }
 
     localStorage.setItem('yuelao_test_event', JSON.stringify({
         id: 'CMD_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
@@ -569,6 +601,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
         gLimEn: sysCfg.genderLimitEnabled,
         gLimMax: sysCfg.genderLimitMax,
         filter: currentFilterVal,
+        search: rosterSearchKeyword,
         pageSize: rosterPageSize,
         page: currentRosterPage,
         rules: forceRulesList,
@@ -626,7 +659,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
     }
     const liveCountBadge = document.getElementById('genderQuotaLiveCount');
     if (liveCountBadge) {
-        liveCountBadge.textContent = `目前玩家人數：男生 ${maleCount} 人 ／ 女生 ${femaleCount} 人`;
+        liveCountBadge.textContent = `目前玩家人數：男生 ${maleCount} 人 ／ 女生 ${femaleCount} 人（女生不限）`;
     }
     const genderLimitDesc = document.getElementById('genderLimitSwitchDesc');
     const genderLimitBtn = document.getElementById('toggleGenderLimitBtn');
@@ -634,16 +667,15 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
         if (sysCfg.genderLimitEnabled) {
             const max = sysCfg.genderLimitMax;
             const maleStatus = maleCount >= max ? '（已滿）' : '';
-            const femaleStatus = femaleCount >= max ? '（已滿）' : '';
             genderLimitDesc.className = 'text-[11px] text-emerald-600 font-semibold';
-            genderLimitDesc.textContent = `目前狀態：🟢 已開啟限制（男上限 ${max} 人${maleStatus} ／ 女上限 ${max} 人${femaleStatus}）`;
+            genderLimitDesc.textContent = `目前狀態：🟢 已開啟限制（男生上限 ${max} 人${maleStatus} ／ 女生不限人數）`;
             genderLimitBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition bg-gray-700 text-white hover:bg-gray-800';
-            genderLimitBtn.textContent = '關閉「男女生人數限制」';
+            genderLimitBtn.textContent = '關閉「男生人數限制」';
         } else {
             genderLimitDesc.className = 'text-[11px] text-gray-500 font-semibold';
-            genderLimitDesc.textContent = '目前狀態：⚪ 未開啟（不限制男女生人數）';
+            genderLimitDesc.textContent = '目前狀態：⚪ 未開啟（男女生皆不限制人數）';
             genderLimitBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition bg-[#c96a7b] text-white hover:opacity-95';
-            genderLimitBtn.textContent = '開啟「男女生人數限制」';
+            genderLimitBtn.textContent = '開啟「男生人數限制」';
         }
     }
 
@@ -703,11 +735,32 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
     }
 
     const rosterFilter = filterSelect.value;
+    const kw = (typeof rosterSearchKeyword === 'string' ? rosterSearchKeyword : '').trim().toLowerCase();
     const filteredUsers = users.filter(u => {
-        if (!rosterFilter || rosterFilter === 'all') return true;
-        if (rosterFilter === 'gender:男') return u.gender === '男';
-        if (rosterFilter === 'gender:女') return u.gender === '女';
-        return true;
+        if (rosterFilter === 'gender:男' && u.gender !== '男') return false;
+        if (rosterFilter === 'gender:女' && u.gender !== '女') return false;
+        if (!kw) return true;
+
+        const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);
+        const cRegs = (u.customActivityRegs && typeof u.customActivityRegs === 'object') ? Object.values(u.customActivityRegs) : [];
+        const hist = Array.isArray(u.matchedHistory) ? u.matchedHistory : [];
+        const haystack = [
+            u.id,
+            u.nickname,
+            u.ig,
+            u.gender,
+            u.age,
+            u.region,
+            u.city,
+            u.mbti,
+            u.backupCode,
+            ...sessions,
+            ...cRegs.map(cr => cr && cr.activityName),
+            ...hist.map(h => `${h.partnerId || ''} ${h.partnerName || ''}`),
+            u.matchedWithId,
+            u.matchedWithName
+        ].filter(Boolean).join(' ').toLowerCase();
+        return haystack.includes(kw);
     });
 
     const pageSizeSelectEl = document.getElementById('rosterPageSizeSelect');
