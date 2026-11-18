@@ -318,7 +318,7 @@ function getUsers() {
             delete u.registeredSession;
             userMigrated = true;
         }
-        if (u.matchedSession) {
+        if (u.matchedSession && !String(u.matchedSession).includes('強制')) {
             const normMatched = normalizeSessionLabel(u.matchedSession);
             if (normMatched !== u.matchedSession) {
                 u.matchedSession = normMatched;
@@ -327,7 +327,7 @@ function getUsers() {
         }
         if (Array.isArray(u.matchedHistory)) {
             u.matchedHistory.forEach(h => {
-                if (h.session) {
+                if (h.session && !String(h.session).includes('強制')) {
                     const normHist = normalizeSessionLabel(h.session);
                     if (normHist !== h.session) {
                         h.session = normHist;

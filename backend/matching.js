@@ -421,13 +421,70 @@ function inferDiscrepancyPairMetadata(pidA, pidB, uA, uB, nowTs = Date.now()) {
     };
 }
 
+function ensureUserRecordLoadedInList(users, targetPid) {
+    const pid = String(targetPid || '').trim();
+    if (!pid) return null;
+    let u = users.find(item => item && String(item.id).trim() === pid) || null;
+    if (!u && typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][pid]) {
+        const treeRec = CloudSync.tree[USERS_KEY][pid];
+        if (treeRec && typeof treeRec === 'object') {
+            u = { ...treeRec, id: pid };
+            users.push(u);
+        }
+    }
+    return u;
+}
+
+function appendOrHealMirrorHistoryEntry(targetUser, partnerId, partnerName, meta) {
+    const pid = String(partnerId || '').trim();
+    const normList = (arr) => (typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
+        ? CloudSync.normalizeMatchedHistoryList(arr)
+        : arr;
+
+    targetUser.matchedHistory = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+        ? CloudSync.mapToArray(targetUser.matchedHistory)
+        : (Array.isArray(targetUser.matchedHistory) ? [...targetUser.matchedHistory] : []);
+
+    const makeEntry = (sessionStr, detailStr = '') => {
+        const obj = {
+            partnerId: pid,
+            partnerName: partnerName || `玩家_${pid}`,
+            session: sessionStr,
+            matchedAt: meta.matchedAt,
+            igUnlocked: meta.igUnlocked,
+            continueVotes: []
+        };
+        if (meta.activityId) obj.activityId = String(meta.activityId);
+        const finalDetail = detailStr || meta.matchDetail;
+        if (finalDetail) obj.matchDetail = String(finalDetail);
+        return obj;
+    };
+
+    const alreadyExists = targetUser.matchedHistory.some(h => h && String(h.partnerId).trim() === pid);
+    if (!alreadyExists) {
+        targetUser.matchedHistory.push(makeEntry(meta.session));
+    }
+    targetUser.matchedHistory = normList(targetUser.matchedHistory);
+
+    // 若該玩家在同一個常規週三／週六場次已有其他對象，normalizeMatchedHistoryList 會依一般自動規則過濾第 2 筆；
+    // 此處為管理員手動執行「資料維護補齊」，自動改標記為「・強制補齊」以確保雙方好友名單必定保留！
+    if (!targetUser.matchedHistory.some(h => h && String(h.partnerId).trim() === pid)) {
+        const baseSess = String(meta.session || '資料維護').trim();
+        const forcedSess = baseSess.includes('強制') ? baseSess : `${baseSess}・強制補齊`;
+        targetUser.matchedHistory.push(makeEntry(forcedSess, '資料維護補齊'));
+        targetUser.matchedHistory = normList(targetUser.matchedHistory);
+    }
+
+    return targetUser.matchedHistory.some(h => h && String(h.partnerId).trim() === pid);
+}
+
 function applySyncPairToUsersList(users, idA, idB, nowTs = Date.now()) {
     const pidA = String(idA || '').trim();
     const pidB = String(idB || '').trim();
     if (!pidA || !pidB || pidA === pidB) return false;
 
-    const uA = users.find(u => u && String(u.id).trim() === pidA);
-    const uB = users.find(u => u && String(u.id).trim() === pidB);
+    const uA = ensureUserRecordLoadedInList(users, pidA);
+    const uB = ensureUserRecordLoadedInList(users, pidB);
     if (!uA || !uB) return false;
 
     if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
@@ -435,60 +492,27 @@ function applySyncPairToUsersList(users, idA, idB, nowTs = Date.now()) {
     }
 
     const meta = inferDiscrepancyPairMetadata(pidA, pidB, uA, uB, nowTs);
-    uA.matchedHistory = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
-        ? CloudSync.mapToArray(uA.matchedHistory)
-        : (Array.isArray(uA.matchedHistory) ? [...uA.matchedHistory] : []);
-    uB.matchedHistory = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
-        ? CloudSync.mapToArray(uB.matchedHistory)
-        : (Array.isArray(uB.matchedHistory) ? [...uB.matchedHistory] : []);
+    const okA = appendOrHealMirrorHistoryEntry(uA, pidB, uB.nickname || `玩家_${pidB}`, meta);
+    const okB = appendOrHealMirrorHistoryEntry(uB, pidA, uA.nickname || `玩家_${pidA}`, meta);
 
-    if (!meta.existingInA) {
-        const entryForA = {
-            partnerId: pidB,
-            partnerName: uB.nickname || `玩家_${pidB}`,
-            session: meta.session,
-            matchedAt: meta.matchedAt,
-            igUnlocked: meta.igUnlocked,
-            continueVotes: []
-        };
-        if (meta.activityId) entryForA.activityId = String(meta.activityId);
-        if (meta.matchDetail) entryForA.matchDetail = String(meta.matchDetail);
-        uA.matchedHistory.push(entryForA);
+    if (!okA || !okB) {
+        return false;
     }
 
-    if (!meta.existingInB) {
-        const entryForB = {
-            partnerId: pidA,
-            partnerName: uA.nickname || `玩家_${pidA}`,
-            session: meta.session,
-            matchedAt: meta.matchedAt,
-            igUnlocked: meta.igUnlocked,
-            continueVotes: []
-        };
-        if (meta.activityId) entryForB.activityId = String(meta.activityId);
-        if (meta.matchDetail) entryForB.matchDetail = String(meta.matchDetail);
-        uB.matchedHistory.push(entryForB);
-    }
+    const entryA = uA.matchedHistory.find(h => h && String(h.partnerId).trim() === pidB) || null;
+    const entryB = uB.matchedHistory.find(h => h && String(h.partnerId).trim() === pidA) || null;
 
-    if (typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function') {
-        uA.matchedHistory = CloudSync.normalizeMatchedHistoryList(uA.matchedHistory);
-        uB.matchedHistory = CloudSync.normalizeMatchedHistoryList(uB.matchedHistory);
-    }
-
-    const hasAInFinal = uA.matchedHistory.some(h => String(h.partnerId).trim() === pidB);
-    const hasBInFinal = uB.matchedHistory.some(h => String(h.partnerId).trim() === pidA);
-
-    if (hasAInFinal && (!uA.matchedWithId || !uA.matchedHistory.some(h => String(h.partnerId).trim() === String(uA.matchedWithId).trim()))) {
+    if (!uA.matchedWithId || !uA.matchedHistory.some(h => String(h.partnerId).trim() === String(uA.matchedWithId).trim())) {
         uA.matchedWithId = pidB;
         uA.matchedWithName = uB.nickname || `玩家_${pidB}`;
-        uA.matchedSession = meta.session;
-        uA.matchedAt = meta.matchedAt;
+        uA.matchedSession = (entryA && entryA.session) || meta.session;
+        uA.matchedAt = (entryA && entryA.matchedAt) || meta.matchedAt;
     }
-    if (hasBInFinal && (!uB.matchedWithId || !uB.matchedHistory.some(h => String(h.partnerId).trim() === String(uB.matchedWithId).trim()))) {
+    if (!uB.matchedWithId || !uB.matchedHistory.some(h => String(h.partnerId).trim() === String(uB.matchedWithId).trim())) {
         uB.matchedWithId = pidA;
         uB.matchedWithName = uA.nickname || `玩家_${pidA}`;
-        uB.matchedSession = meta.session;
-        uB.matchedAt = meta.matchedAt;
+        uB.matchedSession = (entryB && entryB.session) || meta.session;
+        uB.matchedAt = (entryB && entryB.matchedAt) || meta.matchedAt;
     }
 
     if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
@@ -502,7 +526,39 @@ function applySyncPairToUsersList(users, idA, idB, nowTs = Date.now()) {
     return true;
 }
 
-function manualResolveSyncPair(idA, idB) {
+async function persistRepairedUsersDirect(users, targetIds) {
+    const idSet = new Set((Array.isArray(targetIds) ? targetIds : []).map(x => String(x || '').trim()).filter(Boolean));
+    if (Array.isArray(users)) {
+        users.forEach(u => {
+            if (u && u.id) {
+                u.backupCode = generatePlayerBackupCode(u, users);
+            }
+        });
+    }
+    const nextRaw = JSON.stringify(users);
+    AdminMemoryCache.usersRaw = nextRaw;
+    AdminMemoryCache.users = users;
+    localStorage.setItem(USERS_KEY, nextRaw);
+    if (typeof LocalJsonCache !== 'undefined') {
+        LocalJsonCache.invalidate(USERS_KEY);
+    }
+
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+        const tasks = [];
+        idSet.forEach(pid => {
+            const targetU = users.find(u => u && String(u.id).trim() === pid);
+            if (targetU && !CloudSync.isUserDeleted(pid)) {
+                tasks.push(CloudSync.upsertUser(targetU, true, { isMatchMutation: true }));
+            }
+        });
+        if (tasks.length > 0) {
+            await Promise.all(tasks);
+        }
+    }
+    renderAdminAll(true);
+}
+
+async function manualResolveSyncPair(idA, idB) {
     const pidA = String(idA || '').trim();
     const pidB = String(idB || '').trim();
     if (!pidA || !pidB) return;
@@ -512,8 +568,8 @@ function manualResolveSyncPair(idA, idB) {
         AdminMemoryCache.invalidate('chats');
     }
     const users = getUsers();
-    const uA = users.find(u => String(u.id).trim() === pidA);
-    const uB = users.find(u => String(u.id).trim() === pidB);
+    const uA = ensureUserRecordLoadedInList(users, pidA);
+    const uB = ensureUserRecordLoadedInList(users, pidB);
     if (!uA || !uB) {
         alert('其中一方玩家已不存在於會員列表中，無法補齊雙向配對，請改用「解除配對」。');
         return;
@@ -524,19 +580,18 @@ function manualResolveSyncPair(idA, idB) {
     }
 
     const ok = applySyncPairToUsersList(users, pidA, pidB, Date.now());
-    if (!ok) return;
-
-    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
-        AdminMemoryCache.invalidate('users');
-        AdminMemoryCache.invalidate('chats');
+    if (!ok) {
+        alert('⚠️ 補齊雙方好友名單失敗，請確認兩位玩家帳號狀態後再試。');
+        return;
     }
-    saveUsers(users, { isMatchMutation: true, targetIds: [pidA, pidB] });
+
+    await persistRepairedUsersDirect(users, [pidA, pidB]);
     appendLog(`<span class="text-emerald-300">[資料維護補齊]</span> 管理員已補齊 <strong>${uA.nickname} (ID:${pidA})</strong> ⇄ <strong>${uB.nickname} (ID:${pidB})</strong> 的雙方好友名單與聊天室紀錄。`);
     runRepairMatchesFromChats(true);
     alert(`✅ 已成功補齊「${uA.nickname} (ID:${pidA})」與「${uB.nickname} (ID:${pidB})」的雙方好友名單！`);
 }
 
-function manualBatchSyncAllDiscrepancies() {
+async function manualBatchSyncAllDiscrepancies() {
     if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
         AdminMemoryCache.invalidate('users');
         AdminMemoryCache.invalidate('chats');
@@ -584,11 +639,7 @@ function manualBatchSyncAllDiscrepancies() {
         return;
     }
 
-    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
-        AdminMemoryCache.invalidate('users');
-        AdminMemoryCache.invalidate('chats');
-    }
-    saveUsers(users, { isMatchMutation: true, targetIds: Array.from(affectedIds) });
+    await persistRepairedUsersDirect(users, Array.from(affectedIds));
     appendLog(`<span class="text-emerald-300">[資料維護一鍵補齊]</span> 管理員已一鍵補齊 <strong>${repairedCount} 組</strong>（${affectedIds.size} 位玩家）的雙方好友名單與聊天室紀錄。`);
     runRepairMatchesFromChats(true);
     alert(`✅ 一鍵補齊完成！共補齊 ${repairedCount} 組（${affectedIds.size} 位玩家）的雙方好友名單，前後台已同步更新。`);
