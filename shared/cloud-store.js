@@ -1886,6 +1886,7 @@ const Store = {
                 warningReason: state.warningReason || '',
                 isMatchBanned: Boolean(authMatchSource.isMatchBanned),
                 isChatBanned: Boolean(authMatchSource.isChatBanned),
+                readMailIds: Array.isArray(state.readMailIds) ? Array.from(new Set(state.readMailIds.map(String))) : [],
                 registeredSessions: state.isWarnedAccount ? [] : (Array.isArray(state.registeredSessions) ? state.registeredSessions : []),
                 exactMatchCriteria: state.exactMatchCriteria || {},
                 mustMatchKeys: (typeof normalizeMustMatchKeysList === 'function')

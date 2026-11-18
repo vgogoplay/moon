@@ -71,6 +71,60 @@ function renderMailboxList() {
     }).join('');
 }
 
+function recordSinglePlayerMailReadReceipt(mailObj) {
+    if (!mailObj || !mailObj.id) return;
+    const targetId = String(mailObj.targetId || '').trim();
+    if (!targetId || targetId.toUpperCase() === 'ALL') return;
+    const myPid = String((typeof appState !== 'undefined' && appState && appState.playerId) || '').trim();
+    if (!myPid || myPid !== targetId) return;
+    if (mailObj.isReadByTarget) return;
+
+    const nowTs = Date.now();
+    const readAtStr = new Date(nowTs).toLocaleString('zh-TW', { hour12: false });
+    const readerName = String((appState.profile && appState.profile.nickname) || '').trim();
+    const patchPayload = {
+        isReadByTarget: true,
+        readByPlayerId: myPid,
+        readByPlayerName: readerName,
+        readAtTs: nowTs,
+        readAtStr: readAtStr
+    };
+
+    try {
+        const allMails = Store.getMailbox();
+        const idx = allMails.findIndex(m => m && String(m.id) === String(mailObj.id));
+        if (idx >= 0) {
+            allMails[idx] = { ...allMails[idx], ...patchPayload };
+            localStorage.setItem(MAILBOX_KEY, JSON.stringify(allMails));
+            if (typeof LocalJsonCache !== 'undefined') {
+                LocalJsonCache.invalidate(MAILBOX_KEY);
+            }
+        }
+    } catch (e) {}
+
+    if (typeof CloudSync !== 'undefined') {
+        if (CloudSync.initialized && typeof CloudSync.patchNode === 'function') {
+            CloudSync.patchNode(`${MAILBOX_KEY}/${mailObj.id}`, patchPayload);
+        } else if (typeof CloudSync.putNode === 'function') {
+            CloudSync.putNode(`${MAILBOX_KEY}/${mailObj.id}`, { ...mailObj, ...patchPayload });
+        }
+    }
+}
+
+function syncAlreadyReadSingleMailsReceipts() {
+    const myPid = String((typeof appState !== 'undefined' && appState && appState.playerId) || '').trim();
+    if (!myPid || !Array.isArray(appState.readMailIds) || appState.readMailIds.length === 0) return;
+    const readSet = new Set(appState.readMailIds.map(String));
+    const allMails = Store.getMailbox();
+    allMails.forEach(m => {
+        if (!m || !m.id) return;
+        const tId = String(m.targetId || '').trim();
+        if (tId && tId.toUpperCase() !== 'ALL' && tId === myPid && !m.isReadByTarget && readSet.has(String(m.id))) {
+            recordSinglePlayerMailReadReceipt(m);
+        }
+    });
+}
+
 function viewMailDetail(mailId) {
     const mails = getPlayerMails();
     const mail = mails.find(m => m.id === mailId);
@@ -84,6 +138,7 @@ function viewMailDetail(mailId) {
         Store.save(appState);
         updateMailboxBadge();
     }
+    recordSinglePlayerMailReadReceipt(mail);
 
     document.getElementById('mailDetailTitle').textContent = mail.title || '管理員通知信件';
     document.getElementById('mailDetailTime').textContent = mail.updatedAt ? `${mail.createdAt || ''}（已更新）` : (mail.createdAt || '');

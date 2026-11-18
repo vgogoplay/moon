@@ -498,12 +498,18 @@ function sendAdminMailboxMessage() {
         targetLabel: targetLabel,
         title: title,
         content: content,
+        isReadByTarget: false,
+        readAtTs: null,
+        readAtStr: '',
         ts: Date.now(),
         createdAt: new Date().toLocaleString('zh-TW')
     };
     mails.unshift(newMail);
     saveMailbox(mails);
     CloudSync.putNode(`${MAILBOX_KEY}/${newMail.id}`, newMail);
+    if (typeof checkSinglePlayerMailReadStatusDaily === 'function') {
+        checkSinglePlayerMailReadStatusDaily({ force: true, skipRemoteFetch: true });
+    }
 
     document.getElementById('mailTitleInput').value = '';
     document.getElementById('mailContentInput').value = '';
@@ -573,12 +579,24 @@ function saveEditedAdminMailboxMessage(e) {
         : (targetUser ? `${targetUser.nickname} (ID:${nextTargetId})` : `玩家 ID:${nextTargetId}`);
     const updatedAtStr = new Date().toLocaleString('zh-TW');
 
+    const recipientChanged = String(mails[idx].targetId || '') !== String(nextTargetId);
+    const nextReadState = recipientChanged
+        ? { isReadByTarget: false, readByPlayerId: null, readByPlayerName: null, readAtTs: null, readAtStr: '' }
+        : {
+            isReadByTarget: Boolean(mails[idx].isReadByTarget),
+            readByPlayerId: mails[idx].readByPlayerId || null,
+            readByPlayerName: mails[idx].readByPlayerName || null,
+            readAtTs: mails[idx].readAtTs || null,
+            readAtStr: mails[idx].readAtStr || ''
+        };
+
     mails[idx] = {
         ...mails[idx],
         targetId: nextTargetId,
         targetLabel: nextTargetLabel,
         title: nextTitle,
         content: nextContent,
+        ...nextReadState,
         updatedAt: updatedAtStr
     };
     saveMailbox(mails);
@@ -590,11 +608,15 @@ function saveEditedAdminMailboxMessage(e) {
                 targetLabel: nextTargetLabel,
                 title: nextTitle,
                 content: nextContent,
+                ...nextReadState,
                 updatedAt: updatedAtStr
             });
         } else {
             CloudSync.putNode(`${MAILBOX_KEY}/${mid}`, mails[idx]);
         }
+    }
+    if (typeof checkSinglePlayerMailReadStatusDaily === 'function') {
+        checkSinglePlayerMailReadStatusDaily({ force: true, skipRemoteFetch: true });
     }
 
     closeEditAdminMailboxModal();
@@ -604,6 +626,151 @@ function saveEditedAdminMailboxMessage(e) {
 function deleteMailboxMessage(mailId) {
     saveMailbox(getMailbox().filter(m => m.id !== mailId));
     CloudSync.deleteNode(`${MAILBOX_KEY}/${mailId}`);
+    if (typeof checkSinglePlayerMailReadStatusDaily === 'function') {
+        checkSinglePlayerMailReadStatusDaily({ force: true, skipRemoteFetch: true });
+    }
+}
+
+const DAILY_MAIL_READ_CHECK_DAY_KEY = 'yuelao_last_daily_mail_read_check_day';
+const DAILY_MAIL_READ_CHECK_REPORT_KEY = 'yuelao_daily_mail_read_check_report';
+
+function getDailySingleMailReadReport() {
+    try {
+        const raw = localStorage.getItem(DAILY_MAIL_READ_CHECK_REPORT_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return (parsed && typeof parsed === 'object') ? parsed : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function checkSinglePlayerMailReadStatusDaily(options = {}) {
+    const { force = false, skipRemoteFetch = false } = options;
+    const nowTs = Date.now();
+    const todayStr = new Date(nowTs).toDateString();
+
+    if (!force) {
+        try {
+            if (localStorage.getItem(DAILY_MAIL_READ_CHECK_DAY_KEY) === todayStr) {
+                return getDailySingleMailReadReport();
+            }
+        } catch (e) {}
+    }
+
+    if (!skipRemoteFetch && typeof CloudSync !== 'undefined' && CloudSync.dbUrl && CloudSync.inFlightWrites === 0) {
+        try {
+            const encodedMailPath = CloudSync.encodePath(MAILBOX_KEY);
+            const res = await fetch(`${CloudSync.dbUrl}/${encodedMailPath}.json`, { method: 'GET', cache: 'no-store' });
+            if (res.ok) {
+                const remoteMailRaw = await res.json();
+                const remoteMails = CloudSync.mapToArray(remoteMailRaw);
+                remoteMails.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+                const nextMailJson = JSON.stringify(remoteMails);
+                if (localStorage.getItem(MAILBOX_KEY) !== nextMailJson) {
+                    localStorage.setItem(MAILBOX_KEY, nextMailJson);
+                    if (typeof AdminMemoryCache !== 'undefined') AdminMemoryCache.invalidate('mailbox');
+                }
+            }
+        } catch (e) {}
+    }
+
+    const mails = getMailbox();
+    const users = getUsers();
+    const userById = new Map();
+    users.forEach(u => {
+        if (u && u.id) userById.set(String(u.id).trim(), u);
+    });
+
+    let mailboxPatched = false;
+    const checkedItems = [];
+
+    mails.forEach(m => {
+        if (!m || !m.id) return;
+        const tId = String(m.targetId || '').trim();
+        if (!tId || tId.toUpperCase() === 'ALL') return;
+
+        const targetU = userById.get(tId);
+        const userReadIds = (targetU && Array.isArray(targetU.readMailIds)) ? targetU.readMailIds.map(String) : [];
+        let isRead = Boolean(m.isReadByTarget);
+
+        if (!isRead && userReadIds.includes(String(m.id))) {
+            isRead = true;
+            m.isReadByTarget = true;
+            m.readByPlayerId = tId;
+            if (targetU && targetU.nickname) m.readByPlayerName = String(targetU.nickname);
+            if (!m.readAtTs) m.readAtTs = nowTs;
+            if (!m.readAtStr) m.readAtStr = new Date(nowTs).toLocaleString('zh-TW', { hour12: false });
+            mailboxPatched = true;
+            if (typeof CloudSync !== 'undefined' && CloudSync.initialized && typeof CloudSync.patchNode === 'function') {
+                CloudSync.patchNode(`${MAILBOX_KEY}/${m.id}`, {
+                    isReadByTarget: true,
+                    readByPlayerId: tId,
+                    readByPlayerName: m.readByPlayerName || '',
+                    readAtTs: m.readAtTs,
+                    readAtStr: m.readAtStr
+                });
+            }
+        }
+
+        const recipientName = (targetU && targetU.nickname)
+            ? `${targetU.nickname} (ID:${tId})`
+            : (m.targetLabel || `ID:${tId}`);
+
+        checkedItems.push({
+            mailId: String(m.id),
+            targetId: tId,
+            recipientLabel: recipientName,
+            title: String(m.title || ''),
+            isRead,
+            readAtStr: String(m.readAtStr || '')
+        });
+    });
+
+    if (mailboxPatched) {
+        const nextRaw = JSON.stringify(mails);
+        if (typeof AdminMemoryCache !== 'undefined') {
+            AdminMemoryCache.mailboxRaw = nextRaw;
+            AdminMemoryCache.mailbox = mails;
+        }
+        localStorage.setItem(MAILBOX_KEY, nextRaw);
+    }
+
+    const checkedAtStr = new Date(nowTs).toLocaleString('zh-TW', { hour12: false });
+    const report = {
+        checkedDateStr: todayStr,
+        checkedAtTs: nowTs,
+        checkedAtStr,
+        totalSingleCount: checkedItems.length,
+        readCount: checkedItems.filter(i => i.isRead).length,
+        unreadCount: checkedItems.filter(i => !i.isRead).length,
+        items: checkedItems.slice(0, 15)
+    };
+
+    try {
+        localStorage.setItem(DAILY_MAIL_READ_CHECK_DAY_KEY, todayStr);
+        localStorage.setItem(DAILY_MAIL_READ_CHECK_REPORT_KEY, JSON.stringify(report));
+    } catch (e) {}
+
+    if (typeof renderAdminAll === 'function') {
+        renderAdminAll(true);
+    }
+    return report;
+}
+
+async function runManualSingleMailReadCheck() {
+    const report = await checkSinglePlayerMailReadStatusDaily({ force: true, skipRemoteFetch: false });
+    if (!report) return;
+    if (report.totalSingleCount === 0) {
+        alert('📅 目前尚無指定單一玩家的信件需要追蹤。');
+        return;
+    }
+    const lines = report.items.map(item =>
+        item.isRead
+            ? `✅ ${item.recipientLabel}「${item.title}」：已讀${item.readAtStr ? `（${item.readAtStr}）` : ''}`
+            : `⏳ ${item.recipientLabel}「${item.title}」：尚未讀取`
+    );
+    alert(`📅 單一玩家信件已讀檢查完成（${report.checkedAtStr}）\n\n總計 ${report.totalSingleCount} 封（✅ 已讀 ${report.readCount} 封 ／ ⏳ 尚未讀取 ${report.unreadCount} 封）：\n\n${lines.join('\n')}`);
 }
 
 function getFateWallPosts() {
@@ -1089,6 +1256,9 @@ async function unlockAdminUI() {
                 AdminMemoryCache.invalidate('users');
             }
         }
+        if (typeof checkSinglePlayerMailReadStatusDaily === 'function') {
+            checkSinglePlayerMailReadStatusDaily({ force: false, skipRemoteFetch: true });
+        }
         renderAdminAll(false);
     }).catch(() => {});
 }
@@ -1218,6 +1388,9 @@ setInterval(() => {
                 AdminMemoryCache.invalidate('chats');
                 AdminMemoryCache.invalidate('users');
             }
+        }
+        if (typeof checkSinglePlayerMailReadStatusDaily === 'function') {
+            checkSinglePlayerMailReadStatusDaily({ force: false, skipRemoteFetch: true });
         }
     }
     pollSharedStorageChanges();

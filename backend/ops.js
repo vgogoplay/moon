@@ -335,32 +335,109 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
         }
     }
 
+    const mailSummaryBox = document.getElementById('adminMailReadCheckSummaryBox');
     const mailListBox = document.getElementById('adminSentMailsList');
-    if (mailListBox) {
+    if (mailListBox || mailSummaryBox) {
         const sentMails = getMailbox();
-        if (sentMails.length === 0) {
-            mailListBox.innerHTML = `<p class="text-xs text-gray-400">尚未發送任何信件給前台玩家。</p>`;
-        } else {
-            mailListBox.innerHTML = sentMails.slice(0, 10).map(m => {
-                const editedTag = m.updatedAt
-                    ? `<span class="text-[10px] px-1.5 py-0.2 rounded bg-sky-50 border border-sky-200 text-sky-700 font-semibold ml-1.5">已編輯</span>`
-                    : '';
-                return `
-                <div class="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-white border border-pink-200 text-xs">
-                    <div class="min-w-0 flex-1">
-                        <span class="px-2 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold mr-1.5">收件：${escapeAdminHtml(m.targetLabel || m.targetId)}</span>
-                        <strong class="text-[#5e464a]">${escapeAdminHtml(m.title)}</strong>
-                        <span class="text-gray-500 ml-1.5">— ${escapeAdminHtml(m.content)}</span>
-                        <span class="text-[10px] text-gray-400 ml-2">(${escapeAdminHtml(m.createdAt || '')})</span>
-                        ${editedTag}
+        const usersList = (typeof getUsers === 'function') ? getUsers() : [];
+        const userByIdMap = new Map();
+        usersList.forEach(u => {
+            if (u && u.id) userByIdMap.set(String(u.id).trim(), u);
+        });
+
+        const resolveSingleMailReadInfo = (m) => {
+            const tId = String((m && m.targetId) || '').trim();
+            if (!tId || tId.toUpperCase() === 'ALL') {
+                return { isSingle: false, isRead: false, readAtStr: '' };
+            }
+            const targetU = userByIdMap.get(tId);
+            const userReadIds = (targetU && Array.isArray(targetU.readMailIds)) ? targetU.readMailIds.map(String) : [];
+            const isRead = Boolean(m.isReadByTarget || userReadIds.includes(String(m.id)));
+            return {
+                isSingle: true,
+                isRead,
+                readAtStr: String(m.readAtStr || '').trim()
+            };
+        };
+
+        if (mailSummaryBox) {
+            const dailyReport = (typeof getDailySingleMailReadReport === 'function') ? getDailySingleMailReadReport() : null;
+            const singleMails = sentMails.filter(m => {
+                const tId = String((m && m.targetId) || '').trim();
+                return tId !== '' && tId.toUpperCase() !== 'ALL';
+            });
+            const readSingleMails = singleMails.filter(m => resolveSingleMailReadInfo(m).isRead);
+            const unreadSingleMails = singleMails.filter(m => !resolveSingleMailReadInfo(m).isRead);
+            const lastCheckedLabel = (dailyReport && dailyReport.checkedAtStr)
+                ? `最近檢查：${escapeAdminHtml(dailyReport.checkedAtStr)}`
+                : '每日自動檢查 1 次';
+
+            const chipsHtml = singleMails.length === 0
+                ? `<span class="text-[11px] text-gray-400">目前尚無指定單一玩家的信件（發給單一玩家時將自動追蹤已讀狀態）。</span>`
+                : singleMails.slice(0, 8).map(m => {
+                    const info = resolveSingleMailReadInfo(m);
+                    const recLabel = escapeAdminHtml(m.targetLabel || `ID:${m.targetId}`);
+                    const titleShort = escapeAdminHtml(m.title || '');
+                    if (info.isRead) {
+                        return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] font-bold">✅ ${recLabel}「${titleShort}」已讀${info.readAtStr ? `（${escapeAdminHtml(info.readAtStr)}）` : ''}</span>`;
+                    }
+                    return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-300 text-amber-800 text-[11px] font-bold">⏳ ${recLabel}「${titleShort}」尚未讀取</span>`;
+                }).join('');
+
+            mailSummaryBox.innerHTML = `
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-bold text-[#8f4452]">📅 單一玩家信件已讀追蹤（每日自動檢查 1 次）</span>
+                        <span class="px-2 py-0.5 rounded-full bg-pink-50 border border-pink-200 text-[#8f4452] text-[11px] font-semibold">
+                            單一信件 ${singleMails.length} 封：✅ 已讀 ${readSingleMails.length} ／ ⏳ 未讀 ${unreadSingleMails.length}
+                        </span>
+                        <span class="text-[11px] text-gray-400">${lastCheckedLabel}</span>
                     </div>
-                    <div class="flex items-center gap-2.5 shrink-0">
-                        <button type="button" onclick="openEditAdminMailboxModal('${escapeAdminHtml(m.id)}')" class="text-sky-600 hover:underline font-semibold">✏️ 編輯</button>
-                        <button type="button" onclick="deleteMailboxMessage('${escapeAdminHtml(m.id)}')" class="text-rose-500 hover:underline font-semibold">收回刪除</button>
-                    </div>
+                    <button type="button" onclick="runManualSingleMailReadCheck()" class="px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-300 text-[#8f4452] text-[11px] font-bold hover:bg-rose-100 transition shrink-0">
+                        🔍 立即檢查已讀狀態
+                    </button>
                 </div>
-                `;
-            }).join('');
+                <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    ${chipsHtml}
+                </div>
+            `;
+        }
+
+        if (mailListBox) {
+            if (sentMails.length === 0) {
+                mailListBox.innerHTML = `<p class="text-xs text-gray-400">尚未發送任何信件給前台玩家。</p>`;
+            } else {
+                mailListBox.innerHTML = sentMails.slice(0, 10).map(m => {
+                    const editedTag = m.updatedAt
+                        ? `<span class="text-[10px] px-1.5 py-0.2 rounded bg-sky-50 border border-sky-200 text-sky-700 font-semibold ml-1.5">已編輯</span>`
+                        : '';
+                    const readInfo = resolveSingleMailReadInfo(m);
+                    let readBadgeHtml = '';
+                    if (!readInfo.isSingle) {
+                        readBadgeHtml = `<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px] font-bold mr-1.5">📢 全體公告</span>`;
+                    } else if (readInfo.isRead) {
+                        readBadgeHtml = `<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-[10px] font-bold mr-1.5">✅ 玩家已讀${readInfo.readAtStr ? `（${escapeAdminHtml(readInfo.readAtStr)}）` : ''}</span>`;
+                    } else {
+                        readBadgeHtml = `<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-bold mr-1.5">⏳ 尚未讀取</span>`;
+                    }
+                    return `
+                    <div class="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-white border border-pink-200 text-xs">
+                        <div class="min-w-0 flex-1">
+                            <span class="px-2 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold mr-1.5">收件：${escapeAdminHtml(m.targetLabel || m.targetId)}</span>
+                            ${readBadgeHtml}
+                            <strong class="text-[#5e464a]">${escapeAdminHtml(m.title)}</strong>
+                            <span class="text-gray-500 ml-1.5">— ${escapeAdminHtml(m.content)}</span>
+                            <span class="text-[10px] text-gray-400 ml-2">(${escapeAdminHtml(m.createdAt || '')})</span>
+                            ${editedTag}
+                        </div>
+                        <div class="flex items-center gap-2.5 shrink-0">
+                            <button type="button" onclick="openEditAdminMailboxModal('${escapeAdminHtml(m.id)}')" class="text-sky-600 hover:underline font-semibold">✏️ 編輯</button>
+                            <button type="button" onclick="deleteMailboxMessage('${escapeAdminHtml(m.id)}')" class="text-rose-500 hover:underline font-semibold">收回刪除</button>
+                        </div>
+                    </div>
+                    `;
+                }).join('');
+            }
         }
     }
 

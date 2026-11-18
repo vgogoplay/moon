@@ -98,6 +98,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (typeof renderWishWallTab === 'function') renderWishWallTab(true);
     renderProfileForm();
     refreshAllUI();
+    if (typeof syncAlreadyReadSingleMailsReceipts === 'function') {
+        syncAlreadyReadSingleMailsReceipts();
+    }
     updateMailboxBadge();
     if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
 
