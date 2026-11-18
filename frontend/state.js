@@ -420,17 +420,25 @@ function syncFromSharedStorage() {
             }
         }
 
-        // 3. 同步所有已配對好友（不限數量，以正規化後的 matchedHistory 為唯一真實來源，避免殘留 matchedWithId 幽靈復活）
-        const hasHistoryField = Boolean(me && me.matchedHistory !== undefined && me.matchedHistory !== null);
+        // 3. 同步所有已配對好友（不限數量，聯集 matchedHistory 與 matchedWithId 並排除已解除配對組合）
         const historyList = (me && typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
             ? CloudSync.normalizeMatchedHistoryList(me.matchedHistory)
             : ((me && Array.isArray(me.matchedHistory)) ? [...me.matchedHistory] : []);
-        if (!hasHistoryField && me && me.matchedSession && me.matchedWithId && !historyList.some(h => String(h.partnerId) === String(me.matchedWithId))) {
+        const meDirectPartnerId = me && me.matchedWithId ? String(me.matchedWithId).trim() : '';
+        const isDirectUnmatched = Boolean(
+            me && meDirectPartnerId &&
+            typeof CloudSync !== 'undefined' &&
+            typeof CloudSync.isPairRecentlyUnmatched === 'function' &&
+            CloudSync.isPairRecentlyUnmatched(me.id, meDirectPartnerId)
+        );
+        if (me && meDirectPartnerId && !isDirectUnmatched && !historyList.some(h => String(h.partnerId) === meDirectPartnerId)) {
+            const directSessStr = String(me.matchedSession || '').trim();
             historyList.push({
-                session: me.matchedSession,
-                partnerId: String(me.matchedWithId),
+                session: directSessStr,
+                partnerId: meDirectPartnerId,
                 partnerName: me.matchedWithName || '',
                 matchedAt: me.matchedAt || Date.now(),
+                isForceRepaired: Boolean(directSessStr.includes('・強制補齊')),
                 continueVotes: []
             });
         }
@@ -461,12 +469,18 @@ function syncFromSharedStorage() {
                 const syncedMsgs = ChatStore.ensureThread(me.id, partner.id, initialThread);
                 const votes = Array.isArray(item.continueVotes) ? item.continueVotes.map(String) : [];
 
+                const isForceProtectedItem = Boolean(
+                    item.isForceRepaired ||
+                    String(item.session || '').includes('・強制補齊') ||
+                    String(item.matchDetail || '').includes('強制補齊')
+                );
                 appState.friends.push({
                     id: String(partner.id),
                     nickname: partner.nickname,
                     sessionLabel: item.session,
                     matchedAt: now,
                     igUnlocked: Boolean(item.igUnlocked),
+                    isForceRepaired: isForceProtectedItem,
                     myContinue: votes.includes(String(me.id)),
                     partnerContinue: votes.includes(String(partner.id)),
                     profile: { ...partner },
@@ -517,6 +531,19 @@ function syncFromSharedStorage() {
                 const nextIgUnlocked = Boolean(histItem.igUnlocked);
                 if (Boolean(f.igUnlocked) !== nextIgUnlocked) {
                     f.igUnlocked = nextIgUnlocked;
+                    stateChanged = true;
+                }
+                const nextForceProt = Boolean(
+                    histItem.isForceRepaired ||
+                    String(histItem.session || '').includes('・強制補齊') ||
+                    String(histItem.matchDetail || '').includes('強制補齊')
+                );
+                if (Boolean(f.isForceRepaired) !== nextForceProt) {
+                    f.isForceRepaired = nextForceProt;
+                    stateChanged = true;
+                }
+                if (histItem.session && f.sessionLabel !== histItem.session) {
+                    f.sessionLabel = histItem.session;
                     stateChanged = true;
                 }
                 const votes = Array.isArray(histItem.continueVotes) ? histItem.continueVotes.map(String) : [];

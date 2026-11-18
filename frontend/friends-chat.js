@@ -585,7 +585,7 @@ function renderFriendsSection() {
                                 ` : ''}
                                 ${hasCardUnread ? `<span class="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold shrink-0">新訊息</span>` : ''}
                             </div>
-                            <p class="text-[11px] text-gray-500 truncate">${friend.sessionLabel || '七日緣分'} ・ ${friend.profile.region ? friend.profile.region + ' ' : ''}${friend.profile.city || '同城緣分'}</p>
+                            <p class="text-[11px] text-gray-500 truncate">${friend.sessionLabel || '七日緣分'}${(friend.isForceRepaired && !String(friend.sessionLabel || '').includes('・強制補齊')) ? '<span class="text-amber-700 font-bold">・強制補齊</span>' : ''} ・ ${friend.profile.region ? friend.profile.region + ' ' : ''}${friend.profile.city || '同城緣分'}</p>
                         </div>
                     </div>
                     <div class="flex flex-col items-end gap-1.5 shrink-0">

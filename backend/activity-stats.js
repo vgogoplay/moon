@@ -317,12 +317,29 @@ function getSavedSessionMatchResultsMap() {
     const key = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined')
         ? SESSION_MATCH_RESULTS_KEY
         : 'yuelao_session_match_results';
+    const merged = {};
     try {
-        const raw = JSON.parse(localStorage.getItem(key) || '{}');
-        return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
-    } catch (e) {
-        return {};
+        const localRaw = JSON.parse(localStorage.getItem(key) || '{}');
+        if (localRaw && typeof localRaw === 'object' && !Array.isArray(localRaw)) {
+            Object.assign(merged, localRaw);
+        }
+    } catch (e) {}
+    if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[key] && typeof CloudSync.tree[key] === 'object') {
+        Object.entries(CloudSync.tree[key]).forEach(([docK, cSnap]) => {
+            if (!cSnap || typeof cSnap !== 'object') return;
+            const lSnap = merged[docK];
+            if (!lSnap) {
+                merged[docK] = cSnap;
+            } else {
+                const lPairs = Array.isArray(lSnap.matchedPairs) ? lSnap.matchedPairs : [];
+                const cPairs = Array.isArray(cSnap.matchedPairs) ? cSnap.matchedPairs : [];
+                if (cPairs.length > lPairs.length) {
+                    merged[docK] = cSnap;
+                }
+            }
+        });
     }
+    return merged;
 }
 
 function formatStatsUserCriteriaHtml(u, archiveRec = null) {
@@ -619,13 +636,17 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
         // 嚴格 1 對 1 雙向互鎖配對表：唯有雙方皆尚未在本場次配對時才建立雙向連線，確保 成功配對人數 = 成功對數 × 2（如 72 人 = 36 對）
         let hasRawDuplicateInSession = false;
         const sessionLinksByPid = new Map();
-        const tryBindSymmetric1to1Pair = (idA, nameA, idB, nameB) => {
+        const tryBindSymmetric1to1Pair = (idA, nameA, idB, nameB, isForce = false) => {
             const a = String(idA || '').trim();
             const b = String(idB || '').trim();
             if (!a || !b || a === b) return;
             const mapA = sessionLinksByPid.get(a);
             const mapB = sessionLinksByPid.get(b);
             if (mapA && mapA.has(b) && mapB && mapB.has(a)) {
+                if (isForce) {
+                    mapA.get(b).isForceRepaired = true;
+                    mapB.get(a).isForceRepaired = true;
+                }
                 return;
             }
             if ((mapA && mapA.size >= 1) || (mapB && mapB.size >= 1)) {
@@ -633,9 +654,9 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                 return;
             }
             const nextA = new Map();
-            nextA.set(b, { partnerId: b, partnerName: nameB || '' });
+            nextA.set(b, { partnerId: b, partnerName: nameB || '', isForceRepaired: Boolean(isForce) });
             const nextB = new Map();
-            nextB.set(a, { partnerId: a, partnerName: nameA || '' });
+            nextB.set(a, { partnerId: a, partnerName: nameA || '', isForceRepaired: Boolean(isForce) });
             sessionLinksByPid.set(a, nextA);
             sessionLinksByPid.set(b, nextB);
         };
@@ -656,11 +677,13 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                     regUserMap.set(pId, userById.get(pId) || { id: pId, nickname: lk.partnerName || `玩家_${pId}`, gender: pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : '') });
                 }
                 const pUser = userById.get(pId);
+                const isForceLk = Boolean(lk.isForceRepaired || String(lk.session || '').includes('・強制補齊') || String(lk.matchDetail || '').includes('強制補齊'));
                 tryBindSymmetric1to1Pair(
                     uid,
                     u.nickname || `玩家_${uid}`,
                     pId,
-                    (pUser && pUser.nickname) || lk.partnerName || `玩家_${pId}`
+                    (pUser && pUser.nickname) || lk.partnerName || `玩家_${pId}`,
+                    isForceLk
                 );
             });
         });
@@ -724,7 +747,10 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                     const gBadgeHtml = pGender === '男' 
                         ? `<span class="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 font-bold text-[10px] ml-1">男</span>`
                         : (pGender === '女' ? `<span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold text-[10px] ml-1">女</span>` : '');
-                    return `💘 <strong>${escapeActStatHtml(pName)}</strong>${gBadgeHtml} <span class="font-mono text-gray-500">(ID:${escapeActStatHtml(pId)})</span>`;
+                    const forceTagHtml = lk.isForceRepaired
+                        ? `<span class="text-[10px] text-amber-800 font-bold ml-1">・強制補齊</span>`
+                        : '';
+                    return `💘 <strong>${escapeActStatHtml(pName)}</strong>${gBadgeHtml} <span class="font-mono text-gray-500">(ID:${escapeActStatHtml(pId)})</span>${forceTagHtml}`;
                 }).join('<br>');
                 const roleDesc = links.map(lk => {
                     const pId = String(lk.partnerId || '').trim();

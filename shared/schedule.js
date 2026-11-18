@@ -1157,6 +1157,7 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
             const patchFields = {};
             if (regularChanged) {
                 patchFields.registeredSessions = Array.isArray(u.registeredSessions) ? [...u.registeredSessions] : [];
+                patchFields.registeredSession = null;
                 if (patchFields.registeredSessions.length === 0) {
                     patchFields.exactMatchCriteria = {};
                     patchFields.mustMatchKeys = [];

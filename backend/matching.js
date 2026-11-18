@@ -205,18 +205,27 @@ function runRepairMatchesFromChats(silentWhenClean = false) {
         `;
     }).join('');
 
+    const repairableDiscrepancies = discrepancies.filter(item => item.userAExists && item.userBExists);
     resultEl.innerHTML = `
         <div class="p-3 rounded-xl bg-amber-50 border border-amber-300 space-y-2.5">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="text-xs font-bold text-amber-900">
                     ⚠️ 共檢查出 ${discrepancies.length} 組「會員列表」與「聊天紀錄」數據不一致的配對，請手動選擇處理方式：
                 </span>
-                ${discrepancies.length > 1 ? `
-                    <button type="button" onclick="manualBatchUnmatchAllDiscrepancies()"
-                        class="px-3 py-1.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-[11px] font-bold shadow-2xs transition">
-                        💔 一鍵全部解除異常配對 (${discrepancies.length} 組)
-                    </button>
-                ` : ''}
+                <div class="flex flex-wrap items-center gap-2">
+                    ${repairableDiscrepancies.length > 0 ? `
+                        <button type="button" onclick="manualBatchSyncAllDiscrepancies()"
+                            class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-2xs transition">
+                            🔄 一鍵補齊 雙方好友名單 (${repairableDiscrepancies.length} 組)
+                        </button>
+                    ` : ''}
+                    ${discrepancies.length > 1 ? `
+                        <button type="button" onclick="manualBatchUnmatchAllDiscrepancies()"
+                            class="px-3 py-1.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-[11px] font-bold shadow-2xs transition">
+                            💔 一鍵全部解除異常配對 (${discrepancies.length} 組)
+                        </button>
+                    ` : ''}
+                </div>
             </div>
             <div class="space-y-2">
                 ${cardsHtml}
@@ -325,6 +334,91 @@ function manualBatchUnmatchAllDiscrepancies() {
     runRepairMatchesFromChats(true);
 }
 
+function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
+    const pidA = String(idA || '').trim();
+    const pidB = String(idB || '').trim();
+    if (!pidA || !pidB || pidA === pidB) return null;
+
+    const uA = users.find(u => u && String(u.id).trim() === pidA);
+    const uB = users.find(u => u && String(u.id).trim() === pidB);
+    if (!uA || !uB) return null;
+
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
+        CloudSync.clearPairUnmatched(pidA, pidB);
+    }
+
+    uA.matchedHistory = Array.isArray(uA.matchedHistory)
+        ? uA.matchedHistory
+        : (uA.matchedHistory && typeof uA.matchedHistory === 'object' ? Object.values(uA.matchedHistory) : []);
+    uB.matchedHistory = Array.isArray(uB.matchedHistory)
+        ? uB.matchedHistory
+        : (uB.matchedHistory && typeof uB.matchedHistory === 'object' ? Object.values(uB.matchedHistory) : []);
+
+    const existingInA = uA.matchedHistory.find(h => h && String(h.partnerId).trim() === pidB);
+    const existingInB = uB.matchedHistory.find(h => h && String(h.partnerId).trim() === pidA);
+    const rawSharedSession = (existingInA && existingInA.session) || (existingInB && existingInB.session) || uA.matchedSession || uB.matchedSession || '資料維護補齊配對';
+    const sharedSession = rawSharedSession.includes('・強制補齊') ? rawSharedSession : `${rawSharedSession}・強制補齊`;
+    const sharedMatchedAt = Number((existingInA && existingInA.matchedAt) || (existingInB && existingInB.matchedAt) || uA.matchedAt || uB.matchedAt || nowTs);
+
+    if (!existingInA) {
+        uA.matchedHistory.push({
+            partnerId: pidB,
+            partnerName: uB.nickname || `玩家_${pidB}`,
+            session: sharedSession,
+            matchedAt: sharedMatchedAt,
+            igUnlocked: Boolean(existingInB && existingInB.igUnlocked),
+            isForceRepaired: true,
+            matchDetail: '・強制補齊',
+            continueVotes: []
+        });
+    } else {
+        existingInA.partnerName = uB.nickname || existingInA.partnerName || `玩家_${pidB}`;
+        existingInA.isForceRepaired = true;
+        existingInA.session = sharedSession;
+        existingInA.matchDetail = '・強制補齊';
+    }
+    if (!existingInB) {
+        uB.matchedHistory.push({
+            partnerId: pidA,
+            partnerName: uA.nickname || `玩家_${pidA}`,
+            session: sharedSession,
+            matchedAt: sharedMatchedAt,
+            igUnlocked: Boolean(existingInA && existingInA.igUnlocked),
+            isForceRepaired: true,
+            matchDetail: '・強制補齊',
+            continueVotes: []
+        });
+    } else {
+        existingInB.partnerName = uA.nickname || existingInB.partnerName || `玩家_${pidA}`;
+        existingInB.isForceRepaired = true;
+        existingInB.session = sharedSession;
+        existingInB.matchDetail = '・強制補齊';
+    }
+
+    if (!uA.matchedWithId || String(uA.matchedWithId).trim() === pidB) {
+        uA.matchedWithId = pidB;
+        uA.matchedWithName = uB.nickname || `玩家_${pidB}`;
+        uA.matchedSession = sharedSession;
+        uA.matchedAt = sharedMatchedAt;
+    }
+    if (!uB.matchedWithId || String(uB.matchedWithId).trim() === pidA) {
+        uB.matchedWithId = pidA;
+        uB.matchedWithName = uA.nickname || `玩家_${pidA}`;
+        uB.matchedSession = sharedSession;
+        uB.matchedAt = sharedMatchedAt;
+    }
+
+    if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
+        ChatStore.ensureThread(pidA, pidB, [{
+            senderId: 'system',
+            text: '🌸 月老已為你們補齊雙向紅線配對紀錄，祝聊天愉快！',
+            ts: nowTs
+        }]);
+    }
+
+    return { uA, uB, pidA, pidB };
+}
+
 function manualResolveSyncPair(idA, idB) {
     const pidA = String(idA || '').trim();
     const pidB = String(idB || '').trim();
@@ -342,68 +436,52 @@ function manualResolveSyncPair(idA, idB) {
         return;
     }
 
-    if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
-        CloudSync.clearPairUnmatched(pidA, pidB);
-    }
-
-    const nowTs = Date.now();
-    uA.matchedHistory = Array.isArray(uA.matchedHistory) ? uA.matchedHistory : [];
-    uB.matchedHistory = Array.isArray(uB.matchedHistory) ? uB.matchedHistory : [];
-
-    const existingInA = uA.matchedHistory.find(h => String(h.partnerId) === pidB);
-    const existingInB = uB.matchedHistory.find(h => String(h.partnerId) === pidA);
-    const sharedSession = (existingInA && existingInA.session) || (existingInB && existingInB.session) || uA.matchedSession || uB.matchedSession || '資料維護補齊配對';
-    const sharedMatchedAt = Number((existingInA && existingInA.matchedAt) || (existingInB && existingInB.matchedAt) || nowTs);
-
-    if (!existingInA) {
-        uA.matchedHistory.push({
-            partnerId: pidB,
-            partnerName: uB.nickname || `玩家_${pidB}`,
-            session: sharedSession,
-            matchedAt: sharedMatchedAt,
-            igUnlocked: Boolean(existingInB && existingInB.igUnlocked),
-            continueVotes: []
-        });
-    }
-    if (!existingInB) {
-        uB.matchedHistory.push({
-            partnerId: pidA,
-            partnerName: uA.nickname || `玩家_${pidA}`,
-            session: sharedSession,
-            matchedAt: sharedMatchedAt,
-            igUnlocked: Boolean(existingInA && existingInA.igUnlocked),
-            continueVotes: []
-        });
-    }
-
-    if (!uA.matchedWithId) {
-        uA.matchedWithId = pidB;
-        uA.matchedWithName = uB.nickname || `玩家_${pidB}`;
-        uA.matchedSession = sharedSession;
-        uA.matchedAt = sharedMatchedAt;
-    }
-    if (!uB.matchedWithId) {
-        uB.matchedWithId = pidA;
-        uB.matchedWithName = uA.nickname || `玩家_${pidA}`;
-        uB.matchedSession = sharedSession;
-        uB.matchedAt = sharedMatchedAt;
-    }
-
-    if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
-        ChatStore.ensureThread(pidA, pidB, [{
-            senderId: 'system',
-            text: '🌸 月老已為你們補齊雙向紅線配對紀錄，祝聊天愉快！',
-            ts: nowTs
-        }]);
-    }
+    syncSingleDiscrepancyPairToUsers(users, pidA, pidB, Date.now());
 
     if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
         AdminMemoryCache.invalidate('users');
         AdminMemoryCache.invalidate('chats');
     }
-    saveUsers(users, { isMatchMutation: true });
+    saveUsers(users, { isMatchMutation: true, targetIds: [pidA, pidB] });
     appendLog(`<span class="text-emerald-300">[資料維護補齊]</span> 管理員已補齊 <strong>${uA.nickname} (ID:${pidA})</strong> ⇄ <strong>${uB.nickname} (ID:${pidB})</strong> 的雙向配對與聊天室紀錄。`);
     runRepairMatchesFromChats(true);
+}
+
+function manualBatchSyncAllDiscrepancies() {
+    const discrepancies = collectMatchAndChatDiscrepancies();
+    const repairable = discrepancies.filter(item => item.userAExists && item.userBExists);
+    if (repairable.length === 0) {
+        alert('目前沒有可雙向補齊的配對項目（若其中一方會員已刪除，請使用「解除配對」）。');
+        return;
+    }
+
+    if (!confirm(`確定要一鍵補齊全部 ${repairable.length} 組的雙方好友名單與聊天室紀錄嗎？
+補齊後雙方會員列表及前台好友名單將同步更新。`)) {
+        return;
+    }
+
+    const users = getUsers();
+    const nowTs = Date.now();
+    const affectedIds = new Set();
+    let syncedCount = 0;
+
+    repairable.forEach(item => {
+        const res = syncSingleDiscrepancyPairToUsers(users, item.idA, item.idB, nowTs);
+        if (res) {
+            affectedIds.add(res.pidA);
+            affectedIds.add(res.pidB);
+            syncedCount++;
+        }
+    });
+
+    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+        AdminMemoryCache.invalidate('users');
+        AdminMemoryCache.invalidate('chats');
+    }
+    saveUsers(users, { isMatchMutation: true, targetIds: Array.from(affectedIds) });
+    appendLog(`<span class="text-emerald-300">[資料維護一鍵補齊]</span> 管理員已一鍵補齊全部 ${syncedCount} 組的雙方好友名單與聊天室紀錄。`);
+    runRepairMatchesFromChats(true);
+    alert(`✅ 已成功一鍵補齊 ${syncedCount} 組的雙方好友名單與聊天室紀錄！`);
 }
 
 function adminFillPlayerFullData() {
@@ -1278,25 +1356,42 @@ function saveSessionMatchResultRecord(targetSession, allSessionUsers, users, res
         }
     });
 
-    // 單調遞增保護：若既有場次結算快照已記錄更多有效 1 對 1 配對（且未被管理員或玩家解除配對），保留既有配對不倒退
-    let prevSnap = null;
+    // 單調遞增保護：合併本地與雲端既有場次結算快照，保留所有有效 1 對 1 配對（且未被管理員或玩家解除配對）不倒退
+    let localSnap = null;
+    let cloudSnap = null;
     try {
         const existingMap = JSON.parse(localStorage.getItem(storageKey) || '{}');
         if (existingMap && typeof existingMap === 'object' && existingMap[docKey]) {
-            prevSnap = existingMap[docKey];
-        } else if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[storageKey] && CloudSync.tree[storageKey][docKey]) {
-            prevSnap = CloudSync.tree[storageKey][docKey];
+            localSnap = existingMap[docKey];
         }
     } catch (e) {}
+    if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[storageKey] && CloudSync.tree[storageKey][docKey]) {
+        cloudSnap = CloudSync.tree[storageKey][docKey];
+    }
 
-    if (prevSnap && Array.isArray(prevSnap.matchedPairs) && prevSnap.matchedPairs.length > matchedPairs.length) {
+    const mergedPrevPairsMap = new Map();
+    [localSnap, cloudSnap].forEach(sp => {
+        if (!sp || !Array.isArray(sp.matchedPairs)) return;
+        sp.matchedPairs.forEach(p => {
+            if (!p || !p.idA || !p.idB) return;
+            const pk = [String(p.idA).trim(), String(p.idB).trim()].sort().join('__');
+            if (!mergedPrevPairsMap.has(pk)) {
+                mergedPrevPairsMap.set(pk, { ...p });
+            }
+        });
+    });
+
+    const prevTotalReg = Math.max(Number((localSnap && localSnap.totalRegCount) || 0), Number((cloudSnap && cloudSnap.totalRegCount) || 0));
+    const prevMaleReg = Math.max(Number((localSnap && localSnap.maleRegCount) || 0), Number((cloudSnap && cloudSnap.maleRegCount) || 0));
+    const prevFemaleReg = Math.max(Number((localSnap && localSnap.femaleRegCount) || 0), Number((cloudSnap && cloudSnap.femaleRegCount) || 0));
+
+    if (mergedPrevPairsMap.size > 0) {
         const currentPairedIds = new Set();
         matchedPairs.forEach(p => {
             if (p && p.idA) currentPairedIds.add(String(p.idA).trim());
             if (p && p.idB) currentPairedIds.add(String(p.idB).trim());
         });
-        prevSnap.matchedPairs.forEach(oldP => {
-            if (!oldP || !oldP.idA || !oldP.idB) return;
+        mergedPrevPairsMap.forEach(oldP => {
             const idA = String(oldP.idA).trim();
             const idB = String(oldP.idB).trim();
             if (!idA || !idB || idA === idB) return;
@@ -1347,9 +1442,9 @@ function saveSessionMatchResultRecord(targetSession, allSessionUsers, users, res
         batchLabel: extractBatchLabel(normSession),
         executedAtTs: nowTs,
         executedAtStr: new Date(nowTs).toLocaleString('zh-TW', { hour12: false }),
-        totalRegCount: Math.max(allSessionUsers.length, Number((prevSnap && prevSnap.totalRegCount) || 0)),
-        maleRegCount: allSessionUsers.filter(u => u.gender === '男').length,
-        femaleRegCount: allSessionUsers.filter(u => u.gender === '女').length,
+        totalRegCount: Math.max(allSessionUsers.length, prevTotalReg),
+        maleRegCount: Math.max(allSessionUsers.filter(u => u.gender === '男').length, prevMaleReg),
+        femaleRegCount: Math.max(allSessionUsers.filter(u => u.gender === '女').length, prevFemaleReg),
         matchedCount: matchedUsers.length,
         matchedPairCount: matchedPairs.length,
         unmatchedCount: unmatchedUsers.length,
@@ -1397,28 +1492,31 @@ function restoreSessionMatchesFromSnapshot(rawSessionLabel) {
         ? ActivityRegArchive.sanitizeSeg(normSession)
         : normSession.replace(/[\/.#$\[\]\s]+/g, '_');
 
-    let snap = null;
+    let localSnap = null;
+    let cloudSnap = null;
     try {
         const localMap = JSON.parse(localStorage.getItem(storageKey) || '{}');
-        snap = localMap[docKey] || Object.values(localMap || {}).find(s => s && isSameSession(s.session, normSession)) || null;
+        localSnap = localMap[docKey] || Object.values(localMap || {}).find(s => s && isSameSession(s.session, normSession)) || null;
     } catch (e) {}
-    if (!snap && typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[storageKey]) {
+    if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[storageKey]) {
         const treeMap = CloudSync.tree[storageKey];
-        snap = treeMap[docKey] || Object.values(treeMap || {}).find(s => s && isSameSession(s.session, normSession)) || null;
+        cloudSnap = treeMap[docKey] || Object.values(treeMap || {}).find(s => s && isSameSession(s.session, normSession)) || null;
     }
 
     const candidatePairs = [];
-    if (snap && Array.isArray(snap.matchedPairs)) {
-        snap.matchedPairs.forEach(p => {
-            if (p && p.idA && p.idB) {
-                candidatePairs.push({
-                    idA: String(p.idA).trim(),
-                    idB: String(p.idB).trim(),
-                    matchedAt: Number(p.matchedAt || snap.executedAtTs || Date.now())
-                });
-            }
-        });
-    }
+    [localSnap, cloudSnap].forEach(sp => {
+        if (sp && Array.isArray(sp.matchedPairs)) {
+            sp.matchedPairs.forEach(p => {
+                if (p && p.idA && p.idB) {
+                    candidatePairs.push({
+                        idA: String(p.idA).trim(),
+                        idB: String(p.idB).trim(),
+                        matchedAt: Number(p.matchedAt || sp.executedAtTs || Date.now())
+                    });
+                }
+            });
+        }
+    });
 
     // 同時掃描全站聊天室中屬於本場次系統開場訊息的配對（補齊任何尚未寫入結算快照的配對）
     const chatsMap = (typeof getAdminChatsMap === 'function')
@@ -1461,7 +1559,16 @@ function restoreSessionMatchesFromSnapshot(rawSessionLabel) {
         const uB = userById.get(idB);
         if (!uA || !uB || uA.isWarned || uA.isMatchBanned || uB.isWarned || uB.isMatchBanned) return;
 
-        if (recordPairMatch(uA, uB, normSession, matchedAt)) {
+        const protectedRestoreSession = normSession.includes('・強制補齊') ? normSession : `${normSession}・強制補齊`;
+        if (recordPairMatch(uA, uB, protectedRestoreSession, matchedAt, null, '・強制補齊')) {
+            [uA, uB].forEach(uObj => {
+                const lastEntry = Array.isArray(uObj.matchedHistory) ? uObj.matchedHistory[uObj.matchedHistory.length - 1] : null;
+                if (lastEntry) {
+                    lastEntry.isForceRepaired = true;
+                    lastEntry.session = protectedRestoreSession;
+                    lastEntry.matchDetail = '・強制補齊';
+                }
+            });
             currentlyPairedIds.add(idA);
             currentlyPairedIds.add(idB);
             affectedUserIds.add(idA);
@@ -1480,6 +1587,8 @@ function restoreSessionMatchesFromSnapshot(rawSessionLabel) {
         previewLines.push(`...其餘 ${restoredPairs.length - 12} 對`);
     }
 
+    const { allSessionUsers } = collectSessionParticipantsAndMatchedIds(normSession, users);
+    saveSessionMatchResultRecord(normSession, allSessionUsers, users, new Set(), Date.now());
     saveUsers(users, { isMatchMutation: true, targetIds: Array.from(affectedUserIds) });
     appendLog(`<span class="text-emerald-300">[還原場次配對紀錄]</span> 已從結算快照與聊天室紀錄為「<strong>${normSession}</strong>」還原 <strong>${restoredPairs.length} 對</strong>（${restoredPairs.length * 2} 人）配對紀錄。`);
     alert(`✅ 已成功還原【${normSession}】遺失的 ${restoredPairs.length} 對（${restoredPairs.length * 2} 人）配對紀錄並同步寫入雲端！\n\n${previewLines.join('\n')}`);
@@ -2345,3 +2454,4 @@ window.runRepairMatchesFromChats = runRepairMatchesFromChats;
 window.manualResolveUnmatchPair = manualResolveUnmatchPair;
 window.manualBatchUnmatchAllDiscrepancies = manualBatchUnmatchAllDiscrepancies;
 window.manualResolveSyncPair = manualResolveSyncPair;
+window.manualBatchSyncAllDiscrepancies = manualBatchSyncAllDiscrepancies;

@@ -72,6 +72,7 @@ const CloudSync = {
     initialized: false,
     hasLoadedFullTree: false,
     chatsTreeVersion: 0,
+    _persistedSymmetricPairs: Object.create(null),
     eventSource: null,
     pollTimer: null,
     onUpdateCallback: null,
@@ -513,29 +514,46 @@ const CloudSync = {
             const pid = String(item.partnerId || '').trim();
             if (!pid) return;
             const votes = Array.from(new Set(this.normalizeStringArray(item.continueVotes)));
+            const rawSess = String(item.session || '').trim();
+            const rawDetail = String(item.matchDetail || '').trim();
+            const hasForceProtect = Boolean(
+                item.isForceRepaired ||
+                rawSess.includes('・強制補齊') ||
+                rawDetail.includes('強制補齊')
+            );
             const normalizedItem = {
                 ...item,
                 partnerId: pid,
                 partnerName: String(item.partnerName || '').trim(),
-                session: String(item.session || '').trim(),
+                session: rawSess,
                 matchedAt: Number(item.matchedAt || 0) || Date.now(),
                 igUnlocked: Boolean(item.igUnlocked),
+                isForceRepaired: hasForceProtect,
                 continueVotes: votes
             };
+            if (hasForceProtect && !normalizedItem.matchDetail) {
+                normalizedItem.matchDetail = '・強制補齊';
+            }
             const prev = byPartner.get(pid);
             if (!prev) {
                 byPartner.set(pid, normalizedItem);
             } else {
                 const mergedVotes = Array.from(new Set([...(prev.continueVotes || []), ...votes]));
-                byPartner.set(pid, {
+                const mergedForceProtect = Boolean(prev.isForceRepaired || normalizedItem.isForceRepaired);
+                const chosenSession = (String(prev.session || '').includes('・強制補齊') ? prev.session : normalizedItem.session) || prev.session;
+                const chosenDetail = (String(prev.matchDetail || '').includes('強制補齊') ? prev.matchDetail : normalizedItem.matchDetail) || prev.matchDetail || (mergedForceProtect ? '・強制補齊' : '');
+                const mergedObj = {
                     ...prev,
                     ...normalizedItem,
                     partnerName: normalizedItem.partnerName || prev.partnerName,
-                    session: normalizedItem.session || prev.session,
+                    session: chosenSession,
                     matchedAt: Math.min(Number(prev.matchedAt || 0) || Infinity, Number(normalizedItem.matchedAt || 0) || Infinity) || Date.now(),
                     igUnlocked: Boolean(prev.igUnlocked || normalizedItem.igUnlocked),
+                    isForceRepaired: mergedForceProtect,
                     continueVotes: mergedVotes
-                });
+                };
+                if (chosenDetail) mergedObj.matchDetail = chosenDetail;
+                byPartner.set(pid, mergedObj);
             }
         });
 
@@ -617,34 +635,44 @@ const CloudSync = {
             let changedB = false;
 
             if (!recInA) {
+                const baseSessA = String(recInB?.session || userA.matchedSession || userB.matchedSession || '系統補回配對').trim();
+                const protSessA = baseSessA.includes('・強制補齊') ? baseSessA : `${baseSessA}・強制補齊`;
                 userA.matchedHistory.push({
                     partnerId: idB,
                     partnerName: userB.nickname || idB,
-                    session: recInB?.session || userA.matchedSession || userB.matchedSession || '系統補回配對',
+                    session: protSessA,
                     matchedAt: Number(recInB?.matchedAt) || fallbackTs,
                     igUnlocked: Boolean(recInB?.igUnlocked),
+                    isForceRepaired: true,
+                    matchDetail: '・強制補齊',
                     continueVotes: []
                 });
                 if (!userA.matchedWithId) {
                     userA.matchedWithId = idB;
                     userA.matchedWithName = userB.nickname || idB;
+                    userA.matchedSession = protSessA;
                     userA.matchedAt = Number(recInB?.matchedAt) || fallbackTs;
                 }
                 changedA = true;
             }
 
             if (!recInB) {
+                const baseSessB = String(recInA?.session || userB.matchedSession || userA.matchedSession || '系統補回配對').trim();
+                const protSessB = baseSessB.includes('・強制補齊') ? baseSessB : `${baseSessB}・強制補齊`;
                 userB.matchedHistory.push({
                     partnerId: idA,
                     partnerName: userA.nickname || idA,
-                    session: recInA?.session || userB.matchedSession || userA.matchedSession || '系統補回配對',
+                    session: protSessB,
                     matchedAt: Number(recInA?.matchedAt) || fallbackTs,
                     igUnlocked: Boolean(recInA?.igUnlocked),
+                    isForceRepaired: true,
+                    matchDetail: '・強制補齊',
                     continueVotes: []
                 });
                 if (!userB.matchedWithId) {
                     userB.matchedWithId = idA;
                     userB.matchedWithName = userA.nickname || idA;
+                    userB.matchedSession = protSessB;
                     userB.matchedAt = Number(recInA?.matchedAt) || fallbackTs;
                 }
                 changedB = true;
@@ -684,16 +712,35 @@ const CloudSync = {
                 const existingMirror = partnerHist.find(ph => String(ph.partnerId) === uid);
 
                 if (!existingMirror) {
+                    const rawBaseSession = String(h.session || u.matchedSession || '').trim() || '系統補回配對';
+                    const protectedSession = rawBaseSession.includes('・強制補齊')
+                        ? rawBaseSession
+                        : `${rawBaseSession}・強制補齊`;
                     const mirrorEntry = {
                         partnerId: uid,
                         partnerName: String(u.nickname || '').trim(),
-                        session: String(h.session || u.matchedSession || '').trim(),
+                        session: protectedSession,
                         matchedAt: Number(h.matchedAt || u.matchedAt || 0) || Date.now(),
                         igUnlocked: Boolean(h.igUnlocked),
+                        isForceRepaired: true,
+                        matchDetail: (h.matchDetail && String(h.matchDetail).includes('強制補齊')) ? String(h.matchDetail) : '・強制補齊',
                         continueVotes: Array.isArray(h.continueVotes) ? [...h.continueVotes] : []
                     };
                     if (h.activityId) mirrorEntry.activityId = String(h.activityId);
-                    if (h.matchDetail) mirrorEntry.matchDetail = String(h.matchDetail);
+
+                    // 同步為持有方補上 ・強制補齊 保護標記，確保雙向受保護不被舊快取覆蓋
+                    h.isForceRepaired = true;
+                    if (!String(h.session || '').includes('・強制補齊')) {
+                        h.session = protectedSession;
+                    }
+                    if (!h.matchDetail) {
+                        h.matchDetail = '・強制補齊';
+                    }
+                    u.matchedHistory = this.normalizeMatchedHistoryList(uHist);
+                    if (String(u.matchedWithId || '').trim() === partnerId && !String(u.matchedSession || '').includes('・強制補齊')) {
+                        u.matchedSession = protectedSession;
+                    }
+                    repairedUsers.set(uid, u);
 
                     partnerHist.push(mirrorEntry);
                     partner.matchedHistory = this.normalizeMatchedHistoryList(partnerHist);
@@ -737,7 +784,12 @@ const CloudSync = {
                 this.tree[USERS_KEY][pid] = { ...repairedUser };
             }
             if (autoPersistRepaired && this.initialized && this.inFlightWrites === 0) {
-                this.upsertUser(repairedUser, true, { isMatchMutation: true });
+                const nowP = Date.now();
+                const lastP = Number(this._persistedSymmetricPairs[pid] || 0);
+                if (nowP - lastP > 15000) {
+                    this._persistedSymmetricPairs[pid] = nowP;
+                    this.upsertUser(repairedUser, true, { isMatchMutation: true });
+                }
             }
         });
 
@@ -818,12 +870,31 @@ const CloudSync = {
             ));
             cleanUser.matchedHistory = this.normalizeMatchedHistoryList(cleanUser.matchedHistory)
                 .filter(h => !this.isRogueCustomMatchEntry(h, customActsSnapshotForFilter));
-            if (cleanUser.matchedWithId && !cleanUser.matchedHistory.some(h => String(h.partnerId) === String(cleanUser.matchedWithId))) {
-                const fallbackH = cleanUser.matchedHistory[cleanUser.matchedHistory.length - 1] || null;
-                cleanUser.matchedSession = fallbackH ? (fallbackH.session || null) : null;
-                cleanUser.matchedWithId = fallbackH ? (fallbackH.partnerId || null) : null;
-                cleanUser.matchedWithName = fallbackH ? (fallbackH.partnerName || null) : null;
-                cleanUser.matchedAt = fallbackH ? (fallbackH.matchedAt || null) : null;
+            const directWithId = String(cleanUser.matchedWithId || '').trim();
+            if (directWithId && directWithId !== String(cleanUser.id || '').trim() && !cleanUser.matchedHistory.some(h => String(h.partnerId) === directWithId)) {
+                if (!this.isPairRecentlyUnmatched(cleanUser.id, directWithId)) {
+                    const directSessStr = String(cleanUser.matchedSession || '').trim();
+                    const isForceDirect = Boolean(directSessStr.includes('・強制補齊'));
+                    cleanUser.matchedHistory = this.normalizeMatchedHistoryList([
+                        ...cleanUser.matchedHistory,
+                        {
+                            partnerId: directWithId,
+                            partnerName: String(cleanUser.matchedWithName || '').trim(),
+                            session: directSessStr,
+                            matchedAt: Number(cleanUser.matchedAt || 0) || Date.now(),
+                            igUnlocked: false,
+                            isForceRepaired: isForceDirect,
+                            matchDetail: isForceDirect ? '・強制補齊' : '',
+                            continueVotes: []
+                        }
+                    ]);
+                } else {
+                    const fallbackH = cleanUser.matchedHistory[cleanUser.matchedHistory.length - 1] || null;
+                    cleanUser.matchedSession = fallbackH ? (fallbackH.session || null) : null;
+                    cleanUser.matchedWithId = fallbackH ? (fallbackH.partnerId || null) : null;
+                    cleanUser.matchedWithName = fallbackH ? (fallbackH.partnerName || null) : null;
+                    cleanUser.matchedAt = fallbackH ? (fallbackH.matchedAt || null) : null;
+                }
             }
             cleanUser.exactMatchCriteria = (cleanUser.exactMatchCriteria && typeof cleanUser.exactMatchCriteria === 'object' && !Array.isArray(cleanUser.exactMatchCriteria))
                 ? cleanUser.exactMatchCriteria
@@ -860,11 +931,8 @@ const CloudSync = {
                 });
             }
         }
-        const shouldPersistSymmetricRepair = Boolean(this.initialized && this.isBackendContext() && !this._hasRunInitialSymmetricPersist);
-        if (shouldPersistSymmetricRepair) {
-            this._hasRunInitialSymmetricPersist = true;
-        }
-        this.reconcileSymmetricMatches(usersArr, shouldPersistSymmetricRepair);
+        const canPersistSymmetricRepair = Boolean(this.initialized && this.isBackendContext() && this.inFlightWrites === 0);
+        this.reconcileSymmetricMatches(usersArr, canPersistSymmetricRepair);
         this.writeLocalIfChanged(USERS_KEY, JSON.stringify(usersArr));
         usersArr.forEach(u => {
             if (u && u.id) {
@@ -1326,6 +1394,11 @@ const CloudSync = {
             ...localPatch,
             id: pid
         };
+        Object.keys(localPatch).forEach(k => {
+            if (localPatch[k] === null) {
+                delete mergedRecord[k];
+            }
+        });
         delete mergedRecord.registeredSession;
         this.lastPushedUsersJson[pid] = JSON.stringify(mergedRecord);
         this.setSharedPendingUser(pid, mergedRecord, 18000);
@@ -1386,6 +1459,17 @@ const CloudSync = {
         ));
         cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory)
             .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId) && !this.isRogueCustomMatchEntry(h));
+        if (isMatchMutation && existingTreeUser && existingTreeUser.matchedHistory) {
+            const existingProtectedEntries = this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory)
+                .filter(h =>
+                    (h.isForceRepaired || String(h.session || '').includes('・強制補齊') || String(h.matchDetail || '').includes('強制補齊')) &&
+                    !this.isPairRecentlyUnmatched(pid, h.partnerId) &&
+                    !this.isRogueCustomMatchEntry(h)
+                );
+            if (existingProtectedEntries.length > 0) {
+                cleanRecord.matchedHistory = this.normalizeMatchedHistoryList([...cleanRecord.matchedHistory, ...existingProtectedEntries]);
+            }
+        }
         if (!isMatchMutation) {
             // 非配對／解除配對異動時，同時合併雲端樹、本地快取與傳入紀錄的配對歷史（排除近期已解除配對與異常誤配對），絕不以舊快照覆蓋減少已配對好友
             let localCachedUser = null;

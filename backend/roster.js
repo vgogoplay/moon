@@ -643,7 +643,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
             u.id, u.nickname, u.gender, u.age, u.ig, u.region, u.city,
             u.registeredSessions, u.customActivityRegs, u.exactMatchCriteria, u.mustMatchKeys,
             u.isMatchBanned, u.isChatBanned, u.isWarned,
-            u.matchedHistory, u.matchedWithId, u.matchedWithName
+            u.matchedHistory, u.matchedWithId, u.matchedWithName, u.matchedSession
         ])
     });
 
@@ -876,6 +876,13 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
         }
     }
 
+    const userNicknameById = new Map();
+    users.forEach(item => {
+        if (item && item.id) {
+            userNicknameById.set(String(item.id).trim(), String(item.nickname || '').trim());
+        }
+    });
+
     if (pageUsers.length === 0) {
         pBody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-gray-400">尚無符合篩選條件的玩家資料。</td></tr>`;
     } else {
@@ -889,9 +896,69 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
                 ? `${displayMbtiGrp}(${u.mbti})`
                 : (u.mbti || '-');
 
-            const historyList = Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0
+            const selfIdStr = String(u.id || '').trim();
+            const rawHistArr = Array.isArray(u.matchedHistory)
                 ? u.matchedHistory
-                : (u.matchedWithId ? [{ partnerId: u.matchedWithId, partnerName: u.matchedWithName }] : []);
+                : (u.matchedHistory && typeof u.matchedHistory === 'object' ? Object.values(u.matchedHistory) : []);
+            const mergedHistoryMap = new Map();
+
+            rawHistArr.forEach(h => {
+                if (!h || typeof h !== 'object') return;
+                const pid = String(h.partnerId || '').trim();
+                if (!pid || pid === selfIdStr) return;
+                const resolvedName = String(h.partnerName || '').trim() || userNicknameById.get(pid) || `玩家_${pid}`;
+                const prev = mergedHistoryMap.get(pid);
+                if (!prev) {
+                    mergedHistoryMap.set(pid, {
+                        ...h,
+                        partnerId: pid,
+                        partnerName: resolvedName
+                    });
+                } else {
+                    mergedHistoryMap.set(pid, {
+                        ...prev,
+                        ...h,
+                        partnerId: pid,
+                        partnerName: resolvedName || prev.partnerName,
+                        isForceRepaired: Boolean(
+                            prev.isForceRepaired ||
+                            h.isForceRepaired ||
+                            String(prev.session || '').includes('・強制補齊') ||
+                            String(h.session || '').includes('・強制補齊') ||
+                            String(prev.matchDetail || '').includes('強制補齊') ||
+                            String(h.matchDetail || '').includes('強制補齊')
+                        )
+                    });
+                }
+            });
+
+            const directPartnerId = String(u.matchedWithId || '').trim();
+            if (directPartnerId && directPartnerId !== selfIdStr) {
+                const directPartnerName = String(u.matchedWithName || '').trim() || userNicknameById.get(directPartnerId) || `玩家_${directPartnerId}`;
+                const directSess = String(u.matchedSession || '').trim();
+                const directForceFlag = Boolean(directSess.includes('・強制補齊'));
+                const existingDirect = mergedHistoryMap.get(directPartnerId);
+                if (!existingDirect) {
+                    mergedHistoryMap.set(directPartnerId, {
+                        partnerId: directPartnerId,
+                        partnerName: directPartnerName,
+                        session: directSess,
+                        matchedAt: u.matchedAt || 0,
+                        isForceRepaired: directForceFlag,
+                        matchDetail: directForceFlag ? '・強制補齊' : ''
+                    });
+                } else {
+                    existingDirect.partnerName = existingDirect.partnerName || directPartnerName;
+                    if (directForceFlag) {
+                        existingDirect.isForceRepaired = true;
+                        if (!String(existingDirect.session || '').includes('・強制補齊')) {
+                            existingDirect.session = directSess;
+                        }
+                    }
+                }
+            }
+
+            const historyList = Array.from(mergedHistoryMap.values());
 
             let statusParts = [];
             if (u.isMatchBanned) {
@@ -905,9 +972,17 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
             }
             if (historyList.length > 0) {
                 historyList.forEach(h => {
+                    const isForceProtected = Boolean(
+                        h.isForceRepaired ||
+                        String(h.session || '').includes('・強制補齊') ||
+                        String(h.matchDetail || '').includes('強制補齊')
+                    );
+                    const forceTagHtml = isForceProtected
+                        ? `<span class="text-[10px] text-amber-800 font-bold">・強制補齊</span>`
+                        : '';
                     statusParts.push(`
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">
-                            💘 ${h.partnerName} (ID:${h.partnerId})
+                            💘 ${h.partnerName} (ID:${h.partnerId})${forceTagHtml}
                             <button onclick="unmatchPlayerPair('${u.id}', '${h.partnerId}')" title="解除此配對" class="text-rose-600 hover:text-rose-900 font-bold ml-0.5">✕</button>
                         </span>
                     `);

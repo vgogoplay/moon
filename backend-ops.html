@@ -166,7 +166,7 @@
                     <div>
                         <div class="text-xs font-bold text-amber-900">🔍 會員配對與聊天紀錄雙向一致性檢查</div>
                         <p class="text-[11px] text-amber-800/80 mt-0.5">
-                            交叉比對「會員列表的配對名單」與「玩家聊天紀錄房間」；若發現兩邊數據不一致（例如會員列表有配對但聊天紀錄無此房間，或僅單方有配對），將完整列出明細供管理員手動決定是否解除配對。
+                            交叉比對「會員列表的配對名單」與「玩家聊天紀錄房間」；若發現兩邊數據不一致（例如會員列表有配對但聊天紀錄無此房間，或僅單方有配對），將完整列出明細，並提供「一鍵補齊 雙方好友名單」或「解除配對」。
                         </p>
                     </div>
                     <button type="button" onclick="runRepairMatchesFromChats()"
@@ -398,12 +398,12 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261118ap"></script>
+    <script src="shared/schedule.js?v=20261118av"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261118au"></script>
+    <script src="shared/cloud-store.js?v=20261118aw"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261118au"></script>
-    <script src="backend/matching.js?v=20261118ap"></script>
+    <script src="backend/matching.js?v=20261118aw"></script>
     <script src="backend/ops.js?v=20261118v"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261118o"></script>
