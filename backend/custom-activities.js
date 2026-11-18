@@ -28,6 +28,36 @@ function closeCreateCustomActivityModal() {
     if (modal) modal.classList.add('hidden');
 }
 
+function syncNewCustomActAutoMatchTime() {
+    const endInput = document.getElementById('newCustomActEndTime');
+    const matchInput = document.getElementById('newCustomActMatchTime');
+    if (!endInput || !matchInput) return;
+    const endTs = parseLocalDateTimeTs(endInput.value.trim());
+    if (endTs > 0) {
+        const autoMatchTs = endTs + 60 * 1000;
+        matchInput.value = (typeof formatLocalDateTimeInputValue === 'function')
+            ? formatLocalDateTimeInputValue(autoMatchTs)
+            : '';
+    } else {
+        matchInput.value = '';
+    }
+}
+
+function syncEditCustomActAutoMatchTime() {
+    const endInput = document.getElementById('editActEndTime');
+    const matchInput = document.getElementById('editActMatchTime');
+    if (!endInput || !matchInput) return;
+    const endTs = parseLocalDateTimeTs(endInput.value.trim());
+    if (endTs > 0) {
+        const autoMatchTs = endTs + 60 * 1000;
+        matchInput.value = (typeof formatLocalDateTimeInputValue === 'function')
+            ? formatLocalDateTimeInputValue(autoMatchTs)
+            : '';
+    } else {
+        matchInput.value = '';
+    }
+}
+
 function onCustomActivityTypeChange(typeVal) {
     const twoChoiceWrap = document.getElementById('newCustomTwoChoiceWrap');
     const descWrap = document.getElementById('newCustomDescWrap');
@@ -96,18 +126,19 @@ function createCustomActivity() {
 
     const startTimeTs = parseLocalDateTimeTs(startTime);
     const endTimeTs = parseLocalDateTimeTs(endTime);
-    const matchTimeTs = parseLocalDateTimeTs(matchTime);
 
     if (startTimeTs && endTimeTs && endTimeTs <= startTimeTs) {
         alert('「報名結束時間」必須晚於「活動開始時間」！');
         if (endInput) endInput.focus();
         return;
     }
-    if (endTimeTs && matchTimeTs && matchTimeTs < endTimeTs) {
-        alert('「自動配對時間」不能早於「報名結束時間」（需等報名截止後才能進行配對）！');
-        if (matchInput) matchInput.focus();
-        return;
-    }
+
+    // 填寫結束時間時，自動配對時間固定為「結束時間後 +1 分鐘」
+    const finalMatchTimeTs = endTimeTs > 0 ? (endTimeTs + 60 * 1000) : parseLocalDateTimeTs(matchTime);
+    const finalMatchTime = endTimeTs > 0
+        ? ((typeof formatLocalDateTimeInputValue === 'function') ? formatLocalDateTimeInputValue(finalMatchTimeTs) : matchTime)
+        : matchTime;
+    if (matchInput) matchInput.value = finalMatchTime;
 
     let optionA = '';
     let optionB = '';
@@ -142,10 +173,11 @@ function createCustomActivity() {
         description: description,
         startTime: startTime,
         endTime: endTime,
-        matchTime: matchTime,
+        matchTime: finalMatchTime,
         startTimeTs: startTimeTs,
         endTimeTs: endTimeTs,
-        matchTimeTs: matchTimeTs,
+        matchTimeTs: finalMatchTimeTs,
+        matchSafetyEnabled: false,
         autoMatchedDone: false,
         matchedUserIds: [],
         matchedUserMap: {},
@@ -196,7 +228,14 @@ function openEditCustomActivityModal(activityId) {
     const editMatchEl = document.getElementById('editActMatchTime');
     if (editStartEl) editStartEl.value = act.startTime || '';
     if (editEndEl) editEndEl.value = act.endTime || '';
-    if (editMatchEl) editMatchEl.value = act.matchTime || '';
+    if (editMatchEl) {
+        const initEndTs = parseLocalDateTimeTs(act.endTime || act.endTimeTs);
+        if (initEndTs > 0 && typeof formatLocalDateTimeInputValue === 'function') {
+            editMatchEl.value = formatLocalDateTimeInputValue(initEndTs + 60 * 1000);
+        } else {
+            editMatchEl.value = act.matchTime || '';
+        }
+    }
 
     onEditCustomActivityTypeChange(act.activityType || 'classic');
     document.getElementById('editCustomActivityModal').classList.remove('hidden');
@@ -235,18 +274,17 @@ function saveEditedCustomActivity(e) {
 
     const startTimeTs = parseLocalDateTimeTs(actStartTime);
     const endTimeTs = parseLocalDateTimeTs(actEndTime);
-    const matchTimeTs = parseLocalDateTimeTs(actMatchTime);
 
     if (startTimeTs && endTimeTs && endTimeTs <= startTimeTs) {
         alert('「報名結束時間」必須晚於「活動開始時間」！');
         document.getElementById('editActEndTime')?.focus();
         return;
     }
-    if (endTimeTs && matchTimeTs && matchTimeTs < endTimeTs) {
-        alert('「自動配對時間」不能早於「報名結束時間」！');
-        document.getElementById('editActMatchTime')?.focus();
-        return;
-    }
+
+    const matchTimeTs = endTimeTs > 0 ? (endTimeTs + 60 * 1000) : parseLocalDateTimeTs(actMatchTime);
+    const resolvedMatchTime = endTimeTs > 0
+        ? ((typeof formatLocalDateTimeInputValue === 'function') ? formatLocalDateTimeInputValue(matchTimeTs) : actMatchTime)
+        : actMatchTime;
 
     let optionA = '';
     let optionB = '';
@@ -288,10 +326,11 @@ function saveEditedCustomActivity(e) {
         description: actDesc,
         startTime: actStartTime,
         endTime: actEndTime,
-        matchTime: actMatchTime,
+        matchTime: resolvedMatchTime,
         startTimeTs: startTimeTs,
         endTimeTs: endTimeTs,
         matchTimeTs: matchTimeTs,
+        matchSafetyEnabled: Boolean(prevAct.matchSafetyEnabled),
         isOpen: (isFutureMatchReset && prevAct.autoMatchedDone) ? true : Boolean(prevAct.isOpen),
         autoMatchedDone: isFutureMatchReset ? false : Boolean(prevAct.autoMatchedDone),
         matchedUserIds: Array.isArray(prevAct.matchedUserIds) ? [...prevAct.matchedUserIds] : [],
@@ -316,6 +355,30 @@ function saveEditedCustomActivity(e) {
 
     closeEditCustomActivityModal();
     appendLog(`<span class="text-sky-300">[編輯自定義活動]</span> 已更新自定義活動「<strong>${actName}</strong>」的設定。`);
+}
+
+function toggleCustomActivityMatchSafety(activityId) {
+    const list = getCustomActivities();
+    const act = list.find(a => String(a.id) === String(activityId));
+    if (!act) return;
+
+    const nextVal = !Boolean(act.matchSafetyEnabled);
+    if (nextVal) {
+        if (!confirm(`確定要開啟【${act.name}】的配對防呆開關嗎？\n\n開啟後：此活動將允許手動點擊執行配對，或於設定時間到點自動配對。`)) {
+            return;
+        }
+    }
+
+    act.matchSafetyEnabled = nextVal;
+    saveCustomActivities(list);
+    if (typeof CloudSync !== 'undefined') {
+        CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, act);
+    }
+
+    const stateLabel = nextVal
+        ? '🟢 已開啟（允許此活動手動／自動配對）'
+        : '🚫 已關閉（鎖定此活動不可手動／自動配對）';
+    appendLog(`<span class="text-amber-300">[活動配對防呆開關]</span> 自定義活動「<strong>${act.name}</strong>」配對防呆開關已切換為：<strong>${stateLabel}</strong>。`);
 }
 
 async function toggleCustomActivityOpen(activityId) {
@@ -497,25 +560,40 @@ async function runCustomActivityMatch(activityId, isAuto = false) {
     const act = list.find(a => String(a.id) === String(activityId));
     if (!act) return;
 
+    const nowTs = Date.now();
+    const safetyEnabled = Boolean(act.matchSafetyEnabled);
+    const isBeforeCutoff = (typeof isCustomActivityBeforeAllowedDate === 'function')
+        ? isCustomActivityBeforeAllowedDate(act, nowTs)
+        : false;
+
+    if (!safetyEnabled) {
+        if (!isAuto) {
+            alert(`🚫 活動「${act.name}」的配對防呆開關目前為【關閉】狀態！\n\n不管手動或自動皆不可進行配對，請先開啟標題旁邊的配對防呆開關。`);
+        }
+        return;
+    }
+    if (isAuto && isBeforeCutoff) {
+        return;
+    }
+    if (!act.isOpen) {
+        if (!isAuto) {
+            alert(`🚫 活動「${act.name}」目前為【已關閉】狀態，已關閉的活動不可進行配對！`);
+        }
+        return;
+    }
+    if (Boolean(act.autoMatchedDone)) {
+        if (!isAuto) {
+            alert(`🚫 活動「${act.name}」已完成配對結算，不可再次重複配對！`);
+        }
+        return;
+    }
+
     let forceManualOverride = false;
     if (!isAuto) {
-        const nowTs = Date.now();
-        const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
-        const matchTimeLabel = matchTs ? formatShortDateTime(matchTs) : '未設定';
-        const isClosedOrExpired = !act.isOpen || Boolean(act.autoMatchedDone) || (matchTs > 0 && nowTs - matchTs > (15 * 60 * 1000));
-
-        if (isClosedOrExpired) {
-            const warnMsg = `⚠️ 注意：活動「${act.name}」目前為【${!act.isOpen ? '已關閉' : '已結束／已執行過配對'}】（設定配對時間：${matchTimeLabel}）。\n\n一般情況下不應再次觸發配對！確定仍要強制手動補跑一次配對嗎？`;
-            if (!confirm(warnMsg)) {
-                return;
-            }
-            forceManualOverride = true;
-        } else {
-            if (!confirm(`確定要立即執行專屬活動「${act.name}」的配對嗎？`)) {
-                return;
-            }
-            forceManualOverride = true;
+        if (!confirm(`確定要立即執行專屬活動「${act.name}」的配對嗎？`)) {
+            return;
         }
+        forceManualOverride = true;
     }
 
     const res = await executeCustomActivityMatchCore(activityId, {
@@ -525,7 +603,14 @@ async function runCustomActivityMatch(activityId, isAuto = false) {
     });
     if (!res || !res.executed) {
         if (!isAuto) {
-            alert(`⚠️【${act.name}】未執行配對（活動已關閉或已超過排程時間）。`);
+            const reasonMap = {
+                safety_locked: '第 2 種活動配對防呆開關目前為關閉狀態',
+                before_today_cutoff: '此活動為今日（11/18）之前的活動，不可進行配對',
+                closed: '此活動目前為已關閉狀態，不可進行配對',
+                already_done: '此活動已完成配對結算，不可再次配對',
+                expired: '已超過排程配對時間'
+            };
+            alert(`⚠️【${act.name}】未執行配對（${reasonMap[res && res.reason] || '不符合配對條件'}）。`);
         }
         return;
     }
@@ -578,6 +663,14 @@ async function recoverCustomActivityRegistrationsFromArchive(activityId, autoRun
     const list = getCustomActivities();
     const act = list.find(a => String(a.id) === String(activityId));
     if (!act) return;
+
+    if (autoRunMatchAfter) {
+        const safetyEnabled = Boolean(act.matchSafetyEnabled);
+        if (!safetyEnabled || !act.isOpen || Boolean(act.autoMatchedDone)) {
+            alert('🚫 目前此活動「配對防呆開關未開啟」或活動為「已關閉／已結算」，不可執行重新配對！\n（請先將標題旁的防呆開關切換為「🟢 開啟」，或使用「📥 僅找回名單」）');
+            return;
+        }
+    }
 
     const users = getUsers();
     const recoverable = getArchivedRecoverableCustomRegs(act, users);
@@ -721,6 +814,7 @@ async function recoverCustomActivityRegistrationsFromArchive(activityId, autoRun
 
 
 function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
+    const nowRenderTs = Date.now();
     const customActsList = getCustomActivities();
     const customActsAdminBox = document.getElementById('customActivitiesAdminList');
     if (customActsAdminBox) {
@@ -759,6 +853,20 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                     }).join(' ')
                     : '<span class="text-gray-400">尚無玩家報名</span>';
 
+                const safetyEnabled = Boolean(act.matchSafetyEnabled);
+                const isBeforeCutoff = (typeof isCustomActivityBeforeAllowedDate === 'function')
+                    ? isCustomActivityBeforeAllowedDate(act, nowRenderTs)
+                    : false;
+                const canRunThisActMatch = Boolean(safetyEnabled && act.isOpen && !act.autoMatchedDone);
+                let matchBtnLabel = `💘 執行【${act.name}】配對`;
+                if (!safetyEnabled) {
+                    matchBtnLabel = '🔒 防呆開關已關閉（不可配對）';
+                } else if (!act.isOpen) {
+                    matchBtnLabel = '⚪ 活動已關閉（不可配對）';
+                } else if (act.autoMatchedDone) {
+                    matchBtnLabel = '✅ 已完成配對（不可重複配對）';
+                }
+
                 const schedState = getCustomActivityScheduleState(act);
                 let scheduleBadgeHtml = '';
                 if (schedState.hasSchedule) {
@@ -796,10 +904,12 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                         </div>
                         <div class="flex flex-col items-stretch lg:items-end justify-center gap-2 shrink-0 p-3 rounded-xl bg-amber-50/35 border border-amber-200 w-full lg:w-auto">
                             ${recoverableArchivedList.length > 0 ? `
-                                <button type="button" onclick="recoverCustomActivityRegistrationsFromArchive('${act.id}', true)"
-                                    class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow hover:opacity-95 transition">
-                                    🔄 找回名單（${recoverableArchivedList.length}人）並重新配對
-                                </button>
+                                ${canRunThisActMatch ? `
+                                    <button type="button" onclick="recoverCustomActivityRegistrationsFromArchive('${act.id}', true)"
+                                        class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow hover:opacity-95 transition">
+                                        🔄 找回名單（${recoverableArchivedList.length}人）並重新配對
+                                    </button>
+                                ` : ''}
                                 <button type="button" onclick="recoverCustomActivityRegistrationsFromArchive('${act.id}', false)"
                                     class="px-3.5 py-2 rounded-xl bg-sky-50 border border-sky-300 text-sky-800 text-xs font-bold hover:bg-sky-100 transition">
                                     📥 僅找回名單（${recoverableArchivedList.length}人）
@@ -811,8 +921,8 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                             <button type="button" onclick="toggleCustomActivityOpen('${act.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${act.isOpen ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-emerald-600 text-white hover:bg-emerald-700'}">
                                 ${act.isOpen ? '切換為「關閉」' : '開啟活動（前台顯示）'}
                             </button>
-                            <button type="button" onclick="runCustomActivityMatch('${act.id}')" class="px-4 py-2 rounded-xl text-xs font-bold transition ${(!act.isOpen || act.autoMatchedDone) ? 'bg-gray-100 border border-gray-300 text-gray-500 hover:bg-gray-200' : 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white shadow hover:opacity-95'}">
-                                ${(!act.isOpen || act.autoMatchedDone) ? `⚠️ 補跑【${act.name}】配對（已關閉/已結算）` : `💘 執行【${act.name}】配對`}
+                            <button type="button" onclick="runCustomActivityMatch('${act.id}')" ${canRunThisActMatch ? '' : 'disabled'} class="px-4 py-2 rounded-xl text-xs font-bold transition ${canRunThisActMatch ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white shadow hover:opacity-95' : 'bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed'}">
+                                ${matchBtnLabel}
                             </button>
                             <button type="button" onclick="clearCustomActivityRegistrations('${act.id}')" ${regUsers.length === 0 ? 'disabled' : ''} title="清除此活動當前所有已報名玩家，並取消其勾選的活動選項" class="px-3.5 py-2 rounded-xl border text-xs font-bold transition ${regUsers.length === 0 ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'}">
                                 🧹 清除已報名（${regUsers.length}人）
@@ -826,22 +936,31 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
 
                 return `
                     <div class="rounded-2xl bg-white border ${act.isOpen ? 'border-emerald-300' : 'border-pink-200'} overflow-hidden transition shadow-2xs">
-                        <button type="button" onclick="toggleCustomActivityCardExpand('${act.id}')" class="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-amber-50/35 transition">
-                            <div class="flex flex-wrap items-center gap-2 min-w-0">
-                                <span class="text-[11px] px-2.5 py-0.5 rounded-full font-bold ${act.isOpen ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600 border border-gray-300'}">
+                        <div role="button" tabindex="0"
+                            onclick="toggleCustomActivityCardExpand('${act.id}')"
+                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleCustomActivityCardExpand('${act.id}');}"
+                            class="w-full px-4 py-3 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 text-left hover:bg-amber-50/35 transition cursor-pointer select-none">
+                            <div class="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+                                <span class="inline-flex items-center text-[11px] px-2.5 py-0.5 rounded-full font-bold shrink-0 ${act.isOpen ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600 border border-gray-300'}">
                                     ${act.isOpen ? '🟢 開啟中' : '⚪ 已關閉'}
                                 </span>
                                 <span class="text-xs md:text-sm font-bold text-[#8f4452] truncate">🎪 ${act.name}</span>
+                                <button type="button"
+                                    onclick="event.stopPropagation(); toggleCustomActivityMatchSafety('${act.id}')"
+                                    title="點擊手動切換此活動的配對防呆開關（開啟可手動／自動配對，關閉則禁止配對）"
+                                    class="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full border font-bold transition shrink-0 cursor-pointer ${safetyEnabled ? 'bg-emerald-50 text-emerald-800 border-emerald-400 hover:bg-emerald-100 shadow-2xs' : 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'}">
+                                    <span>🛡️ 配對防呆：${safetyEnabled ? '🟢 開啟' : '🚫 關閉'}</span>
+                                </button>
                                 ${recoverableArchivedList.length > 0 ? `
-                                    <span class="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-bold">
+                                    <span class="inline-flex items-center text-[11px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-bold shrink-0">
                                         ⚠️ 可找回 ${recoverableArchivedList.length} 位已報名名單重新配對
                                     </span>
                                 ` : ''}
                             </div>
-                            <span class="text-xs font-semibold text-[#c96a7b] shrink-0">
+                            <span class="text-xs font-semibold text-[#c96a7b] shrink-0 whitespace-nowrap ml-auto">
                                 ${isExpanded ? '▴ 收合管理' : '▾ 點開管理活動'}
                             </span>
-                        </button>
+                        </div>
                         ${expandedBodyHtml}
                     </div>
                 `;
@@ -855,3 +974,6 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
 }
 
 window.recoverCustomActivityRegistrationsFromArchive = recoverCustomActivityRegistrationsFromArchive;
+window.toggleCustomActivityMatchSafety = toggleCustomActivityMatchSafety;
+window.syncNewCustomActAutoMatchTime = syncNewCustomActAutoMatchTime;
+window.syncEditCustomActAutoMatchTime = syncEditCustomActAutoMatchTime;

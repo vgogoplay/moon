@@ -134,15 +134,15 @@
                 </div>
                 <div class="admin-field-box !bg-rose-50/35">
                     <label class="block text-xs font-bold text-[#8f4452] mb-1.5">5. 活動開始時間（選填）</label>
-                    <input type="datetime-local" id="newCustomActStartTime" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
+                    <input type="datetime-local" id="newCustomActStartTime" onchange="syncNewCustomActAutoMatchTime()" oninput="syncNewCustomActAutoMatchTime()" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
                 </div>
                 <div class="admin-field-box !bg-rose-50/35">
                     <label class="block text-xs font-bold text-[#8f4452] mb-1.5">6. 報名結束時間（截止前可報名）</label>
-                    <input type="datetime-local" id="newCustomActEndTime" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
+                    <input type="datetime-local" id="newCustomActEndTime" onchange="syncNewCustomActAutoMatchTime()" oninput="syncNewCustomActAutoMatchTime()" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
                 </div>
                 <div class="admin-field-box !bg-amber-50/45 !border-amber-300">
-                    <label class="block text-xs font-bold text-amber-900 mb-1.5">7. 自動配對時間（到點自動配對）</label>
-                    <input type="datetime-local" id="newCustomActMatchTime" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
+                    <label class="block text-xs font-bold text-amber-900 mb-1.5">7. 自動配對時間（固定結束時間後 +1 分鐘）</label>
+                    <input type="datetime-local" id="newCustomActMatchTime" readonly class="w-full p-2 admin-input-box !bg-amber-50/70 text-xs font-mono font-semibold text-[#8f4452] cursor-not-allowed">
                 </div>
             </div>
 
@@ -188,15 +188,15 @@
                     </div>
                     <div class="admin-field-box !bg-rose-50/35">
                         <label class="block text-xs font-bold text-[#8f4452] mb-1.5">活動開始時間（選填）</label>
-                        <input type="datetime-local" id="editActStartTime" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
+                        <input type="datetime-local" id="editActStartTime" onchange="syncEditCustomActAutoMatchTime()" oninput="syncEditCustomActAutoMatchTime()" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
                     </div>
                     <div class="admin-field-box !bg-rose-50/35">
                         <label class="block text-xs font-bold text-[#8f4452] mb-1.5">報名結束時間（截止前可報名）</label>
-                        <input type="datetime-local" id="editActEndTime" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
+                        <input type="datetime-local" id="editActEndTime" onchange="syncEditCustomActAutoMatchTime()" oninput="syncEditCustomActAutoMatchTime()" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
                     </div>
                     <div class="md:col-span-2 admin-field-box !bg-amber-50/45 !border-amber-300">
-                        <label class="block text-xs font-bold text-amber-900 mb-1.5">自動配對時間（到點自動配對）</label>
-                        <input type="datetime-local" id="editActMatchTime" class="w-full p-2 admin-input-box text-xs font-mono font-semibold text-[#8f4452]">
+                        <label class="block text-xs font-bold text-amber-900 mb-1.5">自動配對時間（固定結束時間後 +1 分鐘）</label>
+                        <input type="datetime-local" id="editActMatchTime" readonly class="w-full p-2 admin-input-box !bg-amber-50/70 text-xs font-mono font-semibold text-[#8f4452] cursor-not-allowed">
                     </div>
                     <div class="md:col-span-2 admin-field-box">
                         <label class="block text-xs font-bold text-[#8f4452] mb-1.5">簡介（選填）</label>
@@ -212,15 +212,15 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261118f"></script>
+    <script src="shared/schedule.js?v=20261118t"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261118f"></script>
+    <script src="shared/cloud-store.js?v=20261118r"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261118l"></script>
+    <script src="backend/state.js?v=20261118r"></script>
     <script src="backend/matching.js?v=20261118f"></script>
     <script src="backend/activity-stats.js?v=20261116a"></script>
-    <script src="backend/custom-activities.js?v=20261118f"></script>
+    <script src="backend/custom-activities.js?v=20261118t"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261118m"></script>
+    <script src="backend/layout.js?v=20261118o"></script>
 </body>
 </html>

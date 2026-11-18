@@ -9,6 +9,7 @@ const SYSTEM_STATE_KEY = 'yuelao_system_batch';
 const BANNED_RULES_KEY = 'yuelao_banned_rules';
 const MAILBOX_KEY = 'yuelao_mailbox';
 const CHATS_KEY = 'yuelao_chats';
+const ADMIN_CHATS_KEY = 'yuelao_admin_chats';
 const CUSTOM_ACTIVITIES_KEY = 'yuelao_custom_activities';
 const REG_HISTORY_KEY = 'yuelao_activity_reg_history';
 const FORCE_KEY = 'yuelao_force_matches';
@@ -790,8 +791,13 @@ const CloudSync = {
             ActivityRegArchive.mergeCloudTreeAndUsers(t[REG_HISTORY_KEY], usersArr);
         }
 
-        // 2. 聊天紀錄
-        this.writeLocalIfChanged(CHATS_KEY, JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY])));
+        // 2. 聊天紀錄（前後台分開儲存：後台寫入完整全站聊天快取 ADMIN_CHATS_KEY，避免同瀏覽器開啟前台分頁時覆蓋清空）
+        const scopedChatsJson = JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY]));
+        if (this.isBackendContext()) {
+            this.writeLocalIfChanged(ADMIN_CHATS_KEY, scopedChatsJson);
+        } else {
+            this.writeLocalIfChanged(CHATS_KEY, scopedChatsJson);
+        }
 
         // 3. 系統開關與期數設定
         if (t[SYSTEM_STATE_KEY] && typeof t[SYSTEM_STATE_KEY] === 'object') {
@@ -859,6 +865,7 @@ const CloudSync = {
             const actsArr = this.mapToArray(t[CUSTOM_ACTIVITIES_KEY]).map(act => {
                 if (!act || typeof act !== 'object') return act;
                 const cleanAct = { ...act };
+                cleanAct.matchSafetyEnabled = Boolean(cleanAct.matchSafetyEnabled);
                 const mapObj = (cleanAct.matchedUserMap && typeof cleanAct.matchedUserMap === 'object' && !Array.isArray(cleanAct.matchedUserMap))
                     ? { ...cleanAct.matchedUserMap }
                     : {};
@@ -1984,14 +1991,52 @@ const ChatStore = {
         return [String(id1), String(id2)].sort().join('__');
     },
 
+    getStorageKeyForContext() {
+        if (typeof CloudSync !== 'undefined' && typeof CloudSync.isBackendContext === 'function' && CloudSync.isBackendContext()) {
+            return ADMIN_CHATS_KEY;
+        }
+        return CHATS_KEY;
+    },
+
     getAll() {
-        const parsed = LocalJsonCache.get(CHATS_KEY, () => ({}));
+        const targetKey = this.getStorageKeyForContext();
+        let parsed = LocalJsonCache.get(targetKey, null);
+        if (!parsed && targetKey === ADMIN_CHATS_KEY) {
+            parsed = LocalJsonCache.get(CHATS_KEY, () => ({}));
+        }
         return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
     },
 
     saveAll(allChats) {
-        localStorage.setItem(CHATS_KEY, JSON.stringify(allChats));
-        LocalJsonCache.invalidate(CHATS_KEY);
+        const serialized = JSON.stringify(allChats);
+        const targetKey = this.getStorageKeyForContext();
+        localStorage.setItem(targetKey, serialized);
+        LocalJsonCache.invalidate(targetKey);
+        if (targetKey === ADMIN_CHATS_KEY) {
+            // 若前台分頁正在觀看其中一間聊天室，同步更新已存在的 key（不覆蓋其他分頁結構）
+            try {
+                const feRaw = localStorage.getItem(CHATS_KEY);
+                if (feRaw) {
+                    const feObj = JSON.parse(feRaw);
+                    if (feObj && typeof feObj === 'object' && !Array.isArray(feObj)) {
+                        let feChanged = false;
+                        Object.keys(feObj).forEach(pk => {
+                            if (!Object.prototype.hasOwnProperty.call(allChats, pk)) {
+                                delete feObj[pk];
+                                feChanged = true;
+                            } else if (JSON.stringify(feObj[pk]) !== JSON.stringify(allChats[pk])) {
+                                feObj[pk] = allChats[pk];
+                                feChanged = true;
+                            }
+                        });
+                        if (feChanged) {
+                            localStorage.setItem(CHATS_KEY, JSON.stringify(feObj));
+                            LocalJsonCache.invalidate(CHATS_KEY);
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
     },
 
     getMessages(id1, id2) {

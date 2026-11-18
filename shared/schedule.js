@@ -97,6 +97,19 @@ function parseLocalDateTimeTs(dtVal) {
     return isNaN(fallback) ? 0 : fallback;
 }
 
+function formatLocalDateTimeInputValue(ts) {
+    const num = Number(ts) || 0;
+    if (!num || isNaN(num)) return '';
+    const d = new Date(num);
+    if (isNaN(d.getTime())) return '';
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
 function formatShortDateTime(dtVal, includeYearIfDifferent = true) {
     const ts = parseLocalDateTimeTs(dtVal);
     if (!ts) return '';
@@ -391,6 +404,52 @@ const CUSTOM_ACT_CLOUD_LOCKS_NODE = 'yuelao_custom_act_locks';
 const CUSTOM_ACT_AUTO_MATCH_GRACE_MS = 15 * 60 * 1000; // 超過設定配對時間 15 分鐘即視為逾期，絕不在更新重整時自動補跑
 const customActivityAutoLockInFlight = new Set();
 
+function isCustomActivityMatchSafetyEnabled(act) {
+    return Boolean(act && typeof act === 'object' && act.matchSafetyEnabled);
+}
+
+function getCustomActivityAllowedMinTs(nowTs = Date.now()) {
+    const d = new Date(Number(nowTs) || Date.now());
+    const todayStartTs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+    const floor20261118Ts = new Date(2026, 10, 18, 0, 0, 0, 0).getTime(); // 2026/11/18 00:00:00
+    return Math.max(todayStartTs, floor20261118Ts);
+}
+
+function isCustomActivityBeforeAllowedDate(act, nowTs = Date.now()) {
+    if (!act || typeof act !== 'object') return true;
+    const cutoffTs = getCustomActivityAllowedMinTs(nowTs);
+    const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+    const endTs = parseLocalDateTimeTs(act.endTime || act.endTimeTs);
+    const startTs = parseLocalDateTimeTs(act.startTime || act.startTimeTs);
+    const createdAtTs = Number(act.createdAtTs || 0);
+
+    if (matchTs > 0) {
+        return matchTs < cutoffTs;
+    }
+    if (endTs > 0) {
+        return endTs < cutoffTs;
+    }
+    if (startTs > 0) {
+        return startTs < cutoffTs;
+    }
+
+    const nameDateMatch = String(act.name || '').match(/(\d{1,2})\s*[\/月.-]\s*(\d{1,2})/);
+    if (nameDateMatch) {
+        const mNum = parseInt(nameDateMatch[1], 10);
+        const dNum = parseInt(nameDateMatch[2], 10);
+        if (mNum >= 1 && mNum <= 12 && dNum >= 1 && dNum <= 31) {
+            const refYear = new Date(cutoffTs).getFullYear();
+            const namedDateTs = new Date(refYear, mNum - 1, dNum, 0, 0, 0, 0).getTime();
+            if (namedDateTs < cutoffTs) return true;
+        }
+    }
+
+    if (createdAtTs > 0 && createdAtTs < cutoffTs) {
+        return true;
+    }
+    return false;
+}
+
 function makeCustomActLockNodeKey(activityId, matchTs) {
     return `${String(activityId || '').trim()}_${Number(matchTs || 0)}`;
 }
@@ -437,6 +496,7 @@ function getCustomActivityMatchedUserIdSet(act, usersList = null) {
 
 async function executeCustomActivityMatchCore(activityId, options = {}) {
     const { isAuto = false, markScheduledDone = false, forceManualOverride = false } = options;
+
     let acts = [];
     try {
         acts = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
@@ -446,20 +506,28 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     const act = Array.isArray(acts) ? acts.find(a => String(a.id) === String(activityId)) : null;
     if (!act) return { executed: false, reason: 'not_found', pairCount: 0, unmatchedCount: 0 };
 
+    // 1. 個別活動配對防呆開關檢查：若此活動未開啟防呆開關，不管手動或自動皆一律禁止配對
+    if (!isCustomActivityMatchSafetyEnabled(act)) {
+        return { executed: false, reason: 'safety_locked', actName: act.name, pairCount: 0, unmatchedCount: 0 };
+    }
+
     const nowCheckTs = Date.now();
     const scheduledMatchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
 
-    // 嚴格防護：活動已關閉、已標記完成配對，或已超過設定配對時間 15 分鐘以上時，除非明確帶入 forceManualOverride，否則一律中止執行
-    if (!forceManualOverride) {
-        if (!act.isOpen) {
-            return { executed: false, reason: 'closed', actName: act.name, pairCount: 0, unmatchedCount: 0 };
-        }
-        if (Boolean(act.autoMatchedDone)) {
-            return { executed: false, reason: 'already_done', actName: act.name, pairCount: 0, unmatchedCount: 0 };
-        }
-        if (scheduledMatchTs > 0 && (nowCheckTs - scheduledMatchTs) > CUSTOM_ACT_AUTO_MATCH_GRACE_MS) {
-            return { executed: false, reason: 'expired', actName: act.name, pairCount: 0, unmatchedCount: 0 };
-        }
+    // 2. 日期防呆檢查：自動排程對今天（11/18）之前的歷史活動一律禁止配對（手動開啟防呆開關並點擊執行則允許）
+    if (!forceManualOverride && isCustomActivityBeforeAllowedDate(act, nowCheckTs)) {
+        return { executed: false, reason: 'before_today_cutoff', actName: act.name, pairCount: 0, unmatchedCount: 0 };
+    }
+
+    // 3. 活動狀態嚴格防護：已關閉（!act.isOpen）或已結算完成配對（autoMatchedDone）的活動，一律禁止再次配對
+    if (!act.isOpen) {
+        return { executed: false, reason: 'closed', actName: act.name, pairCount: 0, unmatchedCount: 0 };
+    }
+    if (Boolean(act.autoMatchedDone)) {
+        return { executed: false, reason: 'already_done', actName: act.name, pairCount: 0, unmatchedCount: 0 };
+    }
+    if (!forceManualOverride && scheduledMatchTs > 0 && (nowCheckTs - scheduledMatchTs) > CUSTOM_ACT_AUTO_MATCH_GRACE_MS) {
+        return { executed: false, reason: 'expired', actName: act.name, pairCount: 0, unmatchedCount: 0 };
     }
 
     if (isAuto || markScheduledDone) {
@@ -666,8 +734,20 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
     const lockNodeKey = makeCustomActLockNodeKey(activityId, matchTs);
     let claimedSuccessfully = false;
     try {
+        const nowGuardTs = Date.now();
+        // 為 11/18 之前日期或本地活動未開啟配對防呆開關時，絕不自動搶鎖執行
+        if (Number(matchTs || 0) < getCustomActivityAllowedMinTs(nowGuardTs)) {
+            return;
+        }
+        try {
+            const localCheckActs = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
+            const localTargetAct = Array.isArray(localCheckActs) ? localCheckActs.find(a => String(a.id) === String(activityId)) : null;
+            if (!localTargetAct || !localTargetAct.isOpen || !isCustomActivityMatchSafetyEnabled(localTargetAct) || localTargetAct.autoMatchedDone) {
+                return;
+            }
+        } catch (e) {}
         // 逾期保護：距離設定配對時間超過 15 分鐘即不再背景自動觸發
-        if (Date.now() - Number(matchTs || 0) > CUSTOM_ACT_AUTO_MATCH_GRACE_MS) {
+        if (nowGuardTs - Number(matchTs || 0) > CUSTOM_ACT_AUTO_MATCH_GRACE_MS) {
             return;
         }
 
@@ -698,8 +778,8 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
             const remoteAct = await actRes.json();
             const remoteLock = await lockRes.json();
 
-            // 若雲端活動已關閉、已標記 autoMatchedDone，或已有其他裝置搶先寫入雲端鎖，立即停止不再執行第二次
-            if (!remoteAct || !remoteAct.isOpen || remoteAct.autoMatchedDone || (remoteLock && remoteLock.claimedBy)) {
+            // 若雲端活動已關閉、未開啟該活動配對防呆開關、已標記 autoMatchedDone，或已有其他裝置搶先寫入雲端鎖，立即停止不再執行第二次
+            if (!remoteAct || !remoteAct.isOpen || !remoteAct.matchSafetyEnabled || remoteAct.autoMatchedDone || (remoteLock && remoteLock.claimedBy)) {
                 claimedSuccessfully = true;
                 try { localStorage.setItem(lockKey, `DONE_${Date.now()}`); } catch (e) {}
                 if (remoteAct && typeof remoteAct === 'object') {
@@ -791,7 +871,8 @@ function checkScheduledCustomActivities(isFrontendCaller = false) {
     let triggeredAny = false;
 
     acts.forEach(act => {
-        if (!act || !act.id || !act.isOpen || act.autoMatchedDone) return;
+        if (!act || !act.id || !act.isOpen || !isCustomActivityMatchSafetyEnabled(act) || act.autoMatchedDone) return;
+        if (isCustomActivityBeforeAllowedDate(act, nowTs)) return;
         const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
         if (!matchTs || nowTs < matchTs) return;
         // 逾期保護：距離設定配對時間超過 15 分鐘不再自動補跑，避免版本更新重整時意外觸發歷史活動

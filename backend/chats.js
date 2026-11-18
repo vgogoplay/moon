@@ -1,4 +1,4 @@
-/* backend/chats.js - 後台玩家聊天紀錄查詢（每頁 10 間分頁 + 近 30 則懶加載＋往上滑動載入更早 30 則） */
+/* backend/chats.js - 後台玩家聊天紀錄查詢（每頁 10 間分頁 + 增量無閃爍渲染 + 近 30 則懶加載） */
 
 let selectedAdminChatPairKey = '';
 let adminChatSearchKeyword = '';
@@ -16,6 +16,9 @@ let lastAdminChatPrependTriggerTs = 0;
 
 let lastAdminChatRoomsSig = '';
 let lastAdminChatDetailSig = '';
+let renderedAdminChatRoomKey = '';
+let renderedAdminChatKeyword = '';
+let renderedAdminChatMsgKeys = new Set();
 
 function escapeChatAdminHtml(str) {
     return String(str ?? '')
@@ -52,6 +55,21 @@ function highlightChatKeywordHtml(text, keyword) {
     return safeText.replace(regex, '<mark class="bg-amber-200 text-[#8f4452] px-0.5 rounded">$1</mark>');
 }
 
+function getAdminChatMessageUniqueKey(m, fallbackIdx = 0) {
+    if (!m || typeof m !== 'object') return `EMPTY_${fallbackIdx}`;
+    if (m.id && String(m.id).trim()) {
+        return String(m.id).trim();
+    }
+    return `${String(m.senderId || '')}_${Number(m.ts || 0)}_${String(m.text || '').slice(0, 24)}_${fallbackIdx}`;
+}
+
+function resetRenderedAdminChatDomState() {
+    lastAdminChatDetailSig = '';
+    renderedAdminChatRoomKey = '';
+    renderedAdminChatKeyword = '';
+    renderedAdminChatMsgKeys = new Set();
+}
+
 let adminChatSearchDebounceTimer = null;
 
 function onAdminChatSearchInput(val) {
@@ -62,7 +80,7 @@ function onAdminChatSearchInput(val) {
         clearBtn.classList.toggle('hidden', adminChatSearchKeyword === '');
     }
     lastAdminChatRoomsSig = '';
-    lastAdminChatDetailSig = '';
+    resetRenderedAdminChatDomState();
     if (adminChatSearchDebounceTimer) clearTimeout(adminChatSearchDebounceTimer);
     adminChatSearchDebounceTimer = setTimeout(() => {
         adminChatSearchDebounceTimer = null;
@@ -78,7 +96,7 @@ function clearAdminChatSearch() {
     const clearBtn = document.getElementById('clearAdminChatSearchBtn');
     if (clearBtn) clearBtn.classList.add('hidden');
     lastAdminChatRoomsSig = '';
-    lastAdminChatDetailSig = '';
+    resetRenderedAdminChatDomState();
     renderAdminAll(true);
 }
 
@@ -91,21 +109,22 @@ function goToAdminChatRoomsPage(pageNum) {
 }
 
 function selectAdminChatRoom(pairKey) {
-    selectedAdminChatPairKey = String(pairKey || '');
-    activeAdminChatDetailPairKey = selectedAdminChatPairKey;
+    const nextKey = String(pairKey || '');
+    selectedAdminChatPairKey = nextKey;
+    activeAdminChatDetailPairKey = nextKey;
     adminChatVisibleBatchLimit = ADMIN_CHAT_BATCH_STEP;
     lastObservedAdminChatMsgCount = 0;
     shouldScrollAdminChatToLatest = true;
     pendingPreserveAdminChatScrollOnPrepend = false;
     lastAdminChatRoomsSig = '';
-    lastAdminChatDetailSig = '';
+    resetRenderedAdminChatDomState();
     renderAdminAll(true);
 }
 
 function loadMoreOlderAdminChatMessages() {
     const chatsMap = typeof getAdminChatsMap === 'function'
         ? getAdminChatsMap()
-        : JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+        : JSON.parse(localStorage.getItem(typeof ADMIN_CHATS_KEY !== 'undefined' ? ADMIN_CHATS_KEY : CHATS_KEY) || '{}');
     const rawThread = selectedAdminChatPairKey ? chatsMap[selectedAdminChatPairKey] : null;
     const totalCount = Array.isArray(rawThread)
         ? rawThread.length
@@ -124,15 +143,15 @@ function ensureAdminChatDetailScrollPagination(detailMsgsBox) {
     detailMsgsBox.dataset.adminScrollBound = '1';
 
     detailMsgsBox.addEventListener('scroll', () => {
-        if (isAutoScrollingAdminChatBottom || shouldScrollAdminChatToLatest) return;
-        if (detailMsgsBox.scrollTop > 24) return;
+        if (isAutoScrollingAdminChatBottom || shouldScrollAdminChatToLatest || pendingPreserveAdminChatScrollOnPrepend) return;
+        if (detailMsgsBox.scrollTop > 16) return;
 
         const now = Date.now();
-        if (now - lastAdminChatPrependTriggerTs < 200) return;
+        if (now - lastAdminChatPrependTriggerTs < 350) return;
 
         const chatsMap = typeof getAdminChatsMap === 'function'
             ? getAdminChatsMap()
-            : JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+            : JSON.parse(localStorage.getItem(typeof ADMIN_CHATS_KEY !== 'undefined' ? ADMIN_CHATS_KEY : CHATS_KEY) || '{}');
         const rawThread = selectedAdminChatPairKey ? chatsMap[selectedAdminChatPairKey] : null;
         const totalCount = Array.isArray(rawThread)
             ? rawThread.length
@@ -198,6 +217,63 @@ function buildAdminChatRoomEntries(users, chatsMap) {
     return rooms;
 }
 
+function buildAdminChatTopBannerHtml(remainingOlderCount, totalRoomMsgs) {
+    if (remainingOlderCount > 0) {
+        const nextLoadCount = Math.min(ADMIN_CHAT_BATCH_STEP, remainingOlderCount);
+        return `
+            <div data-chat-banner="1" class="text-center pb-1.5">
+                <button type="button" onclick="loadMoreOlderAdminChatMessages()" class="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-pink-200 text-[11px] text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-2xs">
+                    <span>⬆️ 往上滑動或點擊載入更早 ${nextLoadCount} 則（還有 ${remainingOlderCount} 則）</span>
+                </button>
+            </div>
+        `;
+    }
+    if (totalRoomMsgs > ADMIN_CHAT_BATCH_STEP) {
+        return `
+            <div data-chat-banner="1" class="text-center pb-1.5">
+                <span class="inline-block px-3 py-0.5 rounded-full bg-pink-50/90 text-[10px] text-gray-400">
+                    🌸 已顯示全部 ${totalRoomMsgs} 則對話紀錄
+                </span>
+            </div>
+        `;
+    }
+    return '';
+}
+
+function buildAdminChatSingleBubbleHtml(m, activeRoom, msgKey) {
+    const senderId = String(m.senderId || '');
+    const timeDisplay = formatAdminChatDateTime(m);
+    const safeKeyAttr = escapeChatAdminHtml(msgKey);
+
+    if (senderId === 'system' || m.sender === 'system') {
+        return `
+            <div data-msg-key="${safeKeyAttr}" class="text-center my-2">
+                <span class="inline-block px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-[#8f4452] leading-relaxed">
+                    ${highlightChatKeywordHtml(m.text || '', adminChatSearchKeyword)}
+                </span>
+                ${timeDisplay ? `<div class="text-[10px] text-gray-400 mt-0.5">${escapeChatAdminHtml(timeDisplay)}</div>` : ''}
+            </div>
+        `;
+    }
+
+    const isSideB = (senderId === String(activeRoom.idB));
+    const senderLabel = isSideB
+        ? `${activeRoom.nameB} (ID:${activeRoom.idB})`
+        : `${activeRoom.nameA} (ID:${activeRoom.idA})`;
+
+    return `
+        <div data-msg-key="${safeKeyAttr}" class="flex flex-col ${isSideB ? 'items-end' : 'items-start'}">
+            <span class="text-[10px] font-semibold mb-0.5 px-1 ${isSideB ? 'text-[#c96a7b]' : 'text-sky-700'}">
+                ${escapeChatAdminHtml(senderLabel)}
+            </span>
+            <div class="max-w-[82%] px-3.5 py-2 rounded-2xl text-xs leading-relaxed shadow-2xs whitespace-pre-wrap break-words ${isSideB ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white rounded-br-xs' : 'bg-white border border-pink-200 text-gray-700 rounded-bl-xs'}">
+                ${highlightChatKeywordHtml(m.text || '', adminChatSearchKeyword)}
+            </div>
+            <span class="text-[10px] text-gray-400 mt-0.5 px-1">${escapeChatAdminHtml(timeDisplay)}</span>
+        </div>
+    `;
+}
+
 function renderChatsPageSection(users, forceRender = false) {
     const roomsListBox = document.getElementById('adminChatRoomsList');
     const roomsPaginationBar = document.getElementById('adminChatRoomsPaginationBar');
@@ -207,26 +283,9 @@ function renderChatsPageSection(users, forceRender = false) {
 
     ensureAdminChatDetailScrollPagination(detailMsgsBox);
 
-    // 每日一次自動清理超過 3 天無更新／無新訊息的聊天室（刪除不保存＋自動解除雙方會員列表好友配對）
-    if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
-        const purgedList = ChatStore.purgeInactiveRooms(Date.now());
-        if (purgedList.length > 0) {
-            if (purgedList.some(p => p.pairKey === selectedAdminChatPairKey)) {
-                selectedAdminChatPairKey = '';
-                activeAdminChatDetailPairKey = '';
-            }
-            if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
-                AdminMemoryCache.invalidate('chats');
-                AdminMemoryCache.invalidate('users');
-            }
-            users = typeof getUsers === 'function' ? getUsers() : users;
-            forceRender = true;
-        }
-    }
-
     const chatsMap = typeof getAdminChatsMap === 'function'
         ? getAdminChatsMap()
-        : JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+        : JSON.parse(localStorage.getItem(typeof ADMIN_CHATS_KEY !== 'undefined' ? ADMIN_CHATS_KEY : CHATS_KEY) || '{}');
 
     const allRooms = buildAdminChatRoomEntries(users, chatsMap);
     const totalMessagesAll = allRooms.reduce((sum, r) => sum + r.messages.length, 0);
@@ -268,7 +327,7 @@ function renderChatsPageSection(users, forceRender = false) {
         rooms: pageRooms.map(r => [r.pairKey, r.nameA, r.nameB, r.messages.length, r.lastTs, r.lastMsg.text])
     });
 
-    if (forceRender || roomsSig !== lastAdminChatRoomsSig) {
+    if (roomsSig !== lastAdminChatRoomsSig || roomsListBox.children.length === 0) {
         lastAdminChatRoomsSig = roomsSig;
         if (pageRooms.length === 0) {
             roomsListBox.innerHTML = `
@@ -350,9 +409,16 @@ function renderChatsPageSection(users, forceRender = false) {
 
     const activeRoom = allRooms.find(r => r.pairKey === selectedAdminChatPairKey) || null;
     if (!activeRoom) {
+        const isCloudSyncing = (typeof CloudSync !== 'undefined' && !CloudSync.initialized);
+        if (selectedAdminChatPairKey && isCloudSyncing && detailMsgsBox.children.length > 0) {
+            return;
+        }
         const emptySig = `EMPTY|${selectedAdminChatPairKey}`;
-        if (!forceRender && emptySig === lastAdminChatDetailSig) return;
+        if (emptySig === lastAdminChatDetailSig && detailMsgsBox.children.length > 0) return;
         lastAdminChatDetailSig = emptySig;
+        renderedAdminChatRoomKey = '';
+        renderedAdminChatKeyword = '';
+        renderedAdminChatMsgKeys = new Set();
 
         detailHeaderBox.innerHTML = `
             <div>
@@ -385,16 +451,22 @@ function renderChatsPageSection(users, forceRender = false) {
     lastObservedAdminChatMsgCount = totalRoomMsgs;
 
     const effectiveVisibleCount = Math.min(totalRoomMsgs, Math.max(ADMIN_CHAT_BATCH_STEP, adminChatVisibleBatchLimit));
-    const visibleMsgs = effectiveVisibleCount < totalRoomMsgs
-        ? activeRoom.messages.slice(-effectiveVisibleCount)
+    const sliceStartIdx = Math.max(0, totalRoomMsgs - effectiveVisibleCount);
+    const visibleMsgs = sliceStartIdx > 0
+        ? activeRoom.messages.slice(sliceStartIdx)
         : activeRoom.messages;
     const remainingOlderCount = Math.max(0, totalRoomMsgs - visibleMsgs.length);
 
-    const firstMsgObj = visibleMsgs[0];
-    const lastMsgObj = visibleMsgs[visibleMsgs.length - 1];
-    const detailSig = `${activeRoom.pairKey}|${totalRoomMsgs}|${visibleMsgs.length}|${firstMsgObj?.id || firstMsgObj?.ts || ''}|${lastMsgObj?.id || lastMsgObj?.ts || ''}|${kw}`;
+    const visibleKeyedItems = visibleMsgs.map((m, idx) => ({
+        msg: m,
+        key: getAdminChatMessageUniqueKey(m, sliceStartIdx + idx)
+    }));
 
-    if (forceRender || detailSig !== lastAdminChatDetailSig) {
+    const firstKey = visibleKeyedItems[0]?.key || '';
+    const lastKey = visibleKeyedItems[visibleKeyedItems.length - 1]?.key || '';
+    const detailSig = `${activeRoom.pairKey}|${activeRoom.nameA}|${activeRoom.nameB}|${totalRoomMsgs}|${visibleKeyedItems.length}|${firstKey}|${lastKey}|${kw}`;
+
+    if (detailSig !== lastAdminChatDetailSig || detailMsgsBox.children.length === 0) {
         const prevScrollTop = detailMsgsBox.scrollTop;
         const prevScrollHeight = detailMsgsBox.scrollHeight;
         const isPrependingOlder = pendingPreserveAdminChatScrollOnPrepend;
@@ -409,71 +481,102 @@ function renderChatsPageSection(users, forceRender = false) {
                     <span class="text-pink-400">⇄</span>
                     <span>${escapeChatAdminHtml(activeRoom.nameB)} (ID:${escapeChatAdminHtml(activeRoom.idB)})</span>
                 </div>
-                <p class="text-[11px] text-gray-500 mt-0.5">房間代號：<span class="font-mono">${escapeChatAdminHtml(activeRoom.pairKey)}</span> ・ 目前顯示最新 ${visibleMsgs.length} / 共 ${totalRoomMsgs} 則訊息</p>
+                <p class="text-[11px] text-gray-500 mt-0.5">房間代號：<span class="font-mono">${escapeChatAdminHtml(activeRoom.pairKey)}</span> ・ 目前顯示最新 ${visibleKeyedItems.length} / 共 ${totalRoomMsgs} 則訊息</p>
             </div>
         `;
 
-        let topBannerHtml = '';
-        if (remainingOlderCount > 0) {
-            const nextLoadCount = Math.min(ADMIN_CHAT_BATCH_STEP, remainingOlderCount);
-            topBannerHtml = `
-                <div class="text-center pb-1.5">
-                    <button type="button" onclick="loadMoreOlderAdminChatMessages()" class="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-pink-200 text-[11px] text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-2xs">
-                        <span>⬆️ 往上滑動或點擊載入更早 ${nextLoadCount} 則（還有 ${remainingOlderCount} 則）</span>
-                    </button>
-                </div>
-            `;
-        } else if (totalRoomMsgs > ADMIN_CHAT_BATCH_STEP) {
-            topBannerHtml = `
-                <div class="text-center pb-1.5">
-                    <span class="inline-block px-3 py-0.5 rounded-full bg-pink-50/90 text-[10px] text-gray-400">
-                        🌸 已顯示全部 ${totalRoomMsgs} 則對話紀錄
-                    </span>
-                </div>
-            `;
+        const canIncrementalPatch = (
+            renderedAdminChatRoomKey === activeRoom.pairKey &&
+            renderedAdminChatKeyword === kw &&
+            renderedAdminChatMsgKeys.size > 0 &&
+            detailMsgsBox.querySelector('[data-msg-key]') !== null
+        );
+
+        let didIncrementalPatch = false;
+        if (canIncrementalPatch) {
+            const nextKeysSet = new Set(visibleKeyedItems.map(item => item.key));
+            let allPrevStillPresent = true;
+            for (const oldKey of renderedAdminChatMsgKeys) {
+                if (!nextKeysSet.has(oldKey)) {
+                    allPrevStillPresent = false;
+                    break;
+                }
+            }
+
+            if (allPrevStillPresent) {
+                // 1. 找出新增在最前面的更早訊息（向上載入歷史紀錄）
+                const leadingNewItems = [];
+                for (let i = 0; i < visibleKeyedItems.length; i++) {
+                    if (renderedAdminChatMsgKeys.has(visibleKeyedItems[i].key)) break;
+                    leadingNewItems.push(visibleKeyedItems[i]);
+                }
+
+                // 2. 找出新增在最尾端的最新訊息（即時收到新對話）
+                const trailingNewItems = [];
+                for (let i = visibleKeyedItems.length - 1; i >= 0; i--) {
+                    if (renderedAdminChatMsgKeys.has(visibleKeyedItems[i].key)) break;
+                    trailingNewItems.unshift(visibleKeyedItems[i]);
+                }
+
+                // 3. 更新頂部提示條（不影響下方既有的訊息氣泡 DOM）
+                const topBannerHtml = buildAdminChatTopBannerHtml(remainingOlderCount, totalRoomMsgs);
+                const existingBanner = detailMsgsBox.querySelector('[data-chat-banner="1"]');
+                if (existingBanner) {
+                    if (topBannerHtml) {
+                        existingBanner.outerHTML = topBannerHtml;
+                    } else {
+                        existingBanner.remove();
+                    }
+                } else if (topBannerHtml) {
+                    detailMsgsBox.insertAdjacentHTML('afterbegin', topBannerHtml);
+                }
+
+                if (leadingNewItems.length > 0) {
+                    const prependHtml = leadingNewItems
+                        .map(item => buildAdminChatSingleBubbleHtml(item.msg, activeRoom, item.key))
+                        .join('');
+                    const firstBubbleEl = detailMsgsBox.querySelector('[data-msg-key]');
+                    if (firstBubbleEl) {
+                        firstBubbleEl.insertAdjacentHTML('beforebegin', prependHtml);
+                    } else {
+                        detailMsgsBox.insertAdjacentHTML('beforeend', prependHtml);
+                    }
+                }
+
+                if (trailingNewItems.length > 0) {
+                    const appendHtml = trailingNewItems
+                        .map(item => buildAdminChatSingleBubbleHtml(item.msg, activeRoom, item.key))
+                        .join('');
+                    detailMsgsBox.insertAdjacentHTML('beforeend', appendHtml);
+                }
+
+                renderedAdminChatMsgKeys = nextKeysSet;
+                didIncrementalPatch = true;
+            }
         }
 
-        const bubblesHtml = visibleMsgs.map(m => {
-            const senderId = String(m.senderId || '');
-            const timeDisplay = formatAdminChatDateTime(m);
-            if (senderId === 'system' || m.sender === 'system') {
-                return `
-                    <div class="text-center my-2">
-                        <span class="inline-block px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-[#8f4452] leading-relaxed">
-                            ${highlightChatKeywordHtml(m.text || '', adminChatSearchKeyword)}
-                        </span>
-                        ${timeDisplay ? `<div class="text-[10px] text-gray-400 mt-0.5">${escapeChatAdminHtml(timeDisplay)}</div>` : ''}
-                    </div>
-                `;
-            }
-
-            const isSideB = (senderId === String(activeRoom.idB));
-            const senderLabel = isSideB
-                ? `${activeRoom.nameB} (ID:${activeRoom.idB})`
-                : `${activeRoom.nameA} (ID:${activeRoom.idA})`;
-
-            return `
-                <div class="flex flex-col ${isSideB ? 'items-end' : 'items-start'}">
-                    <span class="text-[10px] font-semibold mb-0.5 px-1 ${isSideB ? 'text-[#c96a7b]' : 'text-sky-700'}">
-                        ${escapeChatAdminHtml(senderLabel)}
-                    </span>
-                    <div class="max-w-[82%] px-3.5 py-2 rounded-2xl text-xs leading-relaxed shadow-2xs whitespace-pre-wrap break-words ${isSideB ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white rounded-br-xs' : 'bg-white border border-pink-200 text-gray-700 rounded-bl-xs'}">
-                        ${highlightChatKeywordHtml(m.text || '', adminChatSearchKeyword)}
-                    </div>
-                    <span class="text-[10px] text-gray-400 mt-0.5 px-1">${escapeChatAdminHtml(timeDisplay)}</span>
-                </div>
-            `;
-        }).join('');
-
-        detailMsgsBox.innerHTML = topBannerHtml + bubblesHtml;
+        if (!didIncrementalPatch) {
+            const topBannerHtml = buildAdminChatTopBannerHtml(remainingOlderCount, totalRoomMsgs);
+            const bubblesHtml = visibleKeyedItems
+                .map(item => buildAdminChatSingleBubbleHtml(item.msg, activeRoom, item.key))
+                .join('');
+            detailMsgsBox.innerHTML = topBannerHtml + bubblesHtml;
+            renderedAdminChatRoomKey = activeRoom.pairKey;
+            renderedAdminChatKeyword = kw;
+            renderedAdminChatMsgKeys = new Set(visibleKeyedItems.map(item => item.key));
+        }
 
         if (!shouldScrollAdminChatToLatest) {
+            isAutoScrollingAdminChatBottom = true;
             if (isPrependingOlder) {
                 const newScrollHeight = detailMsgsBox.scrollHeight;
-                detailMsgsBox.scrollTop = Math.max(28, prevScrollTop + (newScrollHeight - prevScrollHeight));
-            } else {
+                detailMsgsBox.scrollTop = Math.max(24, prevScrollTop + (newScrollHeight - prevScrollHeight));
+            } else if (!didIncrementalPatch) {
                 detailMsgsBox.scrollTop = prevScrollTop;
             }
+            requestAnimationFrame(() => {
+                isAutoScrollingAdminChatBottom = false;
+            });
         }
     }
 
@@ -490,6 +593,6 @@ function renderChatsPageSection(users, forceRender = false) {
         setTimeout(() => {
             scrollToLatest();
             isAutoScrollingAdminChatBottom = false;
-        }, 60);
+        }, 80);
     }
 }

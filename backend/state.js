@@ -230,6 +230,8 @@ function toggleWishEarlyCloseCanMatch() {
 }
 
 
+
+
 // ==================== 🔑 玩家專屬固定唯一 5 碼英數備份／還原通行碼產生與複製（供玩家遺忘時提供） ====================
 // 共用 shared/schema.js 的 5 碼英數通行碼演算法
 function generatePlayerBackupCode(userObj, allUsers = null) {
@@ -429,8 +431,16 @@ function saveMailbox(mails) {
     renderAdminAll(true);
 }
 
+function getAdminChatsStorageKey() {
+    return (typeof ADMIN_CHATS_KEY !== 'undefined') ? ADMIN_CHATS_KEY : 'yuelao_admin_chats';
+}
+
 function getAdminChatsMap() {
-    const raw = localStorage.getItem(CHATS_KEY) || '{}';
+    const adminKey = getAdminChatsStorageKey();
+    let raw = localStorage.getItem(adminKey);
+    if (raw === null) {
+        raw = localStorage.getItem(CHATS_KEY) || '{}';
+    }
     if (raw === AdminMemoryCache.chatsRaw && AdminMemoryCache.chats && typeof AdminMemoryCache.chats === 'object') {
         return AdminMemoryCache.chats;
     }
@@ -1069,14 +1079,8 @@ async function unlockAdminUI() {
 
     // 2. 雲端背景靜默同步：下載完成後自動比對更新並開啟即時 SSE 推播
     CloudSync.init(() => {
-        if (typeof AdminMemoryCache !== 'undefined') {
-            AdminMemoryCache.invalidate();
-        }
         renderAdminAll(false);
     }).then(() => {
-        if (typeof AdminMemoryCache !== 'undefined') {
-            AdminMemoryCache.invalidate();
-        }
         checkAutoSchedule2000();
         if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
             const purgedOnLoad = ChatStore.purgeInactiveRooms(Date.now());
@@ -1169,7 +1173,7 @@ function pollSharedStorageChanges() {
     const curUsers = localStorage.getItem(USERS_KEY) || '';
     const curReports = localStorage.getItem(REPORTS_KEY) || '';
     const curSys = localStorage.getItem(SYSTEM_STATE_KEY) || '';
-    const curChats = localStorage.getItem(CHATS_KEY) || '';
+    const curChats = localStorage.getItem(getAdminChatsStorageKey()) || '';
     const curMatchLogs = localStorage.getItem(MATCH_LOGS_KEY) || '';
     const pOpKey = (typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs';
     const curPlayerOpLogs = localStorage.getItem(pOpKey) || '';
@@ -1190,7 +1194,7 @@ window.addEventListener('storage', (e) => {
     const pOpKey = (typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs';
     const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
     const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
-    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, CHATS_KEY, REG_HISTORY_KEY, 'yuelao_admin_login_logs', MATCH_LOGS_KEY, pOpKey, fwKey, wwKey].includes(e.key)) {
+    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, getAdminChatsStorageKey(), REG_HISTORY_KEY, 'yuelao_admin_login_logs', MATCH_LOGS_KEY, pOpKey, fwKey, wwKey].includes(e.key)) {
         renderAdminAll(false);
     }
 });
@@ -1226,7 +1230,7 @@ function renderAdminSharedOverview(forceUpdate = false) {
     lastUsersSnapshot = localStorage.getItem(USERS_KEY) || '';
     lastReportsSnapshot = localStorage.getItem(REPORTS_KEY) || '';
     lastSystemSnapshot = localStorage.getItem(SYSTEM_STATE_KEY) || '';
-    lastChatsAdminSnapshot = localStorage.getItem(CHATS_KEY) || '';
+    lastChatsAdminSnapshot = localStorage.getItem(getAdminChatsStorageKey()) || '';
     lastMatchLogsAdminSnapshot = localStorage.getItem(MATCH_LOGS_KEY) || '';
     lastPlayerOpLogsAdminSnapshot = localStorage.getItem((typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs') || '';
     lastFateWallAdminSnapshot = localStorage.getItem((typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall') || '';
