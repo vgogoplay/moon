@@ -1095,7 +1095,13 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
     users.forEach(u => {
         if (!u || !u.id) return;
         const uid = String(u.id).trim();
+        // 前台玩家裝置僅允許清理「自己登入的帳號」，嚴禁改寫其他玩家的雲端資料（防止舊快取手機覆蓋他人配對紀錄）
+        if (isFrontendCaller && (!currentPlayerId || uid !== currentPlayerId)) {
+            return;
+        }
         let userModified = false;
+        let regularChanged = false;
+        let customChanged = false;
 
         // 1. 檢查常規場次（例如：第2屆11/21(六) 於 20:00 結束後，等到 20:03 自動清除選項）
         const prevSessions = Array.isArray(u.registeredSessions)
@@ -1106,25 +1112,25 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
             prevSessions.forEach(s => {
                 const endTs = getRegularSessionEndTs(s);
                 const clearTs = endTs > 0 ? (endTs + POST_ACTIVITY_REG_CLEAR_DELAY_MS) : 0;
-                // 前台僅在輪到自己帳號，或已超過緩衝 10 秒仍未清除時協助清理，避免多台手機同時搶寫
-                const canCleanThis = !isFrontendCaller || uid === currentPlayerId || nowTs >= (clearTs + 10000);
-                if (clearTs > 0 && nowTs >= clearTs && canCleanThis) {
+                if (clearTs > 0 && nowTs >= clearTs) {
                     const label = normalizeSessionLabel(s) || String(s);
                     if (typeof ActivityRegArchive !== 'undefined') {
                         ActivityRegArchive.recordRegular(u, label, true);
                     }
                     clearedRegularSummary.set(label, (clearedRegularSummary.get(label) || 0) + 1);
                     userModified = true;
+                    regularChanged = true;
                 } else {
                     keptSessions.push(s);
                 }
             });
 
-            if (userModified) {
+            if (regularChanged) {
                 u.registeredSessions = keptSessions;
                 delete u.registeredSession;
                 if (keptSessions.length === 0) {
                     u.exactMatchCriteria = {};
+                    u.mustMatchKeys = [];
                 }
             }
         }
@@ -1137,26 +1143,38 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
                 if (entryRecoveredAt > 0 && (nowTs - entryRecoveredAt) < RECOVERED_ACT_REG_GRACE_MS) return;
                 const info = expiredCustomActMap.get(String(actId));
                 if (!info) return;
-                const canCleanThis = !isFrontendCaller || uid === currentPlayerId || nowTs >= (info.clearTs + 10000);
-                if (canCleanThis) {
-                    if (typeof ActivityRegArchive !== 'undefined') {
-                        ActivityRegArchive.recordCustom(u, actId, u.customActivityRegs[actId], true);
-                    }
-                    delete u.customActivityRegs[actId];
-                    clearedCustomSummary.set(info.name, (clearedCustomSummary.get(info.name) || 0) + 1);
-                    userModified = true;
+                if (typeof ActivityRegArchive !== 'undefined') {
+                    ActivityRegArchive.recordCustom(u, actId, u.customActivityRegs[actId], true);
                 }
+                delete u.customActivityRegs[actId];
+                clearedCustomSummary.set(info.name, (clearedCustomSummary.get(info.name) || 0) + 1);
+                userModified = true;
+                customChanged = true;
             });
         }
 
         if (userModified) {
-            changedUsers.push(u);
+            const patchFields = {};
+            if (regularChanged) {
+                patchFields.registeredSessions = Array.isArray(u.registeredSessions) ? [...u.registeredSessions] : [];
+                if (patchFields.registeredSessions.length === 0) {
+                    patchFields.exactMatchCriteria = {};
+                    patchFields.mustMatchKeys = [];
+                }
+            }
+            if (customChanged) {
+                patchFields.customActivityRegs = (u.customActivityRegs && typeof u.customActivityRegs === 'object') ? { ...u.customActivityRegs } : {};
+            }
+            changedUsers.push({ user: u, patchFields });
         }
     });
 
     if (changedUsers.length === 0) return false;
 
     localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    if (typeof LocalJsonCache !== 'undefined') {
+        LocalJsonCache.invalidate(USERS_KEY);
+    }
 
     if (isFrontendCaller && currentPlayerId && typeof appState !== 'undefined' && appState) {
         const me = users.find(u => String(u.id).trim() === currentPlayerId);
@@ -1164,13 +1182,17 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
             delete appState.registeredSession;
             appState.registeredSessions = Array.isArray(me.registeredSessions) ? [...me.registeredSessions] : [];
             appState.exactMatchCriteria = (me.exactMatchCriteria && typeof me.exactMatchCriteria === 'object') ? { ...me.exactMatchCriteria } : {};
+            appState.mustMatchKeys = Array.isArray(me.mustMatchKeys) ? [...me.mustMatchKeys] : [];
             appState.customActivityRegs = (me.customActivityRegs && typeof me.customActivityRegs === 'object') ? { ...me.customActivityRegs } : {};
         }
     }
 
-    if (typeof CloudSync !== 'undefined') {
-        changedUsers.forEach(u => {
-            CloudSync.upsertUser(u, true);
+    // 僅以 PATCH 局部更新報名欄位，絕不整筆 PUT 覆蓋會員物件，確保 matchedHistory 100% 不受影響
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+        changedUsers.forEach(({ user, patchFields }) => {
+            if (typeof CloudSync.patchUserFields === 'function') {
+                CloudSync.patchUserFields(user.id, patchFields, user);
+            }
         });
     }
 

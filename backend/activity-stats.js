@@ -665,23 +665,40 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
             });
         });
 
+        let missingUserHistPairsCount = 0;
+        const checkedRestorePairKeys = new Set();
         savedMatchedByPid.forEach((savedM, uid) => {
-            // 若玩家仍存在於即時會員資料庫中，完全以即時 matchedHistory 為準（避免舊結算快照殘留已被修正的重複對象）
-            if (userById.has(uid)) return;
             const pId = String(savedM.partnerId || '').trim();
-            if (!pId) return;
-            if (!regUserMap.has(uid)) {
-                regUserMap.set(uid, { id: uid, nickname: savedM.nickname || `玩家_${uid}`, gender: savedM.gender || '' });
+            if (!pId || uid === pId) return;
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(uid, pId)) {
+                return;
             }
-            if (!regUserMap.has(pId)) {
-                regUserMap.set(pId, userById.get(pId) || { id: pId, nickname: savedM.partnerName || `玩家_${pId}`, gender: pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : '') });
+            const liveA = userById.get(uid);
+            const liveB = userById.get(pId);
+            if (!liveA && !liveB) {
+                if (!regUserMap.has(uid)) regUserMap.set(uid, { id: uid, nickname: savedM.nickname || `玩家_${uid}`, gender: savedM.gender || '' });
+                if (!regUserMap.has(pId)) regUserMap.set(pId, { id: pId, nickname: savedM.partnerName || `玩家_${pId}`, gender: pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : '') });
+                tryBindSymmetric1to1Pair(uid, savedM.nickname || `玩家_${uid}`, pId, savedM.partnerName || `玩家_${pId}`);
+                return;
             }
-            tryBindSymmetric1to1Pair(
-                uid,
-                savedM.nickname || `玩家_${uid}`,
-                pId,
-                savedM.partnerName || `玩家_${pId}`
-            );
+            // 若玩家仍在會員資料庫中，但因舊版前台快取覆蓋導致 matchedHistory 遺失，且雙方目前在本場次皆尚未綁定其他對象，自動補齊顯示並計算可還原對數
+            const mapA = sessionLinksByPid.get(uid);
+            const mapB = sessionLinksByPid.get(pId);
+            if ((!mapA || mapA.size === 0) && (!mapB || mapB.size === 0)) {
+                if (!regUserMap.has(uid)) regUserMap.set(uid, liveA || { id: uid, nickname: savedM.nickname || `玩家_${uid}`, gender: savedM.gender || '' });
+                if (!regUserMap.has(pId)) regUserMap.set(pId, liveB || { id: pId, nickname: savedM.partnerName || `玩家_${pId}`, gender: pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : '') });
+                tryBindSymmetric1to1Pair(
+                    uid,
+                    (liveA && liveA.nickname) || savedM.nickname || `玩家_${uid}`,
+                    pId,
+                    (liveB && liveB.nickname) || savedM.partnerName || `玩家_${pId}`
+                );
+                const pk = [uid, pId].sort().join('__');
+                if (!checkedRestorePairKeys.has(pk)) {
+                    checkedRestorePairKeys.add(pk);
+                    missingUserHistPairsCount++;
+                }
+            }
         });
 
         const finalSessionRegUsers = Array.from(regUserMap.values());
@@ -761,6 +778,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
             rosterDetails,
             singleSessionLabel: sessionLabel,
             hasRawDuplicateInSession,
+            missingUserHistPairsCount,
             savedSnapshotAt: snap ? (snap.executedAtStr || '') : '',
             extraHtml: ''
         };
@@ -981,8 +999,11 @@ function renderSelectedActivityRosterDetails(activeStats) {
     const repairDupBtnHtml = hasDuplicateSameSessionMatch
         ? `<button type="button" onclick="repairDuplicateSameSessionMatches('${escapeActStatHtml(activeStats.singleSessionLabel)}')" class="px-3.5 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-bold shadow-sm hover:bg-rose-700 transition">🧹 修正1對1</button>`
         : '';
+    const restoreLostPairsBtnHtml = (activeStats.singleSessionLabel && Number(activeStats.missingUserHistPairsCount || 0) > 0)
+        ? `<button type="button" onclick="restoreSessionMatchesFromSnapshot('${escapeActStatHtml(activeStats.singleSessionLabel)}')" class="px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-sm hover:bg-emerald-700 transition">🔄 還原遺失配對（${activeStats.missingUserHistPairsCount}對）</button>`
+        : '';
 
-    let suppMatchBtnHtml = repairDupBtnHtml;
+    let suppMatchBtnHtml = `${restoreLostPairsBtnHtml}${repairDupBtnHtml}`;
     if (activeStats.singleSessionLabel && unmatchedItems.length > 0) {
         suppMatchBtnHtml += `<button type="button" onclick="runSupplementaryMatchForSession('${escapeActStatHtml(activeStats.singleSessionLabel)}')" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow-sm hover:opacity-95 transition">💘 補跑名單(未配對)</button>`;
     } else if (Array.isArray(activeStats.batchSessions) && activeStats.batchSessions.length === 2 && unmatchedItems.length > 0) {

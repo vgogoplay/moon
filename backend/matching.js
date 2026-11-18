@@ -1278,13 +1278,76 @@ function saveSessionMatchResultRecord(targetSession, allSessionUsers, users, res
         }
     });
 
+    // 單調遞增保護：若既有場次結算快照已記錄更多有效 1 對 1 配對（且未被管理員或玩家解除配對），保留既有配對不倒退
+    let prevSnap = null;
+    try {
+        const existingMap = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        if (existingMap && typeof existingMap === 'object' && existingMap[docKey]) {
+            prevSnap = existingMap[docKey];
+        } else if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[storageKey] && CloudSync.tree[storageKey][docKey]) {
+            prevSnap = CloudSync.tree[storageKey][docKey];
+        }
+    } catch (e) {}
+
+    if (prevSnap && Array.isArray(prevSnap.matchedPairs) && prevSnap.matchedPairs.length > matchedPairs.length) {
+        const currentPairedIds = new Set();
+        matchedPairs.forEach(p => {
+            if (p && p.idA) currentPairedIds.add(String(p.idA).trim());
+            if (p && p.idB) currentPairedIds.add(String(p.idB).trim());
+        });
+        prevSnap.matchedPairs.forEach(oldP => {
+            if (!oldP || !oldP.idA || !oldP.idB) return;
+            const idA = String(oldP.idA).trim();
+            const idB = String(oldP.idB).trim();
+            if (!idA || !idB || idA === idB) return;
+            if (currentPairedIds.has(idA) || currentPairedIds.has(idB)) return;
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(idA, idB)) {
+                return;
+            }
+            const uA = userById.get(idA);
+            const uB = userById.get(idB);
+            if (!uA || !uB) return;
+
+            currentPairedIds.add(idA);
+            currentPairedIds.add(idB);
+            matchedPairs.push({ ...oldP });
+
+            const addRestoredMatchedUser = (uObj, pObj, pFallbackName) => {
+                const uid = String(uObj.id).trim();
+                if (!matchedUsers.some(m => String(m.playerId).trim() === uid)) {
+                    matchedUsers.push({
+                        playerId: uid,
+                        nickname: uObj.nickname || `玩家_${uid}`,
+                        gender: uObj.gender || '',
+                        age: uObj.age || '',
+                        region: uObj.region || '',
+                        partnerId: String(pObj.id).trim(),
+                        partnerName: pObj.nickname || pFallbackName || `玩家_${pObj.id}`,
+                        session: normSession,
+                        matchedAt: Number(oldP.matchedAt || nowTs),
+                        criteriaSummary: formatUserCriteriaPlainText(uObj)
+                    });
+                }
+            };
+            addRestoredMatchedUser(uA, uB, oldP.nameB);
+            addRestoredMatchedUser(uB, uA, oldP.nameA);
+        });
+
+        const finalMatchedSet = new Set(matchedUsers.map(m => String(m.playerId).trim()));
+        for (let i = unmatchedUsers.length - 1; i >= 0; i--) {
+            if (finalMatchedSet.has(String(unmatchedUsers[i].playerId).trim())) {
+                unmatchedUsers.splice(i, 1);
+            }
+        }
+    }
+
     const record = {
         id: docKey,
         session: normSession,
         batchLabel: extractBatchLabel(normSession),
         executedAtTs: nowTs,
         executedAtStr: new Date(nowTs).toLocaleString('zh-TW', { hour12: false }),
-        totalRegCount: allSessionUsers.length,
+        totalRegCount: Math.max(allSessionUsers.length, Number((prevSnap && prevSnap.totalRegCount) || 0)),
         maleRegCount: allSessionUsers.filter(u => u.gender === '男').length,
         femaleRegCount: allSessionUsers.filter(u => u.gender === '女').length,
         matchedCount: matchedUsers.length,
@@ -1311,6 +1374,119 @@ function saveSessionMatchResultRecord(targetSession, allSessionUsers, users, res
 
     return record;
 }
+
+function restoreSessionMatchesFromSnapshot(rawSessionLabel) {
+    const normSession = (typeof normalizeSessionLabel === 'function')
+        ? normalizeSessionLabel(rawSessionLabel)
+        : String(rawSessionLabel || '').trim();
+    if (!normSession) return 0;
+
+    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+        AdminMemoryCache.invalidate('users');
+    }
+    const users = getUsers();
+    const userById = new Map();
+    users.forEach(u => {
+        if (u && u.id) userById.set(String(u.id).trim(), u);
+    });
+
+    const storageKey = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined')
+        ? SESSION_MATCH_RESULTS_KEY
+        : 'yuelao_session_match_results';
+    const docKey = (typeof ActivityRegArchive !== 'undefined' && typeof ActivityRegArchive.sanitizeSeg === 'function')
+        ? ActivityRegArchive.sanitizeSeg(normSession)
+        : normSession.replace(/[\/.#$\[\]\s]+/g, '_');
+
+    let snap = null;
+    try {
+        const localMap = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        snap = localMap[docKey] || Object.values(localMap || {}).find(s => s && isSameSession(s.session, normSession)) || null;
+    } catch (e) {}
+    if (!snap && typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[storageKey]) {
+        const treeMap = CloudSync.tree[storageKey];
+        snap = treeMap[docKey] || Object.values(treeMap || {}).find(s => s && isSameSession(s.session, normSession)) || null;
+    }
+
+    const candidatePairs = [];
+    if (snap && Array.isArray(snap.matchedPairs)) {
+        snap.matchedPairs.forEach(p => {
+            if (p && p.idA && p.idB) {
+                candidatePairs.push({
+                    idA: String(p.idA).trim(),
+                    idB: String(p.idB).trim(),
+                    matchedAt: Number(p.matchedAt || snap.executedAtTs || Date.now())
+                });
+            }
+        });
+    }
+
+    // 同時掃描全站聊天室中屬於本場次系統開場訊息的配對（補齊任何尚未寫入結算快照的配對）
+    const chatsMap = (typeof getAdminChatsMap === 'function')
+        ? getAdminChatsMap()
+        : (() => { try { return JSON.parse(localStorage.getItem(CHATS_KEY) || '{}'); } catch (e) { return {}; } })();
+    Object.entries(chatsMap || {}).forEach(([pk, rawThread]) => {
+        const parts = String(pk || '').split('__').map(s => s.trim()).filter(Boolean);
+        if (parts.length !== 2 || parts[0] === parts[1]) return;
+        const msgs = Array.isArray(rawThread)
+            ? rawThread
+            : (rawThread && typeof rawThread === 'object' ? Object.values(rawThread) : []);
+        const sysMatchMsg = msgs.find(m => m && m.senderId === 'system' && typeof m.text === 'string' && m.text.includes(normSession));
+        if (sysMatchMsg) {
+            candidatePairs.push({
+                idA: parts[0],
+                idB: parts[1],
+                matchedAt: Number(sysMatchMsg.ts || Date.now())
+            });
+        }
+    });
+
+    const currentlyPairedIds = new Set();
+    users.forEach(u => {
+        if (u && u.id && hasUserMatchedInRegularSession(u, normSession)) {
+            currentlyPairedIds.add(String(u.id).trim());
+        }
+    });
+
+    const restoredPairs = [];
+    const affectedUserIds = new Set();
+
+    candidatePairs.forEach(cp => {
+        const { idA, idB, matchedAt } = cp;
+        if (!idA || !idB || idA === idB) return;
+        if (currentlyPairedIds.has(idA) || currentlyPairedIds.has(idB)) return;
+        if (typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(idA, idB)) {
+            return;
+        }
+        const uA = userById.get(idA);
+        const uB = userById.get(idB);
+        if (!uA || !uB || uA.isWarned || uA.isMatchBanned || uB.isWarned || uB.isMatchBanned) return;
+
+        if (recordPairMatch(uA, uB, normSession, matchedAt)) {
+            currentlyPairedIds.add(idA);
+            currentlyPairedIds.add(idB);
+            affectedUserIds.add(idA);
+            affectedUserIds.add(idB);
+            restoredPairs.push({ idA, nameA: uA.nickname, idB, nameB: uB.nickname });
+        }
+    });
+
+    if (restoredPairs.length === 0) {
+        alert(`ℹ️【${normSession}】目前所有有效配對紀錄皆已完整同步，沒有需要還原的遺失配對。`);
+        return 0;
+    }
+
+    const previewLines = restoredPairs.slice(0, 12).map(p => `・${p.nameA} (${p.idA}) ⇄ ${p.nameB} (${p.idB})`);
+    if (restoredPairs.length > 12) {
+        previewLines.push(`...其餘 ${restoredPairs.length - 12} 對`);
+    }
+
+    saveUsers(users, { isMatchMutation: true, targetIds: Array.from(affectedUserIds) });
+    appendLog(`<span class="text-emerald-300">[還原場次配對紀錄]</span> 已從結算快照與聊天室紀錄為「<strong>${normSession}</strong>」還原 <strong>${restoredPairs.length} 對</strong>（${restoredPairs.length * 2} 人）配對紀錄。`);
+    alert(`✅ 已成功還原【${normSession}】遺失的 ${restoredPairs.length} 對（${restoredPairs.length * 2} 人）配對紀錄並同步寫入雲端！\n\n${previewLines.join('\n')}`);
+    return restoredPairs.length;
+}
+
+window.restoreSessionMatchesFromSnapshot = restoreSessionMatchesFromSnapshot;
 
 let autoSchedule2000ClaimInFlight = false;
 

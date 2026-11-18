@@ -368,6 +368,11 @@ const CloudSync = {
 
     recordMatchLog(userA, userB, sessionLabel = '', matchTs = Date.now(), sourceLabel = '') {
         if (!userA || !userB || !userA.id || !userB.id) return null;
+        // 僅紀錄自定義活動或強制手動配對，不紀錄常規場次
+        const normSess = (typeof normalizeSessionLabel === 'function') ? normalizeSessionLabel(sessionLabel) : String(sessionLabel).trim();
+        if (/^第\s*\d+\s*屆.+\([三六]\)$/.test(normSess) && !String(sessionLabel).includes('強制')) {
+            return null;
+        }
         const tsNum = Number(matchTs) || Date.now();
         const d = new Date(tsNum);
         const matchedAtStr = Number.isNaN(d.getTime())
@@ -1346,18 +1351,37 @@ const CloudSync = {
         ));
         cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory)
             .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId) && !this.isRogueCustomMatchEntry(h));
-        if (!isMatchMutation && existingTreeUser) {
-            // 非配對／解除配對異動時，合併雲端與本地配對歷史（排除近期已解除配對的對象），絕不以舊快照覆蓋新配對好友
-            const cloudHist = this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory)
-                .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId));
-            cleanRecord.matchedHistory = this.normalizeMatchedHistoryList([...cloudHist, ...cleanRecord.matchedHistory])
-                .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId));
-            const rawPrimaryId = String(existingTreeUser.matchedWithId || cleanRecord.matchedWithId || '').trim();
+        if (!isMatchMutation) {
+            // 非配對／解除配對異動時，同時合併雲端樹、本地快取與傳入紀錄的配對歷史（排除近期已解除配對與異常誤配對），絕不以舊快照覆蓋減少已配對好友
+            let localCachedUser = null;
+            try {
+                const localUsers = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+                if (Array.isArray(localUsers)) {
+                    localCachedUser = localUsers.find(u => u && String(u.id).trim() === pid) || null;
+                }
+            } catch (e) {}
+
+            const cloudHist = (existingTreeUser && existingTreeUser.matchedHistory)
+                ? this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory)
+                : [];
+            const localHist = (localCachedUser && localCachedUser.matchedHistory)
+                ? this.normalizeMatchedHistoryList(localCachedUser.matchedHistory)
+                : [];
+
+            cleanRecord.matchedHistory = this.normalizeMatchedHistoryList([...cloudHist, ...localHist, ...cleanRecord.matchedHistory])
+                .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId) && !this.isRogueCustomMatchEntry(h));
+
+            const rawPrimaryId = String(
+                (existingTreeUser && existingTreeUser.matchedWithId) ||
+                (localCachedUser && localCachedUser.matchedWithId) ||
+                cleanRecord.matchedWithId ||
+                ''
+            ).trim();
             if (rawPrimaryId && !this.isPairRecentlyUnmatched(pid, rawPrimaryId)) {
-                cleanRecord.matchedSession = existingTreeUser.matchedSession || cleanRecord.matchedSession || null;
+                cleanRecord.matchedSession = (existingTreeUser && existingTreeUser.matchedSession) || (localCachedUser && localCachedUser.matchedSession) || cleanRecord.matchedSession || null;
                 cleanRecord.matchedWithId = rawPrimaryId;
-                cleanRecord.matchedWithName = existingTreeUser.matchedWithName || cleanRecord.matchedWithName || null;
-                cleanRecord.matchedAt = existingTreeUser.matchedAt || cleanRecord.matchedAt || null;
+                cleanRecord.matchedWithName = (existingTreeUser && existingTreeUser.matchedWithName) || (localCachedUser && localCachedUser.matchedWithName) || cleanRecord.matchedWithName || null;
+                cleanRecord.matchedAt = (existingTreeUser && existingTreeUser.matchedAt) || (localCachedUser && localCachedUser.matchedAt) || cleanRecord.matchedAt || null;
             } else {
                 const fallbackPrimary = cleanRecord.matchedHistory[cleanRecord.matchedHistory.length - 1] || null;
                 cleanRecord.matchedSession = fallbackPrimary ? (fallbackPrimary.session || null) : null;
