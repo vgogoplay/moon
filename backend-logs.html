@@ -60,29 +60,57 @@
             <div id="playerOpLogsPaginationBar" class="p-4 border-t border-emerald-200 bg-emerald-50/35 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
-        <!-- ==================== 2. 🏮 紅線祈願牆發布與回覆紀錄（分「開放中」與「已結束」二種狀態） ==================== -->
-        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-4">
-            <div class="flex flex-wrap items-center justify-between gap-2">
+        <!-- ==================== 2. 🏮 紅線祈願牆發布與回覆紀錄（表格風格＋每頁 5/10/30 筆＋點擊展開明細） ==================== -->
+        <div class="card-jp rounded-2xl overflow-hidden border-2 border-rose-200">
+            <div class="p-5 border-b border-rose-200 flex flex-col xl:flex-row xl:items-center justify-between bg-rose-50/45 gap-3">
                 <div>
-                    <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🏮 紅線祈願牆發布與回覆紀錄</h2>
-                    <p class="text-xs text-gray-500">依「🟢 開放中」與「🏁 已結束」二種狀態分類顯示前台玩家發布的祈願題目與匿名回覆進度</p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">🏮 紅線祈願牆發布與回覆紀錄</h2>
+                        <span id="adminWishWallCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-rose-100 text-[#8f4452] font-bold">
+                            開放中 0 則 ／ 已結束 0 則
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-0.5">顯示前台玩家發布的祈願題目與匿名回覆進度（點擊標題列可展開或收合明細，預設每頁顯示 5 筆）</p>
                 </div>
-                <div class="flex flex-wrap items-center gap-2">
-                    <select id="adminWishWallFilter" onchange="renderAdminWishWallList()" class="p-2 border border-pink-200 rounded-xl text-xs font-bold text-[#8f4452] bg-white">
-                        <option value="" disabled selected hidden>狀態過濾</option>
-                        <option value="ALL">全部狀態（開放中＋已結束）</option>
-                        <option value="OPEN">🟢 開放中</option>
-                        <option value="ENDED">🏁 已結束</option>
-                    </select>
-                    <button type="button" id="batchDeleteWishWallBtn" onclick="batchDeleteAdminWishWallEntries()" class="text-xs px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-50 transition shadow-sm">
-                        🗑️ 一鍵刪除
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">狀態：</span>
+                        <select id="adminWishWallFilter" onchange="onAdminWishWallFilterChange()" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
+                            <option value="ALL" selected>全部狀態</option>
+                            <option value="OPEN">🟢 開放中</option>
+                            <option value="ENDED">🏁 已結束</option>
+                        </select>
+                    </div>
+                    <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">每頁顯示：</span>
+                        <select id="wishWallPageSizeSelect" onchange="onAdminWishWallPageSizeChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
+                            <option value="5" selected>5 筆（預設）</option>
+                            <option value="10">10 筆</option>
+                            <option value="30">30 筆</option>
+                        </select>
+                    </div>
+                    <button type="button" id="batchDeleteWishWallBtn" onclick="batchDeleteAdminWishWallEntries()" class="px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-50 transition shadow-sm">
+                        🗑️ 一鍵刪除全部 (0 則)
                     </button>
-                    <span id="adminWishWallCountBadge" class="text-xs px-2.5 py-1.5 rounded-xl bg-rose-100 text-[#8f4452] font-bold">
-                        開放中 0 則 ／ 已結束 0 則
-                    </span>
+                    <button type="button" onclick="renderAdminAll(true)" class="px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
+                        ↻ 重新整理
+                    </button>
                 </div>
             </div>
-            <div id="adminWishWallList" class="space-y-4 pt-1"></div>
+            <div class="overflow-x-auto p-3 bg-white">
+                <table class="admin-grid-table text-left text-xs md:text-sm">
+                    <thead>
+                        <tr class="text-xs">
+                            <th class="p-3.5 w-48">狀態</th>
+                            <th class="p-3.5 w-48">發起玩家</th>
+                            <th class="p-3.5">祈願題目（點擊展開明細）</th>
+                            <th class="p-3.5 w-44">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminWishWallTableBody"></tbody>
+                </table>
+            </div>
+            <div id="adminWishWallPaginationBar" class="p-4 border-t border-rose-200 bg-rose-50/35 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
         <!-- ==================== 3. 💘 玩家配對成功日誌（保留最近 30 筆・每頁 5/10/30 筆） ==================== -->
@@ -168,12 +196,12 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261118t"></script>
+    <script src="shared/schedule.js?v=20261118aa"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261118v"></script>
+    <script src="shared/cloud-store.js?v=20261118ag"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261118w"></script>
-    <script src="backend/matching.js?v=20261118f"></script>
+    <script src="backend/state.js?v=20261118ae"></script>
+    <script src="backend/matching.js?v=20261118ah"></script>
     <script src="backend/logs.js?v=20261118g"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261118o"></script>

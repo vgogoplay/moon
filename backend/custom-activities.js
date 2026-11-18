@@ -364,12 +364,22 @@ function toggleCustomActivityMatchSafety(activityId) {
 
     const nextVal = !Boolean(act.matchSafetyEnabled);
     if (nextVal) {
-        if (!confirm(`確定要開啟【${act.name}】的配對防呆開關嗎？\n\n開啟後：此活動將允許手動點擊執行配對，或於設定時間到點自動配對。`)) {
+        const isBeforeCutoff = (typeof isCustomActivityBeforeAllowedDate === 'function')
+            ? isCustomActivityBeforeAllowedDate(act, Date.now())
+            : false;
+        if (isBeforeCutoff) {
+            alert(`🚫 活動「${act.name}」的活動／配對日期早於今日（11/18），依規定不可開啟配對！`);
+            return;
+        }
+        if (!confirm(`確定要開啟【${act.name}】的配對防呆開關嗎？\n\n開啟後：需同時滿足「🟢 活動開啟中」＋「🛡️ 防呆開啟」＋「活動日期為今日起」才會進行配對。`)) {
             return;
         }
     }
 
     act.matchSafetyEnabled = nextVal;
+    if (!nextVal && typeof lockCustomActivityInCloudLocks === 'function') {
+        lockCustomActivityInCloudLocks(act);
+    }
     saveCustomActivities(list);
     if (typeof CloudSync !== 'undefined') {
         CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, act);
@@ -387,6 +397,9 @@ async function toggleCustomActivityOpen(activityId) {
     if (!act) return;
 
     act.isOpen = !act.isOpen;
+    if (!act.isOpen && typeof lockCustomActivityInCloudLocks === 'function') {
+        lockCustomActivityInCloudLocks(act);
+    }
     saveCustomActivities(list);
     CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, act);
 
@@ -566,18 +579,22 @@ async function runCustomActivityMatch(activityId, isAuto = false) {
         ? isCustomActivityBeforeAllowedDate(act, nowTs)
         : false;
 
-    if (!safetyEnabled) {
+    // 3 大條件任何一項不達成，一律禁止配對
+    if (!act.isOpen) {
         if (!isAuto) {
-            alert(`🚫 活動「${act.name}」的配對防呆開關目前為【關閉】狀態！\n\n不管手動或自動皆不可進行配對，請先開啟標題旁邊的配對防呆開關。`);
+            alert(`🚫 活動「${act.name}」目前為【已關閉】狀態（條件 1 未達成），已關閉的活動不可進行配對！`);
         }
         return;
     }
-    if (isAuto && isBeforeCutoff) {
+    if (!safetyEnabled) {
+        if (!isAuto) {
+            alert(`🚫 活動「${act.name}」的配對防呆開關目前為【關閉】狀態（條件 2 未達成），不可進行配對！`);
+        }
         return;
     }
-    if (!act.isOpen) {
+    if (isBeforeCutoff) {
         if (!isAuto) {
-            alert(`🚫 活動「${act.name}」目前為【已關閉】狀態，已關閉的活動不可進行配對！`);
+            alert(`🚫 活動「${act.name}」的日期早於今日（11/18）（條件 3 未達成），歷史活動不可再進行配對！`);
         }
         return;
     }
@@ -665,9 +682,11 @@ async function recoverCustomActivityRegistrationsFromArchive(activityId, autoRun
     if (!act) return;
 
     if (autoRunMatchAfter) {
-        const safetyEnabled = Boolean(act.matchSafetyEnabled);
-        if (!safetyEnabled || !act.isOpen || Boolean(act.autoMatchedDone)) {
-            alert('🚫 目前此活動「配對防呆開關未開啟」或活動為「已關閉／已結算」，不可執行重新配對！\n（請先將標題旁的防呆開關切換為「🟢 開啟」，或使用「📥 僅找回名單」）');
+        const condCheck = (typeof checkCustomActivityThreeConditions === 'function')
+            ? checkCustomActivityThreeConditions(act, Date.now())
+            : { allowed: Boolean(act.isOpen && act.matchSafetyEnabled) };
+        if (!condCheck.allowed || Boolean(act.autoMatchedDone)) {
+            alert('🚫 目前此活動未同時滿足 3 大條件（「🟢 活動開啟中」＋「🟢 防呆開關開啟」＋「活動日期為今日起」），不可執行重新配對！\n（若僅需查看統計名單，請使用「📥 僅找回名單」）');
             return;
         }
     }
@@ -857,15 +876,28 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                 const isBeforeCutoff = (typeof isCustomActivityBeforeAllowedDate === 'function')
                     ? isCustomActivityBeforeAllowedDate(act, nowRenderTs)
                     : false;
-                const canRunThisActMatch = Boolean(safetyEnabled && act.isOpen && !act.autoMatchedDone);
+                const canRunThisActMatch = Boolean(act.isOpen && safetyEnabled && !isBeforeCutoff && !act.autoMatchedDone);
                 let matchBtnLabel = `💘 執行【${act.name}】配對`;
-                if (!safetyEnabled) {
-                    matchBtnLabel = '🔒 防呆開關已關閉（不可配對）';
-                } else if (!act.isOpen) {
+                if (!act.isOpen) {
                     matchBtnLabel = '⚪ 活動已關閉（不可配對）';
+                } else if (!safetyEnabled) {
+                    matchBtnLabel = '🔒 防呆開關已關閉（不可配對）';
+                } else if (isBeforeCutoff) {
+                    matchBtnLabel = '🚫 11/18 之前活動不可配對';
                 } else if (act.autoMatchedDone) {
                     matchBtnLabel = '✅ 已完成配對（不可重複配對）';
                 }
+
+                // 檢查是否有在 11/18 00:00 之後誤產生的配對紀錄（供管理員一鍵清除誤配對，保留 11/15 原本紀錄）
+                const cutoffTodayTs = (typeof getCustomActivityAllowedMinTs === 'function')
+                    ? getCustomActivityAllowedMinTs(nowRenderTs)
+                    : new Date(2026, 10, 18, 0, 0, 0, 0).getTime();
+                const lateRogueUsers = (!act.isOpen || !safetyEnabled || isBeforeCutoff)
+                    ? users.filter(u => u && u.id && Array.isArray(u.matchedHistory) && u.matchedHistory.some(h =>
+                        (String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name)) &&
+                        Number(h.matchedAt || 0) >= cutoffTodayTs
+                    ))
+                    : [];
 
                 const schedState = getCustomActivityScheduleState(act);
                 let scheduleBadgeHtml = '';
@@ -924,6 +956,11 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                             <button type="button" onclick="runCustomActivityMatch('${act.id}')" ${canRunThisActMatch ? '' : 'disabled'} class="px-4 py-2 rounded-xl text-xs font-bold transition ${canRunThisActMatch ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white shadow hover:opacity-95' : 'bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed'}">
                                 ${matchBtnLabel}
                             </button>
+                            ${lateRogueUsers.length > 0 ? `
+                                <button type="button" onclick="purgeLateRogueCustomActivityMatches('${act.id}')" class="px-3.5 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold shadow hover:bg-rose-700 transition">
+                                    🧹 清除今日誤配對紀錄（${lateRogueUsers.length}人）
+                                </button>
+                            ` : ''}
                             <button type="button" onclick="clearCustomActivityRegistrations('${act.id}')" ${regUsers.length === 0 ? 'disabled' : ''} title="清除此活動當前所有已報名玩家，並取消其勾選的活動選項" class="px-3.5 py-2 rounded-xl border text-xs font-bold transition ${regUsers.length === 0 ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'}">
                                 🧹 清除已報名（${regUsers.length}人）
                             </button>
@@ -973,6 +1010,76 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
     }
 }
 
+async function purgeLateRogueCustomActivityMatches(activityId) {
+    const list = getCustomActivities();
+    const act = list.find(a => String(a.id) === String(activityId));
+    if (!act) return;
+
+    const cutoffTodayTs = (typeof getCustomActivityAllowedMinTs === 'function')
+        ? getCustomActivityAllowedMinTs(Date.now())
+        : new Date(2026, 10, 18, 0, 0, 0, 0).getTime();
+    const users = getUsers();
+    const affectedIds = new Set();
+    const pairsToClearChat = new Set();
+
+    users.forEach(u => {
+        if (!u || !u.id || !Array.isArray(u.matchedHistory)) return;
+        const beforeLen = u.matchedHistory.length;
+        u.matchedHistory = u.matchedHistory.filter(h => {
+            const isThisAct = String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name);
+            const isLateRogue = isThisAct && Number(h.matchedAt || 0) >= cutoffTodayTs;
+            if (isLateRogue && h.partnerId) {
+                const pk = [String(u.id).trim(), String(h.partnerId).trim()].sort().join('__');
+                pairsToClearChat.add(pk);
+                if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
+                    CloudSync.markPairUnmatched(u.id, h.partnerId, 86400000);
+                }
+            }
+            return !isLateRogue;
+        });
+        if (u.matchedHistory.length !== beforeLen) {
+            affectedIds.add(String(u.id).trim());
+            const lastH = u.matchedHistory[u.matchedHistory.length - 1] || null;
+            u.matchedSession = lastH ? (lastH.session || null) : null;
+            u.matchedWithId = lastH ? (lastH.partnerId || null) : null;
+            u.matchedWithName = lastH ? (lastH.partnerName || null) : null;
+            u.matchedAt = lastH ? (lastH.matchedAt || null) : null;
+        }
+    });
+
+    if (affectedIds.size === 0) {
+        alert('ℹ️ 目前沒有發現今日（11/18）誤產生的配對紀錄。');
+        return;
+    }
+
+    if (!confirm(`確定要清除【${act.name}】在今日（11/18）誤產生的配對紀錄（共 ${affectedIds.size} 位玩家）嗎？\n\n（11/15 原本的正常配對紀錄將會完整保留不受影響。）`)) {
+        return;
+    }
+
+    if (typeof lockCustomActivityInCloudLocks === 'function') {
+        lockCustomActivityInCloudLocks(act);
+    }
+    act.autoMatchedDone = true;
+    act.isOpen = false;
+    act.matchSafetyEnabled = false;
+    saveCustomActivities(list);
+    if (typeof CloudSync !== 'undefined') {
+        CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, act);
+    }
+
+    pairsToClearChat.forEach(pk => {
+        const [idA, idB] = pk.split('__');
+        if (idA && idB && typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+            ChatStore.clearChat(idA, idB);
+        }
+    });
+
+    saveUsers(users, { isMatchMutation: true, targetIds: Array.from(affectedIds) });
+    appendLog(`<span class="text-rose-300">[清除誤配對紀錄]</span> 已清除專屬活動「<strong>${act.name}</strong>」今日誤產生的 ${affectedIds.size} 位玩家配對紀錄並永久鎖定雲端排程鎖。`);
+    alert(`✅ 已成功清除【${act.name}】今日誤產生的 ${affectedIds.size} 位玩家配對紀錄，並已寫入雲端永久鎖定！`);
+}
+
+window.purgeLateRogueCustomActivityMatches = purgeLateRogueCustomActivityMatches;
 window.recoverCustomActivityRegistrationsFromArchive = recoverCustomActivityRegistrationsFromArchive;
 window.toggleCustomActivityMatchSafety = toggleCustomActivityMatchSafety;
 window.syncNewCustomActAutoMatchTime = syncNewCustomActAutoMatchTime;

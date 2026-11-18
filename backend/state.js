@@ -17,6 +17,7 @@ let lastMatchLogsAdminSnapshot = '';
 let lastFateWallAdminSnapshot = '';
 let lastWishWallAdminSnapshot = '';
 let lastMailboxAdminSnapshot = '';
+let lastSessionMatchResultsSnapshot = '';
 let lastOverviewRenderSig = '';
 let rosterPageSize = '5';
 let currentRosterPage = 1;
@@ -1256,6 +1257,9 @@ async function unlockAdminUI() {
                 AdminMemoryCache.invalidate('users');
             }
         }
+        if (typeof enforceClosedCustomActivityCloudLocks === 'function') {
+            enforceClosedCustomActivityCloudLocks();
+        }
         if (typeof checkSinglePlayerMailReadStatusDaily === 'function') {
             checkSinglePlayerMailReadStatusDaily({ force: false, skipRemoteFetch: true });
         }
@@ -1339,7 +1343,7 @@ function logoutAdmin() {
 
 function pollSharedStorageChanges() {
     if (!isAdminAuthenticated()) return;
-    if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
+    if (typeof CloudSync !== 'undefined' && (!CloudSync.initialized || CloudSync.inFlightWrites > 0)) return;
     const curUsers = localStorage.getItem(USERS_KEY) || '';
     const curReports = localStorage.getItem(REPORTS_KEY) || '';
     const curSys = localStorage.getItem(SYSTEM_STATE_KEY) || '';
@@ -1352,8 +1356,10 @@ function pollSharedStorageChanges() {
     const curFateWall = localStorage.getItem(fwKey) || '';
     const curWishWall = localStorage.getItem(wwKey) || '';
     const curMailbox = localStorage.getItem(MAILBOX_KEY) || '';
+    const smrKey = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined') ? SESSION_MATCH_RESULTS_KEY : 'yuelao_session_match_results';
+    const curSessionMatchResults = localStorage.getItem(smrKey) || '';
     const curBatch = getCurrentBatch();
-    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curMatchLogs !== lastMatchLogsAdminSnapshot || curPlayerOpLogs !== lastPlayerOpLogsAdminSnapshot || curFateWall !== lastFateWallAdminSnapshot || curWishWall !== lastWishWallAdminSnapshot || curMailbox !== lastMailboxAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
+    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curMatchLogs !== lastMatchLogsAdminSnapshot || curPlayerOpLogs !== lastPlayerOpLogsAdminSnapshot || curFateWall !== lastFateWallAdminSnapshot || curWishWall !== lastWishWallAdminSnapshot || curMailbox !== lastMailboxAdminSnapshot || curSessionMatchResults !== lastSessionMatchResultsSnapshot || curBatch !== lastRenderedBatchNumber) {
         renderAdminAll(false);
     }
 }
@@ -1364,7 +1370,8 @@ window.addEventListener('storage', (e) => {
     const pOpKey = (typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs';
     const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
     const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
-    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, getAdminChatsStorageKey(), REG_HISTORY_KEY, 'yuelao_admin_login_logs', MATCH_LOGS_KEY, pOpKey, fwKey, wwKey].includes(e.key)) {
+    const smrKey = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined') ? SESSION_MATCH_RESULTS_KEY : 'yuelao_session_match_results';
+    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, getAdminChatsStorageKey(), REG_HISTORY_KEY, smrKey, 'yuelao_admin_login_logs', MATCH_LOGS_KEY, pOpKey, fwKey, wwKey].includes(e.key)) {
         renderAdminAll(false);
     }
 });
@@ -1409,6 +1416,7 @@ function renderAdminSharedOverview(forceUpdate = false) {
     lastFateWallAdminSnapshot = localStorage.getItem((typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall') || '';
     lastWishWallAdminSnapshot = localStorage.getItem((typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall') || '';
     lastMailboxAdminSnapshot = localStorage.getItem(MAILBOX_KEY) || '';
+    lastSessionMatchResultsSnapshot = localStorage.getItem((typeof SESSION_MATCH_RESULTS_KEY !== 'undefined') ? SESSION_MATCH_RESULTS_KEY : 'yuelao_session_match_results') || '';
 
     const sysCfg = getSystemConfig();
     const batch = sysCfg.currentBatch;
@@ -1500,15 +1508,55 @@ function renderAdminAll(forceUpdate = false) {
     }
 }
 
+const expandedAdminWishWallCards = new Set();
+let wishWallPageSize = '5';
+let currentWishWallPage = 1;
+
+function onAdminWishWallFilterChange() {
+    currentWishWallPage = 1;
+    renderAdminWishWallList();
+}
+
+function onAdminWishWallPageSizeChange(newSize) {
+    const val = ['5', '10', '30'].includes(String(newSize)) ? String(newSize) : '5';
+    wishWallPageSize = val;
+    currentWishWallPage = 1;
+    renderAdminWishWallList();
+}
+
+function goToAdminWishWallPage(pageNum) {
+    const p = parseInt(pageNum, 10);
+    if (isNaN(p) || p < 1) return;
+    currentWishWallPage = p;
+    renderAdminWishWallList();
+}
+
+function toggleAdminWishWallCardExpand(wishId) {
+    const wid = String(wishId || '').trim();
+    if (!wid) return;
+    if (expandedAdminWishWallCards.has(wid)) {
+        expandedAdminWishWallCards.delete(wid);
+    } else {
+        expandedAdminWishWallCards.add(wid);
+    }
+    renderAdminWishWallList();
+}
+
 function renderAdminWishWallList() {
-    const wishWallListBox = document.getElementById('adminWishWallList');
+    const tbody = document.getElementById('adminWishWallTableBody');
+    const paginationBar = document.getElementById('adminWishWallPaginationBar');
     const wishWallBadge = document.getElementById('adminWishWallCountBadge');
     const filterSel = document.getElementById('adminWishWallFilter');
-    if (!wishWallListBox) return;
+    const sizeSel = document.getElementById('wishWallPageSizeSelect');
+    if (!tbody) return;
 
     const allWishes = (typeof getAdminWishWallPosts === 'function') ? getAdminWishWallPosts() : [];
     const nowTs = Date.now();
-    const filterVal = (filterSel && filterSel.value) ? filterSel.value : '';
+    const filterVal = (filterSel && filterSel.value) ? filterSel.value : 'ALL';
+
+    if (sizeSel && sizeSel.value !== wishWallPageSize) {
+        sizeSel.value = wishWallPageSize;
+    }
 
     const openWishes = [];
     const endedWishes = [];
@@ -1516,9 +1564,9 @@ function renderAdminWishWallList() {
         const timeEnded = (typeof isWishWallEnded === 'function') ? isWishWallEnded(w, nowTs) : false;
         const isClosedStatus = timeEnded || Boolean(w.settled);
         if (isClosedStatus) {
-            endedWishes.push(w);
+            endedWishes.push({ wish: w, isClosed: true });
         } else {
-            openWishes.push(w);
+            openWishes.push({ wish: w, isClosed: false });
         }
     });
 
@@ -1532,17 +1580,27 @@ function renderAdminWishWallList() {
             batchDelBtn.textContent = `🗑️ 一鍵刪除已結束 (${endedWishes.length} 則)`;
         } else if (filterVal === 'OPEN') {
             batchDelBtn.textContent = `🗑️ 一鍵刪除開放中 (${openWishes.length} 則)`;
-        } else if (filterVal === 'ALL') {
-            batchDelBtn.textContent = `🗑️ 一鍵刪除全部 (${allWishes.length} 則)`;
         } else {
-            batchDelBtn.textContent = `🗑️ 一鍵刪除`;
+            batchDelBtn.textContent = `🗑️ 一鍵刪除全部 (${allWishes.length} 則)`;
         }
     }
 
-    if (!filterVal) {
-        wishWallListBox.innerHTML = ``;
-        return;
+    let targetItems = [];
+    if (filterVal === 'OPEN') {
+        targetItems = openWishes;
+    } else if (filterVal === 'ENDED') {
+        targetItems = endedWishes;
+    } else {
+        targetItems = [...openWishes, ...endedWishes];
     }
+
+    const perPage = parseInt(wishWallPageSize, 10) || 5;
+    const totalItems = targetItems.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+    if (currentWishWallPage > totalPages) currentWishWallPage = totalPages;
+    if (currentWishWallPage < 1) currentWishWallPage = 1;
+    const startIdx = (currentWishWallPage - 1) * perPage;
+    const pagedItems = targetItems.slice(startIdx, startIdx + perPage);
 
     const escWw = (str) => String(str ?? '')
         .replace(/&/g, '&amp;')
@@ -1551,113 +1609,148 @@ function renderAdminWishWallList() {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 
-    const renderWishCard = (w, isClosedGroup) => {
-        const resps = Array.isArray(w.responses) ? w.responses : [];
-        const gLabel = String(w.authorGender || '').trim() === '男' ? '🚹 男' : '🚺 女';
-        let statusPill = `<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">🟢 開放中（剩 ${typeof calcWishRemainingDays === 'function' ? calcWishRemainingDays(w, nowTs) : '?'} 天）</span>`;
+    if (pagedItems.length === 0) {
+        const emptyMsg = filterVal === 'OPEN'
+            ? '目前沒有「🟢 開放中」的祈願紀錄。'
+            : (filterVal === 'ENDED' ? '目前沒有「🏁 已結束」的祈願紀錄。' : '目前尚無任何紅線祈願牆發布與回覆紀錄。');
+        tbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-gray-400">${emptyMsg}</td></tr>`;
+    } else {
+        tbody.innerHTML = pagedItems.map(({ wish: w, isClosed }) => {
+            const widStr = String(w.id || '');
+            const isCardExpanded = expandedAdminWishWallCards.has(widStr);
+            const resps = Array.isArray(w.responses) ? w.responses : [];
+            const qsList = Array.isArray(w.questions) ? w.questions : [];
+            const isMale = String(w.authorGender || '').trim() === '男';
+            const genderTagHtml = isMale
+                ? `<span class="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 font-bold text-[11px] mr-1">🚹 男</span>`
+                : `<span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold text-[11px] mr-1">🚺 女</span>`;
 
-        if (isClosedGroup) {
-            if (w.settled && w.matchedAnonNumber) {
-                statusPill = `<span class="px-2 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">🏁 已結束・💘 已選匿名${w.matchedAnonNumber}號配對</span>`;
-            } else if (w.settled && w.settledWithoutMatch) {
-                statusPill = `<span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-semibold">🏁 已結束（未選配對）</span>`;
-            } else {
-                statusPill = `<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">🏁 已結束・待題主選擇</span>`;
+            let statusPill = `<span class="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">🟢 開放中（剩 ${typeof calcWishRemainingDays === 'function' ? calcWishRemainingDays(w, nowTs) : '?'} 天）</span>`;
+            if (isClosed) {
+                if (w.settled && w.matchedAnonNumber) {
+                    statusPill = `<span class="inline-block px-2 py-0.5 rounded-full bg-pink-100 text-[#8f4452] text-[11px] font-bold">🏁 已結束・💘 已選匿名${w.matchedAnonNumber}號配對</span>`;
+                } else if (w.settled && w.settledWithoutMatch) {
+                    statusPill = `<span class="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[11px] font-semibold">🏁 已結束（未選配對）</span>`;
+                } else {
+                    statusPill = `<span class="inline-block px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold">🏁 已結束・待題主選擇</span>`;
+                }
             }
-        }
 
-        const respondersDetailHtml = resps.length === 0
-            ? `<div class="text-[11px] text-gray-400">💭 尚無玩家回覆</div>`
-            : `<div class="flex flex-wrap gap-1.5 pt-0.5">
-                ${resps.map(r => {
-                    const rG = String(r.responderGender || '').trim();
-                    const rTag = rG ? `（${rG}）` : '';
-                    const ansSummary = (r.answers || []).map(a => `Q${a.qIndex}:${escWw(a.chosenText)}`).join(' / ');
-                    const isPicked = w.matchedAnonNumber && Number(w.matchedAnonNumber) === Number(r.anonNumber);
-                    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] ${isPicked ? 'bg-rose-100 border border-rose-300 text-[#8f4452] font-bold' : 'bg-pink-50/80 border border-pink-200 text-gray-700'}">
-                        <span>${isPicked ? '💘' : '🎭'} 匿名${r.anonNumber}號：${escWw(r.responderNickname || r.responderId)}${rTag} (ID:${escWw(r.responderId)})</span>
-                        ${ansSummary ? `<span class="text-gray-500">[${ansSummary}]</span>` : ''}
-                    </span>`;
-                }).join('')}
-            </div>`;
+            const isPinned = Boolean(w.isPinned);
+            const pinnedBadgeHtml = isPinned
+                ? `<div class="mb-1"><span class="inline-block px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-bold shadow-2xs">📌 前台置頂中</span></div>`
+                : '';
 
-        const isPinned = Boolean(w.isPinned);
-        const pinnedBadgeHtml = isPinned
-            ? `<span class="px-2 py-0.5 rounded-full bg-rose-600 text-white font-bold shadow-2xs">📌 前台置頂中</span>`
-            : '';
-        const pinActionBtnHtml = isPinned
-            ? `<button type="button" onclick="toggleAdminWishWallPin('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg bg-rose-100 border border-rose-300 text-[#8f4452] font-bold hover:bg-rose-200 transition shadow-sm">📌 取消置頂</button>`
-            : (!isClosedGroup
-                ? `<button type="button" onclick="toggleAdminWishWallPin('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg bg-pink-50 border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-100 transition shadow-sm">📌 置頂顯示</button>`
-                : '');
+            const pinActionBtnHtml = isPinned
+                ? `<button type="button" onclick="event.stopPropagation(); toggleAdminWishWallPin('${escWw(widStr)}')" class="px-2 py-1 rounded-lg bg-rose-100 border border-rose-300 text-[#8f4452] text-[11px] font-bold hover:bg-rose-200 transition">📌 取消置頂</button>`
+                : (!isClosed
+                    ? `<button type="button" onclick="event.stopPropagation(); toggleAdminWishWallPin('${escWw(widStr)}')" class="px-2 py-1 rounded-lg bg-pink-50 border border-pink-300 text-[#8f4452] text-[11px] font-semibold hover:bg-pink-100 transition">📌 置頂</button>`
+                    : '');
 
-        return `
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl ${isPinned ? 'bg-rose-50/45 border-2 border-rose-300' : `bg-white border ${isClosedGroup ? 'border-gray-200' : 'border-emerald-200'}`} text-xs transition hover:bg-pink-50/30">
-                <div class="min-w-0 flex-1 space-y-1.5">
-                    <div class="flex flex-wrap items-center gap-1.5">
+            const mainRowHtml = `
+                <tr onclick="toggleAdminWishWallCardExpand('${escWw(widStr)}')" class="cursor-pointer transition ${isPinned ? 'bg-rose-50/35 hover:bg-rose-50/70' : 'hover:bg-pink-50/40'}">
+                    <td class="p-3.5 text-xs align-middle whitespace-nowrap">
                         ${pinnedBadgeHtml}
                         ${statusPill}
-                        <span class="px-1.5 py-0.5 rounded bg-pink-50 border border-pink-200 text-[11px] font-bold text-[#8f4452]">${gLabel}</span>
-                        <span class="font-bold text-[#8f4452]">${escWw(w.authorNickname)} (ID:${escWw(w.authorId)})</span>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-1.5 text-gray-600">
-                        <span class="font-semibold text-[#5e464a]">🏮 「${escWw(w.title)}」</span>
-                        <span class="text-[11px] text-gray-400">（${(w.questions || []).length}題・開放${w.openDays}天・${resps.length}人已答）</span>
-                    </div>
-                    ${respondersDetailHtml}
-                </div>
-                <div class="flex flex-wrap items-center gap-2 shrink-0 sm:self-center self-end pt-1 sm:pt-0">
-                    ${pinActionBtnHtml}
-                    ${!isClosedGroup ? `<button type="button" onclick="adminFastForwardWishExpiry('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 font-semibold hover:bg-amber-100 transition shadow-sm">⏩ 推進至到期</button>` : ''}
-                    <button type="button" onclick="deleteAdminWishWallEntry('${escWw(w.id)}')" class="px-2.5 py-1.5 rounded-lg text-rose-500 hover:bg-rose-50 font-semibold transition">🗑️ 刪除</button>
-                </div>
-            </div>
-        `;
-    };
+                    </td>
+                    <td class="p-3.5 text-xs align-middle whitespace-nowrap">
+                        ${genderTagHtml}
+                        <span class="font-bold text-gray-800">${escWw(w.authorNickname || w.authorId)}</span>
+                        <span class="text-[11px] font-mono text-gray-400 ml-1">(ID:${escWw(w.authorId)})</span>
+                    </td>
+                    <td class="p-3.5 text-xs align-middle">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex flex-wrap items-center gap-1.5 min-w-0">
+                                <span class="font-bold text-[#5e464a]">🏮 「${escWw(w.title)}」</span>
+                                <span class="text-[11px] px-2 py-0.5 rounded-full bg-rose-50 border border-pink-200 text-[#8f4452] font-semibold shrink-0">
+                                    ${resps.length} 人已答
+                                </span>
+                            </div>
+                            <span class="text-[11px] font-semibold text-[#c96a7b] shrink-0 whitespace-nowrap">
+                                ${isCardExpanded ? '▴ 收合明細' : '▾ 展開明細'}
+                            </span>
+                        </div>
+                    </td>
+                    <td class="p-3.5 text-xs align-middle whitespace-nowrap" onclick="event.stopPropagation()">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            ${pinActionBtnHtml}
+                            ${!isClosed ? `<button type="button" onclick="adminFastForwardWishExpiry('${escWw(widStr)}')" class="px-2 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-[11px] font-semibold hover:bg-amber-100 transition">⏩ 到期</button>` : ''}
+                            <button type="button" onclick="deleteAdminWishWallEntry('${escWw(widStr)}')" class="px-2 py-1 rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px] font-semibold transition">🗑️ 刪除</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
 
-    const sections = [];
+            if (!isCardExpanded) {
+                return mainRowHtml;
+            }
 
-    if (filterVal === 'ALL' || filterVal === 'OPEN') {
-        const openBodyHtml = openWishes.length === 0
-            ? `<div class="p-3.5 text-center text-xs text-gray-400 bg-white/80 rounded-xl border border-dashed border-emerald-200">目前沒有「開放中」的祈願題目。</div>`
-            : `<div class="space-y-2">${openWishes.map(w => renderWishCard(w, false)).join('')}</div>`;
-        sections.push(`
-            <div class="rounded-2xl border border-emerald-200 bg-emerald-50/35 p-3.5 space-y-2.5">
-                <div class="flex items-center justify-between">
-                    <span class="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
-                        <span>🟢 開放中</span>
-                    </span>
-                    <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
-                        ${openWishes.length} 則
-                    </span>
-                </div>
-                ${openBodyHtml}
-            </div>
-        `);
+            const questionsPreviewHtml = qsList.length > 0
+                ? `<div class="space-y-1 p-2.5 rounded-xl bg-white border border-pink-100 text-[11px] text-gray-600">
+                    <div class="font-bold text-[#8f4452]">📝 祈願題目內容（共 ${qsList.length} 題・開放 ${w.openDays} 天）：</div>
+                    ${qsList.map(q => `<div class="leading-relaxed">Q${q.qIndex}. <strong class="text-gray-800">${escWw(q.question)}</strong> <span class="text-gray-400">（A. ${escWw(q.optionA)} ／ B. ${escWw(q.optionB)}）</span></div>`).join('')}
+                </div>`
+                : '';
+
+            const respondersDetailHtml = resps.length === 0
+                ? `<div class="text-[11px] text-gray-400 p-2.5 rounded-xl bg-white border border-dashed border-pink-200">💭 目前尚無玩家回覆此祈願題目</div>`
+                : `<div class="space-y-1.5 p-2.5 rounded-xl bg-white border border-pink-100">
+                    <div class="text-[11px] font-bold text-[#8f4452]">🎭 玩家匿名回覆明細（共 ${resps.length} 人已答）：</div>
+                    <div class="flex flex-wrap gap-1.5">
+                        ${resps.map(r => {
+                            const rG = String(r.responderGender || '').trim();
+                            const rTag = rG ? `（${rG}）` : '';
+                            const ansSummary = (r.answers || []).map(a => `Q${a.qIndex}:${escWw(a.chosenText)}`).join(' / ');
+                            const isPicked = w.matchedAnonNumber && Number(w.matchedAnonNumber) === Number(r.anonNumber);
+                            return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] ${isPicked ? 'bg-rose-100 border border-rose-300 text-[#8f4452] font-bold' : 'bg-pink-50/80 border border-pink-200 text-gray-700'}">
+                                <span>${isPicked ? '💘' : '🎭'} 匿名${r.anonNumber}號：${escWw(r.responderNickname || r.responderId)}${rTag} (ID:${escWw(r.responderId)})</span>
+                                ${ansSummary ? `<span class="text-gray-500">[${ansSummary}]</span>` : ''}
+                            </span>`;
+                        }).join('')}
+                    </div>
+                </div>`;
+
+            const detailRowHtml = `
+                <tr class="bg-pink-50/25">
+                    <td colspan="4" class="p-3.5 space-y-2 text-xs">
+                        ${questionsPreviewHtml}
+                        ${respondersDetailHtml}
+                    </td>
+                </tr>
+            `;
+
+            return mainRowHtml + detailRowHtml;
+        }).join('');
     }
 
-    if (filterVal === 'ALL' || filterVal === 'ENDED') {
-        const endedBodyHtml = endedWishes.length === 0
-            ? `<div class="p-3.5 text-center text-xs text-gray-400 bg-white/80 rounded-xl border border-dashed border-gray-300">目前沒有「已結束」的祈願紀錄。</div>`
-            : `<div class="space-y-2">${endedWishes.map(w => renderWishCard(w, true)).join('')}</div>`;
-        sections.push(`
-            <div class="rounded-2xl border border-gray-200 bg-gray-50/60 p-3.5 space-y-2.5">
-                <div class="flex items-center justify-between">
-                    <span class="text-xs font-bold text-gray-700 flex items-center gap-1.5">
-                        <span>🏁 已結束</span>
-                    </span>
-                    <span class="text-[11px] px-2 py-0.5 rounded-full bg-gray-200/80 text-gray-700 font-bold">
-                        ${endedWishes.length} 則
-                    </span>
-                </div>
-                ${endedBodyHtml}
-            </div>
-        `);
+    if (paginationBar) {
+        if (typeof buildLogsPaginationHtml === 'function') {
+            paginationBar.innerHTML = buildLogsPaginationHtml({
+                totalItems,
+                pageSizeStr: wishWallPageSize,
+                currentPage: currentWishWallPage,
+                totalPages,
+                startIdx,
+                perPage,
+                onPageSizeFnName: 'onAdminWishWallPageSizeChange',
+                onGoPageFnName: 'goToAdminWishWallPage',
+                accentBgClass: 'bg-[#c96a7b]',
+                accentBorderClass: 'border-rose-200',
+                accentHoverClass: 'hover:bg-rose-50',
+                accentTextClass: 'text-[#8f4452]'
+            });
+        } else {
+            const showFrom = totalItems === 0 ? 0 : startIdx + 1;
+            const showTo = Math.min(startIdx + perPage, totalItems);
+            paginationBar.innerHTML = `<div class="text-gray-600 font-medium">顯示第 <strong class="text-[#8f4452]">${showFrom}～${showTo}</strong> 筆，共 <strong class="text-[#8f4452]">${totalItems}</strong> 筆（第 <strong>${currentWishWallPage}</strong> / ${totalPages} 頁，每頁 ${perPage} 筆）</div>`;
+        }
     }
-
-    wishWallListBox.innerHTML = sections.join('');
 }
 
 window.batchDeleteAdminWishWallEntries = batchDeleteAdminWishWallEntries;
 window.renderAdminWishWallList = renderAdminWishWallList;
+window.onAdminWishWallFilterChange = onAdminWishWallFilterChange;
+window.onAdminWishWallPageSizeChange = onAdminWishWallPageSizeChange;
+window.goToAdminWishWallPage = goToAdminWishWallPage;
+window.toggleAdminWishWallCardExpand = toggleAdminWishWallCardExpand;
 window.toggleAdminWishWallPin = toggleAdminWishWallPin;

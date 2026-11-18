@@ -12,6 +12,7 @@ const CHATS_KEY = 'yuelao_chats';
 const ADMIN_CHATS_KEY = 'yuelao_admin_chats';
 const CUSTOM_ACTIVITIES_KEY = 'yuelao_custom_activities';
 const REG_HISTORY_KEY = 'yuelao_activity_reg_history';
+const SESSION_MATCH_RESULTS_KEY = 'yuelao_session_match_results';
 const FORCE_KEY = 'yuelao_force_matches';
 const AUTO_RUN_LOG_KEY = 'yuelao_auto_matched_sessions';
 const FRONTEND_STORAGE_KEY = 'yuelao_romance_app_v2';
@@ -328,6 +329,43 @@ const CloudSync = {
         return Boolean(map[pk] && Date.now() <= Number(map[pk] || 0));
     },
 
+    isRogueCustomMatchEntry(histItem, customActsList = null) {
+        if (!histItem || typeof histItem !== 'object') return false;
+        const matchedAtTs = Number(histItem.matchedAt || 0);
+        const floorTs = (typeof getCustomActivityAllowedMinTs === 'function')
+            ? getCustomActivityAllowedMinTs(Date.now())
+            : new Date(2026, 10, 18, 0, 0, 0, 0).getTime();
+        // 只檢查在 11/18 00:00 之後才寫入的配對紀錄，不影響 11/18 之前原本正常的歷史配對
+        if (!matchedAtTs || matchedAtTs < floorTs) return false;
+
+        let acts = Array.isArray(customActsList) ? customActsList : null;
+        if (!acts) {
+            if (this.tree && this.tree[CUSTOM_ACTIVITIES_KEY] !== undefined) {
+                acts = this.mapToArray(this.tree[CUSTOM_ACTIVITIES_KEY]);
+            } else {
+                try {
+                    acts = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
+                } catch (e) {
+                    acts = [];
+                }
+            }
+        }
+        if (!Array.isArray(acts) || acts.length === 0) return false;
+
+        const aid = String(histItem.activityId || '').trim();
+        const sess = String(histItem.session || '').trim();
+        const matchedAct = acts.find(a =>
+            a && ((aid && String(a.id || '').trim() === aid) || (!aid && sess && String(a.name || '').trim() === sess))
+        );
+        if (!matchedAct) return false;
+
+        // 若該專屬活動符合任一禁止條件（1.已關閉 2.防呆關閉 3.活動日期早於今天 11/18），則此筆 11/18 配對為未重整舊分頁誤觸發，直接攔截
+        if (typeof checkCustomActivityThreeConditions === 'function') {
+            return !checkCustomActivityThreeConditions(matchedAct, matchedAtTs).allowed;
+        }
+        return !Boolean(matchedAct.isOpen) || !Boolean(matchedAct.matchSafetyEnabled);
+    },
+
     recordMatchLog(userA, userB, sessionLabel = '', matchTs = Date.now(), sourceLabel = '') {
         if (!userA || !userB || !userA.id || !userB.id) return null;
         const tsNum = Number(matchTs) || Date.now();
@@ -487,13 +525,34 @@ const CloudSync = {
                     ...normalizedItem,
                     partnerName: normalizedItem.partnerName || prev.partnerName,
                     session: normalizedItem.session || prev.session,
-                    matchedAt: Math.max(Number(prev.matchedAt || 0), Number(normalizedItem.matchedAt || 0)),
+                    matchedAt: Math.min(Number(prev.matchedAt || 0) || Infinity, Number(normalizedItem.matchedAt || 0) || Infinity) || Date.now(),
                     igUnlocked: Boolean(prev.igUnlocked || normalizedItem.igUnlocked),
                     continueVotes: mergedVotes
                 });
             }
         });
-        return Array.from(byPartner.values());
+
+        // 嚴格 1 對 1 場次保護：同一個常規週三／週六單一場次（無 activityId 且非強制配對）每人最多只能配對 1 位對象
+        const dedupedList = Array.from(byPartner.values());
+        dedupedList.sort((a, b) => Number(a.matchedAt || 0) - Number(b.matchedAt || 0));
+        const seenRegularSessionSet = new Set();
+        const finalItems = [];
+        dedupedList.forEach(entry => {
+            if (!entry.activityId && entry.session && !String(entry.session).includes('強制')) {
+                const normSess = (typeof normalizeSessionLabel === 'function')
+                    ? normalizeSessionLabel(entry.session)
+                    : String(entry.session).trim();
+                if (/^第\s*\d+\s*屆.+\([三六]\)$/.test(normSess)) {
+                    if (seenRegularSessionSet.has(normSess)) {
+                        return;
+                    }
+                    seenRegularSessionSet.add(normSess);
+                    entry.session = normSess;
+                }
+            }
+            finalItems.push(entry);
+        });
+        return finalItems;
     },
 
     reconcileSymmetricMatches(usersArr, autoPersistRepaired = false, options = {}) {
@@ -730,6 +789,10 @@ const CloudSync = {
             }
         });
 
+        const customActsSnapshotForFilter = (t[CUSTOM_ACTIVITIES_KEY] !== undefined)
+            ? this.mapToArray(t[CUSTOM_ACTIVITIES_KEY])
+            : null;
+
         // 1. 玩家名單（Firebase RTDB 會自動省略空陣列 [] 與空物件 {}，還原時需明確補回 [] / {} 以確保取消勾選場次能雙向連動）
         const usersArr = this.mapToArray(t[USERS_KEY]).map(u => {
             if (!u || typeof u !== 'object') return u;
@@ -742,7 +805,15 @@ const CloudSync = {
             cleanUser.registeredSessions = Array.from(new Set(
                 this.normalizeStringArray(cleanUser.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
             ));
-            cleanUser.matchedHistory = this.normalizeMatchedHistoryList(cleanUser.matchedHistory);
+            cleanUser.matchedHistory = this.normalizeMatchedHistoryList(cleanUser.matchedHistory)
+                .filter(h => !this.isRogueCustomMatchEntry(h, customActsSnapshotForFilter));
+            if (cleanUser.matchedWithId && !cleanUser.matchedHistory.some(h => String(h.partnerId) === String(cleanUser.matchedWithId))) {
+                const fallbackH = cleanUser.matchedHistory[cleanUser.matchedHistory.length - 1] || null;
+                cleanUser.matchedSession = fallbackH ? (fallbackH.session || null) : null;
+                cleanUser.matchedWithId = fallbackH ? (fallbackH.partnerId || null) : null;
+                cleanUser.matchedWithName = fallbackH ? (fallbackH.partnerName || null) : null;
+                cleanUser.matchedAt = fallbackH ? (fallbackH.matchedAt || null) : null;
+            }
             cleanUser.exactMatchCriteria = (cleanUser.exactMatchCriteria && typeof cleanUser.exactMatchCriteria === 'object' && !Array.isArray(cleanUser.exactMatchCriteria))
                 ? cleanUser.exactMatchCriteria
                 : {};
@@ -789,6 +860,14 @@ const CloudSync = {
         // 1b. 活動歷史報名紀錄同步（確保活動結束 3 分鐘自動清除會員「報名場次」後，後台統計人數仍完整保留）
         if (typeof ActivityRegArchive !== 'undefined') {
             ActivityRegArchive.mergeCloudTreeAndUsers(t[REG_HISTORY_KEY], usersArr);
+        }
+
+        // 1c. 週三／週六場次配對成功與失敗名單快照同步
+        if (t[SESSION_MATCH_RESULTS_KEY] && typeof t[SESSION_MATCH_RESULTS_KEY] === 'object') {
+            this.writeLocalIfChanged(SESSION_MATCH_RESULTS_KEY, JSON.stringify(t[SESSION_MATCH_RESULTS_KEY]));
+        } else if (t[SESSION_MATCH_RESULTS_KEY] === null && localStorage.getItem(SESSION_MATCH_RESULTS_KEY) !== null) {
+            localStorage.removeItem(SESSION_MATCH_RESULTS_KEY);
+            LocalJsonCache.invalidate(SESSION_MATCH_RESULTS_KEY);
         }
 
         // 2. 聊天紀錄（前後台分開儲存：後台寫入完整全站聊天快取 ADMIN_CHATS_KEY，避免同瀏覽器開啟前台分頁時覆蓋清空）
@@ -1017,6 +1096,7 @@ const CloudSync = {
             topNode === PLAYER_OP_LOGS_KEY ||
             topNode === MATCH_LOGS_KEY ||
             topNode === REG_HISTORY_KEY ||
+            topNode === SESSION_MATCH_RESULTS_KEY ||
             topNode === FORCE_KEY ||
             topNode === AUTO_RUN_LOG_KEY
         ) {
@@ -1261,7 +1341,7 @@ const CloudSync = {
             this.normalizeStringArray(cleanRecord.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
         ));
         cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory)
-            .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId));
+            .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId) && !this.isRogueCustomMatchEntry(h));
         if (!isMatchMutation && existingTreeUser) {
             // 非配對／解除配對異動時，合併雲端與本地配對歷史（排除近期已解除配對的對象），絕不以舊快照覆蓋新配對好友
             const cloudHist = this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory)
@@ -2311,6 +2391,17 @@ const ActivityRegArchive = {
         const batchLbl = (typeof extractBatchLabel === 'function')
             ? extractBatchLabel(norm)
             : ((norm.match(/^第\s*(\d+)\s*屆/) || [])[0] || '');
+        const rawCrit = (user && user.exactMatchCriteria && typeof user.exactMatchCriteria === 'object' && !Array.isArray(user.exactMatchCriteria))
+            ? { ...user.exactMatchCriteria }
+            : ((existingEntry && existingEntry.exactMatchCriteria && typeof existingEntry.exactMatchCriteria === 'object' && !Array.isArray(existingEntry.exactMatchCriteria))
+                ? { ...existingEntry.exactMatchCriteria }
+                : {});
+        const rawMust = (user && Array.isArray(user.mustMatchKeys))
+            ? [...user.mustMatchKeys]
+            : (Array.isArray(existingEntry && existingEntry.mustMatchKeys) ? [...existingEntry.mustMatchKeys] : []);
+        const mustArr = (typeof normalizeMustMatchKeysList === 'function')
+            ? normalizeMustMatchKeysList(rawMust, rawCrit)
+            : rawMust.filter(k => Object.prototype.hasOwnProperty.call(rawCrit, k)).slice(0, 2);
         return {
             id: key,
             kind: 'regular',
@@ -2319,6 +2410,8 @@ const ActivityRegArchive = {
             playerId: pid,
             nickname: String((user && user.nickname) || (existingEntry && existingEntry.nickname) || '').trim(),
             gender: String((user && user.gender) || (existingEntry && existingEntry.gender) || '').trim(),
+            exactMatchCriteria: rawCrit,
+            mustMatchKeys: mustArr,
             recordedAt: Number((existingEntry && existingEntry.recordedAt) || Date.now())
         };
     },
@@ -2365,7 +2458,7 @@ const ActivityRegArchive = {
         const prev = map[key] || null;
         const entry = this.buildRegularEntry(user, sessionStr, prev);
         if (!entry) return null;
-        if (!prev || prev.nickname !== entry.nickname || prev.gender !== entry.gender || prev.session !== entry.session) {
+        if (!prev || prev.nickname !== entry.nickname || prev.gender !== entry.gender || prev.session !== entry.session || JSON.stringify(prev.exactMatchCriteria || {}) !== JSON.stringify(entry.exactMatchCriteria || {}) || JSON.stringify(prev.mustMatchKeys || []) !== JSON.stringify(entry.mustMatchKeys || [])) {
             map[key] = entry;
             this.saveAllMap(map);
             if (pushToCloud && typeof CloudSync !== 'undefined' && CloudSync.initialized) {

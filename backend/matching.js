@@ -958,18 +958,61 @@ function acceptsCandidate(seeker, candidate) {
 }
 
 function canPair(A, B) {
-    const alreadyFriends = (A.matchedHistory || []).some(h => String(h.partnerId) === String(B.id)) ||
-                           String(A.matchedWithId) === String(B.id);
-    if (alreadyFriends) return false;
+    if (!A || !B) return false;
+    const idA = String(A.id || '').trim();
+    const idB = String(B.id || '').trim();
+    if (!idA || !idB || idA === idB) return false;
+    const aHasB = (A.matchedHistory || []).some(h => String(h.partnerId).trim() === idB) ||
+                  String(A.matchedWithId || '').trim() === idB;
+    const bHasA = (B.matchedHistory || []).some(h => String(h.partnerId).trim() === idA) ||
+                  String(B.matchedWithId || '').trim() === idA;
+    if (aHasB || bHasA) return false;
     return acceptsCandidate(A, B) && acceptsCandidate(B, A);
 }
 
+function hasUserMatchedInRegularSession(user, targetSession) {
+    if (!user || !targetSession) return false;
+    const normTarget = (typeof normalizeSessionLabel === 'function')
+        ? normalizeSessionLabel(targetSession)
+        : String(targetSession).trim();
+    if (!normTarget || String(normTarget).includes('強制')) return false;
+
+    const rawHist = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+        ? CloudSync.mapToArray(user.matchedHistory)
+        : (Array.isArray(user.matchedHistory) ? user.matchedHistory : []);
+    if (rawHist.some(h => h && !h.activityId && isSameSession(h.session, normTarget))) {
+        return true;
+    }
+    if (user.matchedWithId && user.matchedSession && isSameSession(user.matchedSession, normTarget)) {
+        return true;
+    }
+    return false;
+}
+
 function recordPairMatch(userA, userB, targetSession, nowTs, activityId = null, matchDetail = '') {
+    if (!userA || !userB || String(userA.id) === String(userB.id)) return false;
+
+    // 嚴格 1 對 1 保護：常規週三／週六場次每人當場最多只能配對 1 人，絕不允許 1 人配對 2 人
+    if (!activityId && targetSession && !String(targetSession).includes('強制')) {
+        if (hasUserMatchedInRegularSession(userA, targetSession) || hasUserMatchedInRegularSession(userB, targetSession)) {
+            console.warn('已攔截同場次重複配對（每人限 1 對 1）：', userA.id, userB.id, targetSession);
+            return false;
+        }
+    }
+
     if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
         CloudSync.clearPairUnmatched(userA.id, userB.id);
     }
-    if (!Array.isArray(userA.matchedHistory)) userA.matchedHistory = [];
-    if (!Array.isArray(userB.matchedHistory)) userB.matchedHistory = [];
+    if (!Array.isArray(userA.matchedHistory)) {
+        userA.matchedHistory = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+            ? CloudSync.mapToArray(userA.matchedHistory)
+            : [];
+    }
+    if (!Array.isArray(userB.matchedHistory)) {
+        userB.matchedHistory = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+            ? CloudSync.mapToArray(userB.matchedHistory)
+            : [];
+    }
 
     const itemForA = { session: targetSession, partnerId: String(userB.id), partnerName: userB.nickname, matchedAt: nowTs };
     const itemForB = { session: targetSession, partnerId: String(userA.id), partnerName: userA.nickname, matchedAt: nowTs };
@@ -998,96 +1041,605 @@ function recordPairMatch(userA, userB, targetSession, nowTs, activityId = null, 
         const srcLabel = matchDetail || (String(targetSession).includes('強制') ? '管理員手動配對' : '場次配對');
         CloudSync.recordMatchLog(userA, userB, targetSession, nowTs, srcLabel);
     }
+    return true;
 }
 
-function runSessionMatch(isAuto = false) {
-    const targetSessionSel = document.getElementById('adminSessionSelect'); const targetSession = targetSessionSel ? targetSessionSel.value : getBatchScheduleInfo(getCurrentBatch()).wedLabel;
-    const batchName = extractBatchLabel(targetSession);
-    const users = getUsers();
-    const rules = getForceRules();
+function findMaximumCompatibilityMatching(pool, adj) {
+    const n = pool.length;
+    const matchOf = new Array(n).fill(-1);
+    if (n < 2) return matchOf;
 
-    const activeBatchRules = rules.filter(r => extractBatchLabel(r.batch) === batchName);
-    const reservedIds = new Set();
-    activeBatchRules.forEach(r => {
-        reservedIds.add(String(r.adminId));
-        reservedIds.add(String(r.targetId));
-    });
-
-    const pairedThisSessionIds = new Set();
-    let pairCount = 0;
-    const nowTs = Date.now();
-    const triggerLabel = isAuto ? '20:00 到點自動配對' : '20:00 配對執行';
-
-    appendLog(`<span class="text-yellow-300">[${triggerLabel}]</span> 場次：<strong>${targetSession}</strong>...`);
-
-    activeBatchRules.forEach(rule => {
-        if (rule.executed) return;
-        const adminUser = users.find(u => String(u.id) === String(rule.adminId));
-        const targetUser = users.find(u => String(u.id) === String(rule.targetId));
-
-        if (adminUser && targetUser && !adminUser.isMatchBanned && !targetUser.isMatchBanned) {
-            recordPairMatch(adminUser, targetUser, targetSession, nowTs);
-            pairedThisSessionIds.add(String(adminUser.id));
-            pairedThisSessionIds.add(String(targetUser.id));
-            rule.executed = true;
-            pairCount++;
-
-            appendLog(`<span class="text-rose-400">[秘密強制配對完成]</span> ID:<strong>${adminUser.id}</strong>（${adminUser.nickname}）⇄ ID:<strong>${targetUser.id}</strong>（${targetUser.nickname}）`);
-        }
-    });
-    saveForceRules(rules);
-
-    const eligiblePool = shuffle(users.filter(u => {
-        if (u.isWarned || u.isMatchBanned) return false;
-        const sessions = Array.isArray(u.registeredSessions)
-            ? u.registeredSessions
-            : (u.registeredSession ? [u.registeredSession] : []);
-        const alreadyMatchedThisSession = (u.matchedHistory || []).some(h => isSameSession(h.session, targetSession)) ||
-                                          isSameSession(u.matchedSession, targetSession);
-        return sessions.some(s => isSameSession(s, targetSession)) &&
-               !alreadyMatchedThisSession &&
-               !pairedThisSessionIds.has(String(u.id)) &&
-               !reservedIds.has(String(u.id));
-    }));
-
-    for (let i = 0; i < eligiblePool.length; i++) {
-        const A = eligiblePool[i];
-        if (pairedThisSessionIds.has(String(A.id))) continue;
-
-        const candidates = [];
-        for (let j = i + 1; j < eligiblePool.length; j++) {
-            const B = eligiblePool[j];
-            if (pairedThisSessionIds.has(String(B.id))) continue;
-            if (canPair(A, B)) {
-                candidates.push(B);
+    // 1. 先依「可配對對象數最少優先（MRV）」進行貪心初始配對，優先保障條件較嚴格的玩家
+    const order = Array.from({ length: n }, (_, idx) => idx).sort((a, b) => adj[a].length - adj[b].length);
+    order.forEach(u => {
+        if (matchOf[u] !== -1) return;
+        const neighbors = [...adj[u]].sort((a, b) => adj[a].length - adj[b].length);
+        for (let k = 0; k < neighbors.length; k++) {
+            const v = neighbors[k];
+            if (matchOf[v] === -1) {
+                matchOf[u] = v;
+                matchOf[v] = u;
+                break;
             }
         }
+    });
 
-        if (candidates.length > 0) {
-            const B = candidates[Math.floor(Math.random() * candidates.length)];
-            pairedThisSessionIds.add(String(A.id));
-            pairedThisSessionIds.add(String(B.id));
-            recordPairMatch(A, B, targetSession, nowTs);
-            pairCount++;
+    // 2. Edmonds Blossom 增廣路徑演算法：在 100% 遵守雙方條件前提下，透過調整重排找出全場最大配對數
+    const p = new Array(n).fill(-1);
+    const base = new Array(n).fill(0);
+    const used = new Array(n).fill(false);
+    const blossom = new Array(n).fill(false);
 
-            if (pairCount <= 15) {
-                appendLog(`<span class="text-emerald-400">[配對成功 #${pairCount}]</span> ID:${A.id}（${A.nickname}）⇄ ID:${B.id}（${B.nickname}）`);
+    const lca = (a, b) => {
+        const visited = new Array(n).fill(false);
+        while (true) {
+            a = base[a];
+            visited[a] = true;
+            if (matchOf[a] === -1) break;
+            a = p[matchOf[a]];
+        }
+        while (true) {
+            b = base[b];
+            if (visited[b]) return b;
+            b = p[matchOf[b]];
+        }
+    };
+
+    const markPath = (v, b, children) => {
+        while (base[v] !== b) {
+            blossom[base[v]] = blossom[base[matchOf[v]]] = true;
+            p[v] = children;
+            children = matchOf[v];
+            v = p[matchOf[v]];
+        }
+    };
+
+    const findAugmentingPath = (root) => {
+        used.fill(false);
+        p.fill(-1);
+        for (let i = 0; i < n; i++) base[i] = i;
+
+        const q = [root];
+        used[root] = true;
+        let qHead = 0;
+
+        while (qHead < q.length) {
+            const v = q[qHead++];
+            for (let idx = 0; idx < adj[v].length; idx++) {
+                const to = adj[v][idx];
+                if (base[v] === base[to] || matchOf[v] === to) continue;
+                if (to === root || (matchOf[to] !== -1 && p[matchOf[to]] !== -1)) {
+                    const curBase = lca(v, to);
+                    blossom.fill(false);
+                    markPath(v, curBase, to);
+                    markPath(to, curBase, v);
+                    for (let i = 0; i < n; i++) {
+                        if (blossom[base[i]]) {
+                            base[i] = curBase;
+                            if (!used[i]) {
+                                used[i] = true;
+                                q.push(i);
+                            }
+                        }
+                    }
+                } else if (p[to] === -1) {
+                    p[to] = v;
+                    if (matchOf[to] === -1) return to;
+                    const nextV = matchOf[to];
+                    used[nextV] = true;
+                    q.push(nextV);
+                }
+            }
+        }
+        return -1;
+    };
+
+    for (let i = 0; i < n; i++) {
+        if (matchOf[i] === -1 && adj[i].length > 0) {
+            const v = findAugmentingPath(i);
+            let cur = v;
+            while (cur !== -1) {
+                const pv = p[cur];
+                const ppv = matchOf[pv];
+                matchOf[cur] = pv;
+                matchOf[pv] = cur;
+                cur = ppv;
             }
         }
     }
+
+    return matchOf;
+}
+
+function diagnoseSessionUnmatchedReason(user, allSessionUsers, reservedIds = new Set()) {
+    if (!user) return '資料異常';
+    const uid = String(user.id || '').trim();
+    if (user.isWarned) return '⚠️ 警告帳號（系統不提供配對）';
+    if (user.isMatchBanned) return '🚫 管理員設定「禁止配對」';
+    if (reservedIds.has(uid)) return '🔒 秘密強制配對保留名單未觸發';
+
+    const others = (allSessionUsers || []).filter(other => other && String(other.id).trim() !== uid && !other.isWarned && !other.isMatchBanned);
+    if (others.length === 0) {
+        return '🔍 本場次無其他可參與配對的玩家';
+    }
+
+    let uAcceptsCount = 0;
+    let othersAcceptUCount = 0;
+    let mutualCompatCount = 0;
+
+    others.forEach(other => {
+        const uOk = acceptsCandidate(user, other);
+        const oOk = acceptsCandidate(other, user);
+        if (uOk) uAcceptsCount++;
+        if (oOk) othersAcceptUCount++;
+        if (uOk && oOk) mutualCompatCount++;
+    });
+
+    if (mutualCompatCount > 0) {
+        return `⏳ 場內有 ${mutualCompatCount} 位互相符合的對象，但名額已被其他玩家優先配對走（可補跑配對）`;
+    }
+    if (uAcceptsCount === 0) {
+        return '🔍 自身開出的條件過嚴（場內異性無人同時符合此玩家條件）';
+    }
+    if (othersAcceptUCount === 0) {
+        return '🔍 未符合其他異性玩家開出的條件（場內無人同時接受此玩家條件）';
+    }
+    return '🔍 單向有符合對象，但雙方條件未同時互中（互選交集為 0）';
+}
+
+function formatUserCriteriaPlainText(u) {
+    if (!u || typeof u !== 'object') return '不限制（隨機配對）';
+    const crit = (u.exactMatchCriteria && typeof u.exactMatchCriteria === 'object') ? u.exactMatchCriteria : {};
+    const keys = Object.keys(crit).filter(k => !(k === 'city' && crit.region));
+    if (keys.length === 0) return '不限制（隨機配對）';
+    const mustSet = new Set(
+        (Array.isArray(u.mustMatchKeys) ? u.mustMatchKeys : [])
+            .map(String)
+            .filter(k => keys.includes(k))
+            .slice(0, 2)
+    );
+    const labelOf = (k) => k === 'region' ? `居住地區:${crit.region}` : `${(typeof FIELD_LABELS !== 'undefined' && FIELD_LABELS[k]) || k}:${crit[k]}`;
+    const mustList = keys.filter(k => mustSet.has(k)).map(labelOf);
+    const orList = keys.filter(k => !mustSet.has(k)).map(labelOf);
+    const parts = [];
+    if (mustList.length > 0) parts.push(`🔒必須:${mustList.join('+')}`);
+    if (orList.length > 0) parts.push(`✨選填:${orList.join('/')}`);
+    return parts.join(' ｜ ') || '不限制（隨機配對）';
+}
+
+function saveSessionMatchResultRecord(targetSession, allSessionUsers, users, reservedIds, nowTs) {
+    const normSession = (typeof normalizeSessionLabel === 'function')
+        ? normalizeSessionLabel(targetSession)
+        : String(targetSession || '').trim();
+    if (!normSession) return null;
+
+    const storageKey = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined')
+        ? SESSION_MATCH_RESULTS_KEY
+        : 'yuelao_session_match_results';
+    const docKey = (typeof ActivityRegArchive !== 'undefined' && typeof ActivityRegArchive.sanitizeSeg === 'function')
+        ? ActivityRegArchive.sanitizeSeg(normSession)
+        : normSession.replace(/[\/.#$\[\]\s]+/g, '_');
+
+    const userById = new Map();
+    (users || []).forEach(u => {
+        if (u && u.id) userById.set(String(u.id).trim(), u);
+    });
+
+    const matchedUsers = [];
+    const unmatchedUsers = [];
+    const seenPairs = new Set();
+    const matchedPairs = [];
+
+    allSessionUsers.forEach(regU => {
+        const pid = String(regU.id).trim();
+        const liveU = userById.get(pid) || regU;
+        const histLinks = (Array.isArray(liveU.matchedHistory) ? liveU.matchedHistory : [])
+            .filter(h => !h.activityId && isSameSession(h.session, normSession));
+
+        if (histLinks.length > 0) {
+            const firstLink = histLinks[0];
+            const partnerId = String(firstLink.partnerId || '').trim();
+            const partnerU = userById.get(partnerId);
+            const partnerName = (partnerU && partnerU.nickname) || firstLink.partnerName || `玩家_${partnerId}`;
+            matchedUsers.push({
+                playerId: pid,
+                nickname: liveU.nickname || `玩家_${pid}`,
+                gender: liveU.gender || '',
+                age: liveU.age || '',
+                region: liveU.region || '',
+                partnerId,
+                partnerName,
+                session: normSession,
+                matchedAt: Number(firstLink.matchedAt || nowTs),
+                criteriaSummary: formatUserCriteriaPlainText(liveU)
+            });
+            if (partnerId) {
+                const pk = [pid, partnerId].sort().join('__');
+                if (!seenPairs.has(pk)) {
+                    seenPairs.add(pk);
+                    matchedPairs.push({
+                        idA: pid,
+                        nameA: liveU.nickname || `玩家_${pid}`,
+                        genderA: liveU.gender || '',
+                        idB: partnerId,
+                        nameB: partnerName,
+                        genderB: (partnerU && partnerU.gender) || '',
+                        matchedAt: Number(firstLink.matchedAt || nowTs)
+                    });
+                }
+            }
+        } else {
+            unmatchedUsers.push({
+                playerId: pid,
+                nickname: liveU.nickname || `玩家_${pid}`,
+                gender: liveU.gender || '',
+                age: liveU.age || '',
+                region: liveU.region || '',
+                criteriaSummary: formatUserCriteriaPlainText(liveU),
+                failReason: diagnoseSessionUnmatchedReason(liveU, allSessionUsers, reservedIds)
+            });
+        }
+    });
+
+    const record = {
+        id: docKey,
+        session: normSession,
+        batchLabel: extractBatchLabel(normSession),
+        executedAtTs: nowTs,
+        executedAtStr: new Date(nowTs).toLocaleString('zh-TW', { hour12: false }),
+        totalRegCount: allSessionUsers.length,
+        maleRegCount: allSessionUsers.filter(u => u.gender === '男').length,
+        femaleRegCount: allSessionUsers.filter(u => u.gender === '女').length,
+        matchedCount: matchedUsers.length,
+        matchedPairCount: matchedPairs.length,
+        unmatchedCount: unmatchedUsers.length,
+        matchedPairs,
+        matchedUsers,
+        unmatchedUsers
+    };
+
+    try {
+        const existingMap = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        const mapObj = (existingMap && typeof existingMap === 'object' && !Array.isArray(existingMap)) ? existingMap : {};
+        mapObj[docKey] = record;
+        localStorage.setItem(storageKey, JSON.stringify(mapObj));
+        if (typeof LocalJsonCache !== 'undefined') {
+            LocalJsonCache.invalidate(storageKey);
+        }
+    } catch (e) {}
+
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+        CloudSync.putNode(`${storageKey}/${docKey}`, record);
+    }
+
+    return record;
+}
+
+let sessionMatchRunInProgress = false;
+
+function runSessionMatch(isAuto = false, overrideSession = null) {
+    if (sessionMatchRunInProgress) {
+        if (!isAuto) alert('⏳ 系統正在執行本場次配對結算中，請稍候再試！');
+        return null;
+    }
+    if (typeof CloudSync !== 'undefined' && CloudSync.inFlightWrites > 0) {
+        if (!isAuto) alert('⏳ 雲端資料尚在寫入同步中，請稍候 2 秒再點擊執行，避免重複配對！');
+        return null;
+    }
+
+    const targetSessionSel = document.getElementById('adminSessionSelect');
+    const rawTargetSession = overrideSession || (targetSessionSel ? targetSessionSel.value : getBatchScheduleInfo(getCurrentBatch()).wedLabel);
+    const targetSession = (typeof normalizeSessionLabel === 'function')
+        ? normalizeSessionLabel(rawTargetSession)
+        : String(rawTargetSession || '').trim();
+    const batchName = extractBatchLabel(targetSession);
+
+    const sessionLockKey = `yuelao_session_match_lock_${targetSession.replace(/[\/.#$\[\]\s]+/g, '_')}`;
+    const nowTs = Date.now();
+    try {
+        const prevLockTs = Number(localStorage.getItem(sessionLockKey) || 0);
+        if (prevLockTs > 0 && (nowTs - prevLockTs) < 8000) {
+            if (!isAuto) alert('⏳ 剛剛已執行過本場次配對，請稍候 8 秒再操作，避免重疊觸發！');
+            return null;
+        }
+        localStorage.setItem(sessionLockKey, String(nowTs));
+    } catch (e) {}
+
+    sessionMatchRunInProgress = true;
+    try {
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('users');
+        }
+        const users = getUsers();
+        const rules = getForceRules();
+
+        // 先確保本場次既有配對皆為嚴格 1 對 1（若有任何歷史殘留 1 對多重複紀錄先自動整理為 1 對 1）
+        const activeBatchRules = rules.filter(r => extractBatchLabel(r.batch) === batchName);
+        const reservedIds = new Set();
+        activeBatchRules.forEach(r => {
+            reservedIds.add(String(r.adminId));
+            reservedIds.add(String(r.targetId));
+        });
+
+        // 雙向收集本場次所有已配對玩家 ID（包含本人紀錄、對方紀錄的 partnerId、以及場次結算快照），確保已配對的 A 與 B 絕不再進入補跑名單
+        const pairedThisSessionIds = new Set();
+        users.forEach(u => {
+            if (!u || !u.id) return;
+            const uid = String(u.id).trim();
+            if (hasUserMatchedInRegularSession(u, targetSession)) {
+                pairedThisSessionIds.add(uid);
+            }
+            const rawHist = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+                ? CloudSync.mapToArray(u.matchedHistory)
+                : (Array.isArray(u.matchedHistory) ? u.matchedHistory : []);
+            rawHist.forEach(h => {
+                if (h && !h.activityId && isSameSession(h.session, targetSession)) {
+                    pairedThisSessionIds.add(uid);
+                    const pId = String(h.partnerId || '').trim();
+                    if (pId) pairedThisSessionIds.add(pId);
+                }
+            });
+            if (u.matchedWithId && u.matchedSession && isSameSession(u.matchedSession, targetSession)) {
+                pairedThisSessionIds.add(uid);
+                pairedThisSessionIds.add(String(u.matchedWithId).trim());
+            }
+        });
+        try {
+            const smrKey = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined') ? SESSION_MATCH_RESULTS_KEY : 'yuelao_session_match_results';
+            const smrMap = JSON.parse(localStorage.getItem(smrKey) || '{}');
+            const snap = Object.values(smrMap || {}).find(s => s && isSameSession(s.session, targetSession));
+            if (snap) {
+                (snap.matchedUsers || []).forEach(mu => {
+                    if (mu && mu.playerId) pairedThisSessionIds.add(String(mu.playerId).trim());
+                    if (mu && mu.partnerId) pairedThisSessionIds.add(String(mu.partnerId).trim());
+                });
+                (snap.matchedPairs || []).forEach(mp => {
+                    if (mp && mp.idA) pairedThisSessionIds.add(String(mp.idA).trim());
+                    if (mp && mp.idB) pairedThisSessionIds.add(String(mp.idB).trim());
+                });
+            }
+        } catch (e) {}
+
+        let pairCount = 0;
+        const triggerLabel = isAuto ? '20:00 到點自動配對' : '20:00 配對執行';
+
+        appendLog(`<span class="text-yellow-300">[${triggerLabel}]</span> 場次：<strong>${targetSession}</strong>...`);
+
+        let forceRulesChanged = false;
+        activeBatchRules.forEach(rule => {
+            if (rule.executed) return;
+            const adminIdStr = String(rule.adminId || '').trim();
+            const targetIdStr = String(rule.targetId || '').trim();
+            if (pairedThisSessionIds.has(adminIdStr) || pairedThisSessionIds.has(targetIdStr)) return;
+
+            const adminUser = users.find(u => String(u.id).trim() === adminIdStr);
+            const targetUser = users.find(u => String(u.id).trim() === targetIdStr);
+
+            if (adminUser && targetUser && !adminUser.isMatchBanned && !targetUser.isMatchBanned) {
+                if (recordPairMatch(adminUser, targetUser, targetSession, nowTs)) {
+                    pairedThisSessionIds.add(adminIdStr);
+                    pairedThisSessionIds.add(targetIdStr);
+                    rule.executed = true;
+                    forceRulesChanged = true;
+                    pairCount++;
+
+                    appendLog(`<span class="text-rose-400">[秘密強制配對完成]</span> ID:<strong>${adminUser.id}</strong>（${adminUser.nickname}）⇄ ID:<strong>${targetUser.id}</strong>（${targetUser.nickname}）`);
+                }
+            }
+        });
+        if (forceRulesChanged) {
+            saveForceRules(rules);
+        }
+
+        // 合併「目前仍在報名場次中」與「統計封存紀錄（ActivityRegArchive）」的該場次完整報名玩家（確保活動結束3分鐘後補跑也能抓到全部未配對名單）
+        const sessionRegUserMap = new Map();
+        const userById = new Map();
+        users.forEach(u => {
+            if (!u || !u.id) return;
+            userById.set(String(u.id).trim(), u);
+            const sessions = Array.isArray(u.registeredSessions)
+                ? u.registeredSessions
+                : (u.registeredSession ? [u.registeredSession] : []);
+            if (sessions.some(s => isSameSession(s, targetSession))) {
+                sessionRegUserMap.set(String(u.id).trim(), u);
+            }
+        });
+        if (typeof getActivityRegHistory === 'function') {
+            const regHist = getActivityRegHistory();
+            Object.values(regHist).forEach(rec => {
+                if (rec && rec.kind === 'regular' && rec.session && isSameSession(rec.session, targetSession)) {
+                    const pid = String(rec.playerId || '').trim();
+                    const liveU = userById.get(pid);
+                    if (liveU && !sessionRegUserMap.has(pid)) {
+                        sessionRegUserMap.set(pid, liveU);
+                    }
+                }
+            });
+        }
+        const allSessionUsers = Array.from(sessionRegUserMap.values());
+
+        // 嚴格過濾：只把「本場次尚未配對過（1對1）」且符合資格的玩家放進待配對池
+        const eligiblePool = shuffle(allSessionUsers.filter(u => {
+            if (u.isWarned || u.isMatchBanned) return false;
+            const uidStr = String(u.id).trim();
+            if (pairedThisSessionIds.has(uidStr)) return false;
+            if (hasUserMatchedInRegularSession(u, targetSession)) return false;
+            if (reservedIds.has(uidStr)) return false;
+            return true;
+        }));
+
+        // 建立 100% 符合雙方必填／選填條件的相容圖，並使用最大基數配對演算法找出最多可配對組合（每人最多 1 位對象）
+        const adj = Array.from({ length: eligiblePool.length }, () => []);
+        for (let i = 0; i < eligiblePool.length; i++) {
+            for (let j = i + 1; j < eligiblePool.length; j++) {
+                if (canPair(eligiblePool[i], eligiblePool[j])) {
+                    adj[i].push(j);
+                    adj[j].push(i);
+                }
+            }
+        }
+
+        const matchOf = findMaximumCompatibilityMatching(eligiblePool, adj);
+        for (let i = 0; i < eligiblePool.length; i++) {
+            const j = matchOf[i];
+            if (j > i) {
+                const A = eligiblePool[i];
+                const B = eligiblePool[j];
+                const idA = String(A.id).trim();
+                const idB = String(B.id).trim();
+                if (pairedThisSessionIds.has(idA) || pairedThisSessionIds.has(idB)) continue;
+                if (recordPairMatch(A, B, targetSession, nowTs)) {
+                    pairedThisSessionIds.add(idA);
+                    pairedThisSessionIds.add(idB);
+                    pairCount++;
+
+                    if (pairCount <= 15) {
+                        appendLog(`<span class="text-emerald-400">[配對成功 #${pairCount}]</span> ID:${A.id}（${A.nickname}）⇄ ID:${B.id}（${B.nickname}）`);
+                    }
+                }
+            }
+        }
 
     if (pairCount > 15) {
         appendLog(`<span class="text-emerald-400">...（其餘成功配對明細已省略，共完成 ${pairCount} 對）</span>`);
     }
 
-    const bannedSkippedCount = users.filter(u => {
-        const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);
-        return sessions.some(s => isSameSession(s, targetSession)) && u.isMatchBanned;
-    }).length;
+    const bannedSkippedCount = allSessionUsers.filter(u => u.isMatchBanned).length;
+
+    // 永久保存本場次「配對成功名單」與「配對失敗名單及原因」
+    const summaryRec = saveSessionMatchResultRecord(targetSession, allSessionUsers, users, reservedIds, nowTs);
 
     appendLog(`<span class="text-pink-300">[結算完成]</span> 本場次共配對成功 <strong>${pairCount} 對</strong>${bannedSkippedCount > 0 ? `（另有 ${bannedSkippedCount} 名已報名玩家因設定「禁止配對」而未配對）` : ''}。`);
     saveUsers(users, { isMatchMutation: true, targetIds: Array.from(pairedThisSessionIds) });
+    return summaryRec;
+    } finally {
+        sessionMatchRunInProgress = false;
+    }
 }
+
+function repairDuplicateSameSessionMatches(targetSessionFilter = '') {
+    const normFilter = targetSessionFilter
+        ? ((typeof normalizeSessionLabel === 'function') ? normalizeSessionLabel(targetSessionFilter) : String(targetSessionFilter).trim())
+        : '';
+
+    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+        AdminMemoryCache.invalidate('users');
+    }
+    const users = getUsers();
+    const userById = new Map();
+    users.forEach(u => {
+        if (u && u.id) userById.set(String(u.id).trim(), u);
+    });
+
+    // 1. 合併掃描雲端原始節點（CloudSync.tree）與本地會員清單，找出所有「同一常規週三／週六場次配對超過 1 人」的異常重複組合
+    const extraPairsToRemove = new Map(); // pairKey -> { idA, idB, session }
+    const inspectUserHistoryForDup = (u) => {
+        if (!u || !u.id) return;
+        const uid = String(u.id).trim();
+        const rawHist = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+            ? CloudSync.mapToArray(u.matchedHistory)
+            : (Array.isArray(u.matchedHistory) ? u.matchedHistory : []);
+        const sortedHist = [...rawHist].sort((a, b) => Number(a.matchedAt || 0) - Number(b.matchedAt || 0));
+
+        const keptPartnerBySession = new Map();
+        sortedHist.forEach(h => {
+            if (!h || h.activityId || !h.session || String(h.session).includes('強制')) return;
+            const normSess = (typeof normalizeSessionLabel === 'function')
+                ? normalizeSessionLabel(h.session)
+                : String(h.session).trim();
+            if (!/^第\s*\d+\s*屆.+\([三六]\)$/.test(normSess)) return;
+            if (normFilter && normSess !== normFilter) return;
+
+            const pid = String(h.partnerId || '').trim();
+            if (!pid || pid === uid) return;
+
+            if (!keptPartnerBySession.has(normSess)) {
+                keptPartnerBySession.set(normSess, pid);
+            } else if (keptPartnerBySession.get(normSess) !== pid) {
+                const pk = [uid, pid].sort().join('__');
+                extraPairsToRemove.set(pk, { idA: uid, idB: pid, session: normSess });
+            }
+        });
+    };
+
+    if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && typeof CloudSync.tree[USERS_KEY] === 'object') {
+        Object.values(CloudSync.tree[USERS_KEY]).forEach(rawTreeU => inspectUserHistoryForDup(rawTreeU));
+    }
+    users.forEach(u => inspectUserHistoryForDup(u));
+
+    if (extraPairsToRemove.size === 0) {
+        alert('ℹ️ 目前沒有發現同場次 1 對多重複配對的異常紀錄（所有玩家皆為 1 對 1）。');
+        return 0;
+    }
+
+    const detailLines = Array.from(extraPairsToRemove.values()).map(item => {
+        const uA = userById.get(item.idA);
+        const uB = userById.get(item.idB);
+        return `・[${item.session}] ${uA ? uA.nickname : item.idA} (ID:${item.idA}) ⇄ ${uB ? uB.nickname : item.idB} (ID:${item.idB})`;
+    });
+
+    if (!confirm(`偵測到 ${extraPairsToRemove.size} 組同場次多餘的重複配對（違反 1 對 1 規則）：\n\n${detailLines.join('\n')}\n\n確定要保留每位玩家的第一組 1 對 1 配對，並解除多餘的重複配對（讓多出來的對象回到未配對名單以便重新 1 對 1 配對）嗎？`)) {
+        return 0;
+    }
+
+    const affectedUserIds = new Set();
+    extraPairsToRemove.forEach(({ idA, idB }) => {
+        affectedUserIds.add(idA);
+        affectedUserIds.add(idB);
+        if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
+            CloudSync.markPairUnmatched(idA, idB, 600000);
+        }
+        if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+            ChatStore.clearChat(idA, idB);
+        }
+        const uA = userById.get(idA);
+        const uB = userById.get(idB);
+        if (uA && Array.isArray(uA.matchedHistory)) {
+            uA.matchedHistory = uA.matchedHistory.filter(h => String(h.partnerId).trim() !== idB);
+            if (String(uA.matchedWithId || '').trim() === idB) {
+                const lastA = uA.matchedHistory[uA.matchedHistory.length - 1] || null;
+                uA.matchedSession = lastA ? (lastA.session || null) : null;
+                uA.matchedWithId = lastA ? (lastA.partnerId || null) : null;
+                uA.matchedWithName = lastA ? (lastA.partnerName || null) : null;
+                uA.matchedAt = lastA ? (lastA.matchedAt || null) : null;
+            }
+        }
+        if (uB && Array.isArray(uB.matchedHistory)) {
+            uB.matchedHistory = uB.matchedHistory.filter(h => String(h.partnerId).trim() !== idA);
+            if (String(uB.matchedWithId || '').trim() === idA) {
+                const lastB = uB.matchedHistory[uB.matchedHistory.length - 1] || null;
+                uB.matchedSession = lastB ? (lastB.session || null) : null;
+                uB.matchedWithId = lastB ? (lastB.partnerId || null) : null;
+                uB.matchedWithName = lastB ? (lastB.partnerName || null) : null;
+                uB.matchedAt = lastB ? (lastB.matchedAt || null) : null;
+            }
+        }
+    });
+
+    // 同步更新場次結算快照（yuelao_session_match_results），移除舊快照中的多餘重複配對
+    const affectedSessions = new Set(Array.from(extraPairsToRemove.values()).map(x => x.session));
+    affectedSessions.forEach(sess => {
+        const regList = users.filter(u => {
+            if (!u || !u.id) return false;
+            const sArr = Array.isArray(u.registeredSessions) ? u.registeredSessions : [];
+            if (sArr.some(s => isSameSession(s, sess))) return true;
+            if (hasUserMatchedInRegularSession(u, sess)) return true;
+            if (typeof getActivityRegHistory === 'function') {
+                const histMap = getActivityRegHistory();
+                return Object.values(histMap).some(r => r && r.kind === 'regular' && isSameSession(r.session, sess) && String(r.playerId) === String(u.id));
+            }
+            return false;
+        });
+        saveSessionMatchResultRecord(sess, regList, users, new Set(), Date.now());
+    });
+
+    saveUsers(users, { isMatchMutation: true, targetIds: Array.from(affectedUserIds) });
+    appendLog(`<span class="text-emerald-300">[修正同場重複配對]</span> 已清理 ${extraPairsToRemove.size} 組同場次多餘重複配對，恢復所有玩家 1 對 1 狀態。`);
+    alert(`✅ 已成功修正 ${extraPairsToRemove.size} 組同場次重複配對！\n\n・原本的第一組 1 對 1 配對已完整保留\n・多出來的重複對象已恢復為「未配對」，您現在可點擊「補跑配對」為他們重新 1 對 1 配對！`);
+    return extraPairsToRemove.size;
+}
+
+window.repairDuplicateSameSessionMatches = repairDuplicateSameSessionMatches;
 
 function addSecretForceMatch() {
     const adminId = document.getElementById('forceAdminId').value.trim();
