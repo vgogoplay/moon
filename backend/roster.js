@@ -903,16 +903,27 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
             if (u.isWarned) {
                 statusParts.push(`<span class="inline-block px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-bold">⚠️ 警告帳號</span>`);
             }
-            if (historyList.length > 0) {
-                historyList.forEach(h => {
+            
+            // 完整收集所有歷史紀錄與當下 matchedWithId 的對象，去重顯示
+            const uniquePartners = new Map();
+            historyList.forEach(h => {
+                if (h && h.partnerId) uniquePartners.set(String(h.partnerId).trim(), h.partnerName || `玩家_${h.partnerId}`);
+            });
+            if (u.matchedWithId && !uniquePartners.has(String(u.matchedWithId).trim())) {
+                uniquePartners.set(String(u.matchedWithId).trim(), u.matchedWithName || `玩家_${u.matchedWithId}`);
+            }
+
+            if (uniquePartners.size > 0) {
+                uniquePartners.forEach((pName, pId) => {
                     statusParts.push(`
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">
-                            💘 ${h.partnerName} (ID:${h.partnerId})
-                            <button onclick="unmatchPlayerPair('${u.id}', '${h.partnerId}')" title="解除此配對" class="text-rose-600 hover:text-rose-900 font-bold ml-0.5">✕</button>
+                            💘 ${pName} (ID:${pId})
+                            <button onclick="unmatchPlayerPair('${u.id}', '${pId}')" title="解除此配對" class="text-rose-600 hover:text-rose-900 font-bold ml-0.5">✕</button>
                         </span>
                     `);
                 });
             }
+            
             if (statusParts.length === 0) {
                 statusParts.push(`<span class="text-gray-400">未配對</span>`);
             }
