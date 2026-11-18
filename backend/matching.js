@@ -576,12 +576,7 @@ async function manualBatchSyncAllDiscrepancies(btnEl = null) {
         previewLines.push(`...其餘 ${repairable.length - 10} 組`);
     }
 
-    if (!confirm(`偵測到 ${repairable.length} 組可雙向補齊的配對：
-
-${previewLines.join('
-')}
-
-確定要一鍵補齊全部 ${repairable.length} 組的雙方好友名單並同步寫入雲端嗎？`)) {
+    if (!confirm(`偵測到 ${repairable.length} 組可雙向補齊的配對：\n\n${previewLines.join('\n')}\n\n確定要一鍵補齊全部 ${repairable.length} 組的雙方好友名單並同步寫入雲端嗎？`)) {
         return;
     }
 
