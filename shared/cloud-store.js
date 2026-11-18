@@ -320,7 +320,7 @@ const CloudSync = {
         if (this.tree && this.tree[UNMATCHED_PAIRS_CLOUD_NODE] && Object.prototype.hasOwnProperty.call(this.tree[UNMATCHED_PAIRS_CLOUD_NODE], pk)) {
             delete this.tree[UNMATCHED_PAIRS_CLOUD_NODE][pk];
         }
-        if (this.initialized) {
+        if (this.dbUrl) {
             return this.deleteNode(`${UNMATCHED_PAIRS_CLOUD_NODE}/${pk}`);
         }
         return Promise.resolve();

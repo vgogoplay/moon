@@ -411,6 +411,10 @@ function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
         uB.matchedAt = sharedMatchedAt;
     }
 
+    const updatedStamp = new Date(nowTs).toLocaleString('zh-TW') + ' (強制補齊)';
+    uA.updatedAt = updatedStamp;
+    uB.updatedAt = updatedStamp;
+
     if (typeof generatePlayerBackupCode === 'function') {
         uA.backupCode = generatePlayerBackupCode(uA, users);
         uB.backupCode = generatePlayerBackupCode(uB, users);
@@ -428,6 +432,18 @@ function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
 }
 
 async function persistRepairedUsersToLocalAndCloud(users, affectedUserIds) {
+    const targetUsers = [];
+    affectedUserIds.forEach(uid => {
+        const cleanUid = String(uid).trim();
+        const uObj = users.find(u => u && String(u.id).trim() === cleanUid);
+        if (uObj) {
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.setSharedPendingUser === 'function') {
+                CloudSync.setSharedPendingUser(cleanUid, { ...uObj }, 60000);
+            }
+            targetUsers.push(uObj);
+        }
+    });
+
     const nextRaw = JSON.stringify(users);
     if (typeof AdminMemoryCache !== 'undefined') {
         AdminMemoryCache.usersRaw = nextRaw;
@@ -438,20 +454,37 @@ async function persistRepairedUsersToLocalAndCloud(users, affectedUserIds) {
     }
     localStorage.setItem(USERS_KEY, nextRaw);
 
-    const targetUsers = [];
-    affectedUserIds.forEach(uid => {
-        const uObj = users.find(u => u && String(u.id).trim() === String(uid).trim());
-        if (uObj) {
-            if (typeof CloudSync !== 'undefined' && typeof CloudSync.setSharedPendingUser === 'function') {
-                CloudSync.setSharedPendingUser(String(uObj.id).trim(), { ...uObj }, 30000);
-            }
-            targetUsers.push(uObj);
-        }
-    });
-
-    if (typeof CloudSync !== 'undefined' && CloudSync.initialized && targetUsers.length > 0) {
+    if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl && targetUsers.length > 0) {
         await Promise.all(
             targetUsers.map(uObj => CloudSync.upsertUser(uObj, true, { isMatchMutation: true, throwOnError: true }))
+        );
+
+        // 寫入後向 Firebase RTDB 進行回讀驗證，確保雲端節點確實已寫入最新 matchedHistory 與 matchedWithId
+        await Promise.all(
+            targetUsers.map(async (uObj) => {
+                const pid = String(uObj.id).trim();
+                const encoded = CloudSync.encodePath(`${USERS_KEY}/${pid}`);
+                const verifyRes = await fetch(`${CloudSync.dbUrl}/${encoded}.json`, { method: 'GET', cache: 'no-store' });
+                if (!verifyRes.ok) {
+                    throw new Error(`回讀驗證失敗 (ID:${pid}, HTTP ${verifyRes.status})`);
+                }
+                const remoteUser = await verifyRes.json();
+                const remoteHistLen = Array.isArray(remoteUser && remoteUser.matchedHistory)
+                    ? remoteUser.matchedHistory.length
+                    : (remoteUser && remoteUser.matchedHistory && typeof remoteUser.matchedHistory === 'object'
+                        ? Object.keys(remoteUser.matchedHistory).length
+                        : 0);
+                if (!remoteUser || (remoteHistLen === 0 && !remoteUser.matchedWithId)) {
+                    throw new Error(`雲端寫入未生效 (ID:${pid})`);
+                }
+                if (CloudSync.tree && typeof CloudSync.tree === 'object') {
+                    if (!CloudSync.tree[USERS_KEY] || typeof CloudSync.tree[USERS_KEY] !== 'object') {
+                        CloudSync.tree[USERS_KEY] = {};
+                    }
+                    CloudSync.tree[USERS_KEY][pid] = remoteUser;
+                }
+                CloudSync.setSharedPendingUser(pid, remoteUser, 60000);
+            })
         );
     }
 }
@@ -482,11 +515,18 @@ async function manualResolveSyncPair(idA, idB, btnEl = null) {
     }
 
     try {
-        const res = syncSingleDiscrepancyPairToUsers(users, pidA, pidB, Date.now());
+        if (typeof CloudSync !== 'undefined' && !CloudSync.initialized && CloudSync.dbUrl && typeof CloudSync.fetchFullTree === 'function') {
+            await CloudSync.fetchFullTree();
+        }
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('users');
+        }
+        const latestUsers = getUsers();
+        const res = syncSingleDiscrepancyPairToUsers(latestUsers, pidA, pidB, Date.now());
         if (res && res.clearUnmatchedPromise) {
             await res.clearUnmatchedPromise;
         }
-        await persistRepairedUsersToLocalAndCloud(users, [pidA, pidB]);
+        await persistRepairedUsersToLocalAndCloud(latestUsers, [pidA, pidB]);
 
         appendLog(`<span class="text-emerald-300">[資料維護補齊]</span> 管理員已補齊 <strong>${uA.nickname} (ID:${pidA})</strong> ⇄ <strong>${uB.nickname} (ID:${pidB})</strong> 的雙向配對與聊天室紀錄。`);
         runRepairMatchesFromChats(true);
@@ -528,6 +568,12 @@ async function manualBatchSyncAllDiscrepancies(btnEl = null) {
     }
 
     try {
+        if (typeof CloudSync !== 'undefined' && !CloudSync.initialized && CloudSync.dbUrl && typeof CloudSync.fetchFullTree === 'function') {
+            await CloudSync.fetchFullTree();
+        }
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('users');
+        }
         const users = getUsers();
         const nowTs = Date.now();
         const affectedIds = new Set();
