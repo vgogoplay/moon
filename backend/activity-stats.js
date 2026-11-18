@@ -390,9 +390,19 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
     const savedResultsMap = getSavedSessionMatchResultsMap();
 
     const getHist = (u) => {
-        if (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0) return u.matchedHistory;
-        if (u.matchedWithId) return [{ session: u.matchedSession || '', partnerId: u.matchedWithId, partnerName: u.matchedWithName || '' }];
-        return [];
+        const rawHist = Array.isArray(u.matchedHistory)
+            ? u.matchedHistory
+            : (u.matchedHistory && typeof u.matchedHistory === 'object' ? Object.values(u.matchedHistory) : []);
+        const hArr = rawHist.filter(h => h && h.partnerId).map(h => ({ ...h }));
+        const dirId = String(u.matchedWithId || '').trim();
+        if (dirId && !hArr.some(h => String(h.partnerId).trim() === dirId)) {
+            hArr.push({
+                session: u.matchedSession || '',
+                partnerId: dirId,
+                partnerName: u.matchedWithName || `玩家_${dirId}`
+            });
+        }
+        return hArr;
     };
 
     if (targetKey.startsWith('batch:')) {
