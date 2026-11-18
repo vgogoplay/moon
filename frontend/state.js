@@ -78,7 +78,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
             if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
-            if (!document.getElementById('mailboxModal').classList.contains('hidden') &&
+            if (typeof syncOpenMailboxModalView === 'function') {
+                syncOpenMailboxModalView();
+            } else if (!document.getElementById('mailboxModal').classList.contains('hidden') &&
                 !document.getElementById('mailboxListView').classList.contains('hidden')) {
                 renderMailboxList();
             }
@@ -136,7 +138,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             syncFromSharedStorage();
             updateMailboxBadge();
             if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
-            if (!document.getElementById('mailboxModal').classList.contains('hidden') &&
+            if (typeof syncOpenMailboxModalView === 'function') {
+                syncOpenMailboxModalView();
+            } else if (!document.getElementById('mailboxModal').classList.contains('hidden') &&
                 !document.getElementById('mailboxListView').classList.contains('hidden')) {
                 renderMailboxList();
             }

@@ -31,7 +31,10 @@ function openMailboxModal() {
     document.getElementById('mailboxModal').classList.remove('hidden');
 }
 
+let currentViewingMailId = null;
+
 function closeMailboxModal() {
+    currentViewingMailId = null;
     document.getElementById('mailboxModal').classList.add('hidden');
 }
 
@@ -73,6 +76,8 @@ function viewMailDetail(mailId) {
     const mail = mails.find(m => m.id === mailId);
     if (!mail) return;
 
+    currentViewingMailId = String(mailId);
+
     if (!Array.isArray(appState.readMailIds)) appState.readMailIds = [];
     if (!appState.readMailIds.includes(mailId)) {
         appState.readMailIds.push(mailId);
@@ -81,7 +86,7 @@ function viewMailDetail(mailId) {
     }
 
     document.getElementById('mailDetailTitle').textContent = mail.title || '管理員通知信件';
-    document.getElementById('mailDetailTime').textContent = mail.createdAt || '';
+    document.getElementById('mailDetailTime').textContent = mail.updatedAt ? `${mail.createdAt || ''}（已更新）` : (mail.createdAt || '');
     document.getElementById('mailDetailBody').textContent = mail.content || '';
 
     document.getElementById('mailboxListView').classList.add('hidden');
@@ -89,9 +94,30 @@ function viewMailDetail(mailId) {
 }
 
 function backToMailboxList() {
+    currentViewingMailId = null;
     document.getElementById('mailboxDetailView').classList.add('hidden');
     document.getElementById('mailboxListView').classList.remove('hidden');
     renderMailboxList();
+}
+
+function syncOpenMailboxModalView() {
+    const modalEl = document.getElementById('mailboxModal');
+    if (!modalEl || modalEl.classList.contains('hidden')) return;
+    const listViewEl = document.getElementById('mailboxListView');
+    const detailViewEl = document.getElementById('mailboxDetailView');
+    if (listViewEl && !listViewEl.classList.contains('hidden')) {
+        renderMailboxList();
+    } else if (detailViewEl && !detailViewEl.classList.contains('hidden') && currentViewingMailId) {
+        const mails = getPlayerMails();
+        const latestMail = mails.find(m => String(m.id) === String(currentViewingMailId));
+        if (!latestMail) {
+            backToMailboxList();
+            return;
+        }
+        document.getElementById('mailDetailTitle').textContent = latestMail.title || '管理員通知信件';
+        document.getElementById('mailDetailTime').textContent = latestMail.updatedAt ? `${latestMail.createdAt || ''}（已更新）` : (latestMail.createdAt || '');
+        document.getElementById('mailDetailBody').textContent = latestMail.content || '';
+    }
 }
 
 // ==================== 問題回報（送出後可查看送出內容、處理狀態與管理員回覆） ====================

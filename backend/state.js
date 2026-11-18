@@ -16,6 +16,7 @@ let lastChatsAdminSnapshot = '';
 let lastMatchLogsAdminSnapshot = '';
 let lastFateWallAdminSnapshot = '';
 let lastWishWallAdminSnapshot = '';
+let lastMailboxAdminSnapshot = '';
 let lastOverviewRenderSig = '';
 let rosterPageSize = '5';
 let currentRosterPage = 1;
@@ -497,6 +498,97 @@ function sendAdminMailboxMessage() {
     document.getElementById('mailTitleInput').value = '';
     document.getElementById('mailContentInput').value = '';
     appendLog(`<span class="text-pink-300">[信件已發送]</span> 已發送信件「<strong>${title}</strong>」給 <strong>${targetLabel}</strong>，前台玩家可於信件欄位點開查看。`);
+}
+
+function openEditAdminMailboxModal(mailId) {
+    const mid = String(mailId || '').trim();
+    if (!mid) return;
+    const target = getMailbox().find(m => String(m.id) === mid);
+    if (!target) return;
+
+    const modal = document.getElementById('editMailboxModal');
+    const idInput = document.getElementById('editMailTargetMailId');
+    const recipientInput = document.getElementById('editMailRecipientInput');
+    const titleInput = document.getElementById('editMailTitleInput');
+    const contentInput = document.getElementById('editMailContentInput');
+    if (!modal || !idInput || !titleInput || !contentInput) return;
+
+    idInput.value = mid;
+    if (recipientInput) recipientInput.value = String(target.targetId || 'ALL');
+    titleInput.value = String(target.title || '');
+    contentInput.value = String(target.content || '');
+    modal.classList.remove('hidden');
+    setTimeout(() => {
+        contentInput.focus();
+        contentInput.select();
+    }, 40);
+}
+
+function closeEditAdminMailboxModal() {
+    const modal = document.getElementById('editMailboxModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function saveEditedAdminMailboxMessage(e) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    const mid = String(document.getElementById('editMailTargetMailId')?.value || '').trim();
+    const recipientInput = document.getElementById('editMailRecipientInput');
+    const titleInput = document.getElementById('editMailTitleInput');
+    const contentInput = document.getElementById('editMailContentInput');
+    if (!mid || !titleInput || !contentInput) return;
+
+    const rawTarget = (recipientInput ? recipientInput.value.trim() : '') || 'ALL';
+    const nextTargetId = rawTarget.toUpperCase() === 'ALL' ? 'ALL' : rawTarget;
+    const nextTitle = titleInput.value.trim();
+    const nextContent = contentInput.value.trim();
+
+    if (!nextTitle || !nextContent) {
+        alert('請輸入信件標題與文字內容！');
+        if (!nextTitle) titleInput.focus();
+        else contentInput.focus();
+        return;
+    }
+
+    const mails = getMailbox();
+    const idx = mails.findIndex(m => String(m.id) === mid);
+    if (idx < 0) {
+        closeEditAdminMailboxModal();
+        return;
+    }
+
+    const users = getUsers();
+    const targetUser = nextTargetId === 'ALL' ? null : users.find(u => String(u.id) === String(nextTargetId));
+    const nextTargetLabel = nextTargetId === 'ALL'
+        ? '全體玩家'
+        : (targetUser ? `${targetUser.nickname} (ID:${nextTargetId})` : `玩家 ID:${nextTargetId}`);
+    const updatedAtStr = new Date().toLocaleString('zh-TW');
+
+    mails[idx] = {
+        ...mails[idx],
+        targetId: nextTargetId,
+        targetLabel: nextTargetLabel,
+        title: nextTitle,
+        content: nextContent,
+        updatedAt: updatedAtStr
+    };
+    saveMailbox(mails);
+
+    if (typeof CloudSync !== 'undefined') {
+        if (CloudSync.initialized && typeof CloudSync.patchNode === 'function') {
+            CloudSync.patchNode(`${MAILBOX_KEY}/${mid}`, {
+                targetId: nextTargetId,
+                targetLabel: nextTargetLabel,
+                title: nextTitle,
+                content: nextContent,
+                updatedAt: updatedAtStr
+            });
+        } else {
+            CloudSync.putNode(`${MAILBOX_KEY}/${mid}`, mails[idx]);
+        }
+    }
+
+    closeEditAdminMailboxModal();
+    appendLog(`<span class="text-sky-300">[編輯信件內容]</span> 已更新發送給 <strong>${nextTargetLabel}</strong> 的信件「<strong>${nextTitle}</strong>」，並同步至前台玩家信箱。`);
 }
 
 function deleteMailboxMessage(mailId) {
@@ -1085,8 +1177,9 @@ function pollSharedStorageChanges() {
     const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
     const curFateWall = localStorage.getItem(fwKey) || '';
     const curWishWall = localStorage.getItem(wwKey) || '';
+    const curMailbox = localStorage.getItem(MAILBOX_KEY) || '';
     const curBatch = getCurrentBatch();
-    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curMatchLogs !== lastMatchLogsAdminSnapshot || curPlayerOpLogs !== lastPlayerOpLogsAdminSnapshot || curFateWall !== lastFateWallAdminSnapshot || curWishWall !== lastWishWallAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
+    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curMatchLogs !== lastMatchLogsAdminSnapshot || curPlayerOpLogs !== lastPlayerOpLogsAdminSnapshot || curFateWall !== lastFateWallAdminSnapshot || curWishWall !== lastWishWallAdminSnapshot || curMailbox !== lastMailboxAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
         renderAdminAll(false);
     }
 }
@@ -1138,6 +1231,7 @@ function renderAdminSharedOverview(forceUpdate = false) {
     lastPlayerOpLogsAdminSnapshot = localStorage.getItem((typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs') || '';
     lastFateWallAdminSnapshot = localStorage.getItem((typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall') || '';
     lastWishWallAdminSnapshot = localStorage.getItem((typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall') || '';
+    lastMailboxAdminSnapshot = localStorage.getItem(MAILBOX_KEY) || '';
 
     const sysCfg = getSystemConfig();
     const batch = sysCfg.currentBatch;

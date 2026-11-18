@@ -204,6 +204,10 @@ function renderAdminSharedShell() {
                 </nav>
 
                 <div class="pt-4 mt-4 border-t border-pink-100 space-y-2">
+                    <button type="button" onclick="openAdminGitRepoWithPassword()" class="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-xl bg-gray-800 border border-gray-700 text-white text-xs font-semibold hover:bg-gray-900 transition shadow-2xs">
+                        <span>🐙</span>
+                        <span>Git</span>
+                    </button>
                     <a href="index.html" target="_blank" class="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-xl bg-pink-50 border border-pink-200 text-[#8f4452] text-xs font-semibold hover:bg-pink-100 transition">
                         <span>🌸</span>
                         <span>開啟前台首頁</span>
@@ -224,8 +228,100 @@ function renderAdminSharedShell() {
                 </div>
             </div>
         </div>
+
+        <!-- ==================== 🔐 開啟 Git 倉庫密碼驗證 Modal ==================== -->
+        <div id="adminGitPasswordModal" class="hidden fixed inset-0 bg-black/55 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+            <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border-2 border-gray-300 space-y-4">
+                <div class="flex items-center justify-between border-b border-gray-100 pb-2.5">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl">🐙</span>
+                        <div>
+                            <h3 class="text-base font-bold font-serif-jp text-gray-800">開啟 Git 倉庫驗證</h3>
+                            <p class="text-[11px] text-gray-500">請輸入管理員密碼以開啟 GitHub 專案頁面</p>
+                        </div>
+                    </div>
+                    <button type="button" onclick="closeAdminGitPasswordModal()" class="text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
+                </div>
+
+                <form onsubmit="submitAdminGitPassword(event)" class="space-y-3">
+                    <div class="admin-field-box !bg-gray-50 !border-gray-300">
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5">管理員密碼 <span class="text-rose-500">*</span></label>
+                        <input type="password" id="adminGitPwdInput" autocomplete="current-password" placeholder="請輸入管理員密碼" class="w-full p-2.5 admin-input-box text-sm" required>
+                    </div>
+
+                    <div id="adminGitPwdError" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-700 font-bold text-center">
+                        🚫 密碼錯誤，無法開啟 Git 連結！
+                    </div>
+
+                    <div class="flex justify-end gap-2 pt-1">
+                        <button type="button" onclick="closeAdminGitPasswordModal()" class="px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+                            取消
+                        </button>
+                        <button type="submit" class="px-5 py-2 rounded-xl bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold shadow transition">
+                            🔓 確認開啟 Git
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
     `;
 }
+
+const ADMIN_GIT_REPO_URL = 'https://github.com/vgogoplay/moon';
+
+function openAdminGitRepoWithPassword() {
+    const modal = document.getElementById('adminGitPasswordModal');
+    const inputEl = document.getElementById('adminGitPwdInput');
+    const errEl = document.getElementById('adminGitPwdError');
+    if (modal && inputEl) {
+        if (errEl) errEl.classList.add('hidden');
+        inputEl.value = '';
+        modal.classList.remove('hidden');
+        setTimeout(() => inputEl.focus(), 50);
+        return;
+    }
+    const expectedPass = (typeof VALID_ADMIN_PASS !== 'undefined') ? VALID_ADMIN_PASS : 'tff456';
+    const pwd = prompt('請輸入管理員密碼以開啟 Git 倉庫：');
+    if (pwd === null) return;
+    if (pwd !== expectedPass) {
+        alert('🚫 密碼錯誤，無法開啟 Git 連結！');
+        return;
+    }
+    window.open(ADMIN_GIT_REPO_URL, '_blank', 'noopener,noreferrer');
+}
+
+function closeAdminGitPasswordModal() {
+    const modal = document.getElementById('adminGitPasswordModal');
+    const inputEl = document.getElementById('adminGitPwdInput');
+    const errEl = document.getElementById('adminGitPwdError');
+    if (modal) modal.classList.add('hidden');
+    if (inputEl) inputEl.value = '';
+    if (errEl) errEl.classList.add('hidden');
+}
+
+function submitAdminGitPassword(e) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    const expectedPass = (typeof VALID_ADMIN_PASS !== 'undefined') ? VALID_ADMIN_PASS : 'tff456';
+    const inputEl = document.getElementById('adminGitPwdInput');
+    const errEl = document.getElementById('adminGitPwdError');
+    const pwd = inputEl ? inputEl.value : '';
+
+    if (pwd !== expectedPass) {
+        if (errEl) errEl.classList.remove('hidden');
+        if (inputEl) {
+            inputEl.value = '';
+            inputEl.focus();
+        }
+        return;
+    }
+
+    closeAdminGitPasswordModal();
+    window.open(ADMIN_GIT_REPO_URL, '_blank', 'noopener,noreferrer');
+}
+
+window.openAdminGitRepoWithPassword = openAdminGitRepoWithPassword;
+window.closeAdminGitPasswordModal = closeAdminGitPasswordModal;
+window.submitAdminGitPassword = submitAdminGitPassword;
 
 renderAdminSharedShell();
 

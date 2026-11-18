@@ -341,17 +341,26 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
         if (sentMails.length === 0) {
             mailListBox.innerHTML = `<p class="text-xs text-gray-400">尚未發送任何信件給前台玩家。</p>`;
         } else {
-            mailListBox.innerHTML = sentMails.slice(0, 10).map(m => `
+            mailListBox.innerHTML = sentMails.slice(0, 10).map(m => {
+                const editedTag = m.updatedAt
+                    ? `<span class="text-[10px] px-1.5 py-0.2 rounded bg-sky-50 border border-sky-200 text-sky-700 font-semibold ml-1.5">已編輯</span>`
+                    : '';
+                return `
                 <div class="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-white border border-pink-200 text-xs">
                     <div class="min-w-0 flex-1">
-                        <span class="px-2 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold mr-1.5">收件：${m.targetLabel || m.targetId}</span>
-                        <strong class="text-[#5e464a]">${m.title}</strong>
-                        <span class="text-gray-500 ml-1.5">— ${m.content}</span>
-                        <span class="text-[10px] text-gray-400 ml-2">(${m.createdAt})</span>
+                        <span class="px-2 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold mr-1.5">收件：${escapeAdminHtml(m.targetLabel || m.targetId)}</span>
+                        <strong class="text-[#5e464a]">${escapeAdminHtml(m.title)}</strong>
+                        <span class="text-gray-500 ml-1.5">— ${escapeAdminHtml(m.content)}</span>
+                        <span class="text-[10px] text-gray-400 ml-2">(${escapeAdminHtml(m.createdAt || '')})</span>
+                        ${editedTag}
                     </div>
-                    <button onclick="deleteMailboxMessage('${m.id}')" class="text-rose-500 hover:underline shrink-0">收回刪除</button>
+                    <div class="flex items-center gap-2.5 shrink-0">
+                        <button type="button" onclick="openEditAdminMailboxModal('${escapeAdminHtml(m.id)}')" class="text-sky-600 hover:underline font-semibold">✏️ 編輯</button>
+                        <button type="button" onclick="deleteMailboxMessage('${escapeAdminHtml(m.id)}')" class="text-rose-500 hover:underline font-semibold">收回刪除</button>
+                    </div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
         }
     }
 

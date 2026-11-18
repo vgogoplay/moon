@@ -304,6 +304,49 @@
         </div>
     </div>
 
+    <!-- ✏️ 編輯已發送信件 Modal -->
+    <div id="editMailboxModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 md:p-7 shadow-2xl border-2 border-rose-200 space-y-4">
+            <div class="flex items-center justify-between border-b border-pink-100 pb-3">
+                <div>
+                    <h3 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">✏️ 編輯已發送信件內容</h3>
+                    <p class="text-xs text-gray-500">修改後按下「保存修改並同步前台」，玩家信箱內的信件內容將即時同步更新</p>
+                </div>
+                <button type="button" onclick="closeEditAdminMailboxModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+
+            <form id="adminEditMailboxForm" onsubmit="saveEditedAdminMailboxMessage(event)" class="space-y-3.5">
+                <input type="hidden" id="editMailTargetMailId">
+                <div class="admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 收件對象（玩家 ID 或全體）</label>
+                    <div class="flex gap-1.5">
+                        <input type="text" id="editMailRecipientInput" placeholder="輸入玩家 ID 或 ALL" class="w-full p-2.5 admin-input-box text-xs font-mono" required>
+                        <button type="button" onclick="document.getElementById('editMailRecipientInput').value='ALL'" class="px-3 py-2 rounded-xl bg-pink-100 border border-pink-300 text-[#8f4452] text-[11px] font-bold shrink-0 hover:bg-pink-200">
+                            全體
+                        </button>
+                    </div>
+                </div>
+                <div class="admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">2. 信件標題 <span class="text-rose-500">*</span></label>
+                    <input type="text" id="editMailTitleInput" placeholder="請輸入信件標題..." class="w-full p-2.5 admin-input-box text-xs" required>
+                </div>
+                <div class="admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">3. 信件文字內容 <span class="text-rose-500">*</span></label>
+                    <textarea id="editMailContentInput" rows="4" placeholder="請輸入要發送給玩家的信件內容..." class="w-full p-2.5 admin-input-box text-xs resize-y" required></textarea>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t border-pink-100">
+                    <button type="button" onclick="closeEditAdminMailboxModal()" class="px-4 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-5 py-2 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition">
+                        💾 保存修改並同步前台
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- ✏️ 編輯即時緣分動態牆 Modal -->
     <div id="editFateWallModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 md:p-7 shadow-2xl border-2 border-pink-200 space-y-4">
@@ -356,10 +399,10 @@
     <script src="shared/schema.js?v=20261117a"></script>
     <script src="shared/cloud-store.js?v=20261118f"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261118g"></script>
+    <script src="backend/state.js?v=20261118l"></script>
     <script src="backend/matching.js?v=20261118f"></script>
-    <script src="backend/ops.js?v=20261117t"></script>
+    <script src="backend/ops.js?v=20261118l"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261118e"></script>
+    <script src="backend/layout.js?v=20261118m"></script>
 </body>
 </html>
