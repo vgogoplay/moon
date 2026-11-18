@@ -66,19 +66,218 @@ function goToActDetailRosterPage(pageNum) {
     renderAdminAll();
 }
 
-function runSupplementaryMatchForBatch(wedLabel, satLabel) {
-    const sessions = [String(wedLabel || '').trim(), String(satLabel || '').trim()].filter(Boolean);
+let pendingSupplementaryMatchPlan = null;
+let suppPreviewStatusFilter = 'ALL'; // 'ALL' | 'WILL_MATCH' | 'NO_MATCH'
+let suppPreviewGenderFilter = 'ALL'; // 'ALL' | '男' | '女'
+let suppPreviewSearchKeyword = '';
+
+function closeSupplementaryMatchPreviewModal() {
+    pendingSupplementaryMatchPlan = null;
+    const modal = document.getElementById('supplementaryMatchPreviewModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function setSuppPreviewStatusFilter(val) {
+    suppPreviewStatusFilter = ['ALL', 'WILL_MATCH', 'NO_MATCH'].includes(val) ? val : 'ALL';
+    renderSupplementaryMatchPreviewModalBody();
+}
+
+function setSuppPreviewGenderFilter(val) {
+    suppPreviewGenderFilter = ['ALL', '男', '女'].includes(val) ? val : 'ALL';
+    renderSupplementaryMatchPreviewModalBody();
+}
+
+function onSuppPreviewSearchInput(val) {
+    suppPreviewSearchKeyword = String(val || '').trim();
+    renderSupplementaryMatchPreviewModalBody();
+}
+
+function renderSupplementaryMatchPreviewModalBody() {
+    if (!pendingSupplementaryMatchPlan) return;
+    const { sessions, sessionPreviews, allCandidateRows, totalPlannedPairs } = pendingSupplementaryMatchPlan;
+    const showSessionTag = sessions.length > 1;
+
+    const totalUnmatched = allCandidateRows.length;
+    const maleUnmatched = allCandidateRows.filter(r => r.gender === '男').length;
+    const femaleUnmatched = allCandidateRows.filter(r => r.gender === '女').length;
+    const willMatchRows = allCandidateRows.filter(r => r.willMatch);
+    const noMatchRows = allCandidateRows.filter(r => !r.willMatch);
+
+    const sessBadge = document.getElementById('suppPreviewSessionBadge');
+    if (sessBadge) sessBadge.textContent = sessions.join(' ＋ ');
+
+    const totEl = document.getElementById('suppPreviewTotalCount');
+    if (totEl) totEl.textContent = `${totalUnmatched} 人`;
+
+    const genEl = document.getElementById('suppPreviewGenderBreakdown');
+    if (genEl) genEl.textContent = `男 ${maleUnmatched} 人 ／ 女 ${femaleUnmatched} 人`;
+
+    const matchEl = document.getElementById('suppPreviewMatchedCount');
+    if (matchEl) matchEl.textContent = `${totalPlannedPairs} 對（${willMatchRows.length} 人）`;
+
+    const remEl = document.getElementById('suppPreviewRemainUnmatchedCount');
+    if (remEl) remEl.textContent = `${noMatchRows.length} 人`;
+
+    const statusBar = document.getElementById('suppPreviewStatusFilterBar');
+    if (statusBar) {
+        const mkStatusBtn = (code, label, activeCls) => {
+            const act = suppPreviewStatusFilter === code;
+            return `<button type="button" onclick="setSuppPreviewStatusFilter('${code}')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${act ? activeCls : 'bg-white border border-pink-200 text-gray-600 hover:bg-pink-50'}">${label}</button>`;
+        };
+        statusBar.innerHTML = [
+            mkStatusBtn('ALL', `全部補跑名單 (${totalUnmatched}人)`, 'bg-[#8f4452] text-white shadow-2xs'),
+            mkStatusBtn('WILL_MATCH', `✅ 預計可配對 (${willMatchRows.length}人)`, 'bg-emerald-600 text-white shadow-2xs'),
+            mkStatusBtn('NO_MATCH', `🍃 暫無對象 (${noMatchRows.length}人)`, 'bg-amber-600 text-white shadow-2xs')
+        ].join('');
+    }
+
+    const genderBar = document.getElementById('suppPreviewGenderFilterBar');
+    if (genderBar) {
+        const mkGenBtn = (code, label) => {
+            const act = suppPreviewGenderFilter === code;
+            return `<button type="button" onclick="setSuppPreviewGenderFilter('${code}')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${act ? 'bg-[#8f4452] text-white' : 'bg-white border border-pink-200 text-gray-600 hover:bg-pink-50'}">${label}</button>`;
+        };
+        genderBar.innerHTML = `<span class="text-[11px] text-gray-500 font-bold">性別：</span>` +
+            mkGenBtn('ALL', '全部') + mkGenBtn('男', '男') + mkGenBtn('女', '女');
+    }
+
+    const kw = suppPreviewSearchKeyword.toLowerCase();
+    const filtered = allCandidateRows.filter(r => {
+        if (suppPreviewStatusFilter === 'WILL_MATCH' && !r.willMatch) return false;
+        if (suppPreviewStatusFilter === 'NO_MATCH' && r.willMatch) return false;
+        if (suppPreviewGenderFilter !== 'ALL' && r.gender !== suppPreviewGenderFilter) return false;
+        if (kw) {
+            const hay = `${r.playerId} ${r.nickname} ${r.partnerId} ${r.partnerName} ${r.reasonText} ${r.session}`.toLowerCase();
+            if (!hay.includes(kw)) return false;
+        }
+        return true;
+    });
+
+    const tbody = document.getElementById('suppPreviewTableBody');
+    if (tbody) {
+        if (filtered.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-gray-400">目前篩選條件下沒有符合的補跑名單資料。</td></tr>`;
+        } else {
+            tbody.innerHTML = filtered.map(r => {
+                const statusBadge = r.willMatch
+                    ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-[11px] font-bold">✅ 預計可配對</span>`
+                    : (r.isExcluded
+                        ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-100 border border-rose-300 text-rose-700 text-[11px] font-bold">🚫 排除不配對</span>`
+                        : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-800 text-[11px] font-bold">🍃 暫無對象</span>`);
+
+                const gBadge = r.gender === '男'
+                    ? `<span class="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 font-bold text-[11px] ml-1">男</span>`
+                    : (r.gender === '女' ? `<span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold text-[11px] ml-1">女</span>` : '');
+                const metaText = [r.age ? `${r.age}歲` : '', r.region || ''].filter(Boolean).join('・');
+                const sessTag = showSessionTag
+                    ? `<div class="text-[10px] text-pink-600 font-semibold mt-0.5">[${escapeActStatHtml(r.session)}]</div>`
+                    : '';
+
+                let detailCellHtml = '';
+                if (r.willMatch) {
+                    const pGBadge = r.partnerGender === '男'
+                        ? `<span class="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 font-bold text-[10px] ml-1">男</span>`
+                        : (r.partnerGender === '女' ? `<span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold text-[10px] ml-1">女</span>` : '');
+                    detailCellHtml = `💘 預計配對：<strong>${escapeActStatHtml(r.partnerName)}</strong>${pGBadge} <span class="font-mono text-gray-500">(ID:${escapeActStatHtml(r.partnerId)})</span>`;
+                } else {
+                    detailCellHtml = `<span class="text-amber-800 font-medium">${escapeActStatHtml(r.reasonText)}</span>`;
+                }
+
+                return `
+                    <tr class="${r.willMatch ? 'bg-emerald-50/20 hover:bg-emerald-50/40' : 'hover:bg-amber-50/35'} transition">
+                        <td class="p-3 text-xs whitespace-nowrap">${statusBadge}</td>
+                        <td class="p-3 text-xs whitespace-nowrap">
+                            <span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-mono font-bold mr-1">${escapeActStatHtml(r.playerId)}</span>
+                            <span class="font-bold text-gray-800">${escapeActStatHtml(r.nickname)}</span>
+                            ${gBadge}
+                            ${metaText ? `<span class="text-[11px] text-gray-400 ml-1">(${escapeActStatHtml(metaText)})</span>` : ''}
+                            ${sessTag}
+                        </td>
+                        <td class="p-3 text-[11px] leading-relaxed">${formatStatsUserCriteriaHtml(r.userObj)}</td>
+                        <td class="p-3 text-xs leading-relaxed">${detailCellHtml}</td>
+                        <td class="p-3 text-xs font-bold text-gray-500 whitespace-nowrap">${escapeActStatHtml(r.roleTypeText)}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+    }
+
+    const confirmBtn = document.getElementById('confirmRunSuppMatchBtn');
+    if (confirmBtn) {
+        confirmBtn.textContent = totalPlannedPairs > 0
+            ? `💘 確認執行補跑名單（預計配對 ${totalPlannedPairs} 對）`
+            : `💘 確認執行補跑名單`;
+    }
+}
+
+function openSupplementaryMatchPreviewModal(sessionLabels) {
+    const sessions = (Array.isArray(sessionLabels) ? sessionLabels : [sessionLabels])
+        .map(s => String(s || '').trim())
+        .filter(Boolean);
     if (sessions.length === 0) return;
+
+    if (typeof previewSessionSupplementaryMatch !== 'function' || typeof runSessionMatch !== 'function') {
+        alert('配對模組尚未載入，請重新整理頁面後再試。');
+        return;
+    }
+
+    const sessionPreviews = sessions
+        .map(s => previewSessionSupplementaryMatch(s))
+        .filter(Boolean);
+
+    const allCandidateRows = [];
+    let totalPlannedPairs = 0;
+    sessionPreviews.forEach(sp => {
+        totalPlannedPairs += (sp.plannedPairs || []).length;
+        (sp.candidateRows || []).forEach(row => allCandidateRows.push(row));
+    });
+
+    if (allCandidateRows.length === 0) {
+        alert(`ℹ️【${sessions.join(' ＋ ')}】目前所有報名玩家皆已完成配對，沒有尚未配對的補跑名單！`);
+        return;
+    }
+
+    pendingSupplementaryMatchPlan = {
+        sessions,
+        sessionPreviews,
+        allCandidateRows,
+        totalPlannedPairs
+    };
+    suppPreviewStatusFilter = 'ALL';
+    suppPreviewGenderFilter = 'ALL';
+    suppPreviewSearchKeyword = '';
+
+    const searchInput = document.getElementById('suppPreviewSearchInput');
+    if (searchInput) searchInput.value = '';
+
+    renderSupplementaryMatchPreviewModalBody();
+
+    const modal = document.getElementById('supplementaryMatchPreviewModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function confirmAndRunSupplementaryMatch() {
+    if (!pendingSupplementaryMatchPlan) return;
     if (typeof runSessionMatch !== 'function') {
         alert('配對模組尚未載入，請重新整理頁面後再試。');
         return;
     }
-    if (!confirm(`確定要針對【${sessions.join(' ＋ ')}】尚未配對成功的名單補跑一次配對嗎？\n\n・已配對成功的玩家不會受到任何影響\n・系統將嚴格依照每位玩家設定的「必須吻合」與「選填」條件，為尚未配對者尋找最佳可配對對象並同步更新成功／失敗名單紀錄。`)) {
-        return;
-    }
-    const summaries = sessions.map(s => runSessionMatch(false, s)).filter(Boolean);
+
+    const plan = pendingSupplementaryMatchPlan;
+    closeSupplementaryMatchPreviewModal();
+
+    const summaries = plan.sessionPreviews.map(sp =>
+        runSessionMatch(false, sp.session, { preferredPairs: sp.plannedPairs || [] })
+    ).filter(Boolean);
+
     renderAdminAll(true);
-    if (summaries.length > 0) {
+
+    if (summaries.length === 1) {
+        const res = summaries[0];
+        alert(`💘【${res.session}】補跑結算完成！\n\n・報名總人數：${res.totalRegCount} 人（男 ${res.maleRegCount} ／ 女 ${res.femaleRegCount}）\n・最新成功配對：${res.matchedCount} 人（共 ${res.matchedPairCount} 對）\n・尚未配對人數：${res.unmatchedCount} 人`);
+    } else if (summaries.length > 1) {
         const lines = summaries.map(res =>
             `【${res.session}】報名 ${res.totalRegCount} 人 → 成功 ${res.matchedCount} 人（${res.matchedPairCount} 對）、未配對 ${res.unmatchedCount} 人`
         );
@@ -86,22 +285,19 @@ function runSupplementaryMatchForBatch(wedLabel, satLabel) {
     }
 }
 
-function runSupplementaryMatchForSession(sessionLabel) {
-    const cleanSession = String(sessionLabel || '').trim();
-    if (!cleanSession) return;
-    if (typeof runSessionMatch !== 'function') {
-        alert('配對模組尚未載入，請重新整理頁面後再試。');
-        return;
-    }
-    if (!confirm(`確定要針對【${cleanSession}】尚未配對成功的名單補跑一次配對嗎？\n\n・已配對成功的玩家不會受到任何影響\n・系統將嚴格依照每位玩家設定的「必須吻合」與「選填」條件，為尚未配對者尋找最佳可配對對象並同步更新成功／失敗名單紀錄。`)) {
-        return;
-    }
-    const res = runSessionMatch(false, cleanSession);
-    renderAdminAll(true);
-    if (res) {
-        alert(`💘【${cleanSession}】補跑結算完成！\n\n・報名總人數：${res.totalRegCount} 人（男 ${res.maleRegCount} ／ 女 ${res.femaleRegCount}）\n・最新成功配對：${res.matchedCount} 人（共 ${res.matchedPairCount} 對）\n・尚未配對人數：${res.unmatchedCount} 人`);
-    }
+function runSupplementaryMatchForBatch(wedLabel, satLabel) {
+    openSupplementaryMatchPreviewModal([wedLabel, satLabel]);
 }
+
+function runSupplementaryMatchForSession(sessionLabel) {
+    openSupplementaryMatchPreviewModal([sessionLabel]);
+}
+
+window.closeSupplementaryMatchPreviewModal = closeSupplementaryMatchPreviewModal;
+window.setSuppPreviewStatusFilter = setSuppPreviewStatusFilter;
+window.setSuppPreviewGenderFilter = setSuppPreviewGenderFilter;
+window.onSuppPreviewSearchInput = onSuppPreviewSearchInput;
+window.confirmAndRunSupplementaryMatch = confirmAndRunSupplementaryMatch;
 
 function getMergedActivityRegHistoryList() {
     const map = (typeof getActivityRegHistory === 'function')
@@ -310,6 +506,12 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                         : (pGender === '女' ? `<span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold text-[10px] ml-1">女</span>` : '');
                     return `💘 <strong>${escapeActStatHtml(pName)}</strong>${gBadgeHtml} <span class="font-mono text-gray-500">(ID:${escapeActStatHtml(pId)})</span> <span class="text-[11px] text-pink-600">[${escapeActStatHtml(lk.session || '')}]</span>`;
                 }).join('<br>');
+                const roleDesc = links.map(lk => {
+                    const pId = String(lk.partnerId || '').trim();
+                    const pUser = userById.get(pId);
+                    const pGender = (pUser && pUser.gender) || (pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : ''));
+                    return `${liveU.gender || '?'} > ${pGender}`;
+                }).join('<br>');
                 rosterDetails.push({
                     playerId: pid,
                     nickname: liveU.nickname || `玩家_${pid}`,
@@ -319,6 +521,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                     isMatched: true,
                     criteriaHtml: formatStatsUserCriteriaHtml(liveU, archiveByPid.get(pid)),
                     resultHtml: partnerDesc,
+                    roleTypeHtml: roleDesc,
                     searchText: `${pid} ${liveU.nickname || ''} ${links.map(l => `${l.partnerId} ${l.partnerName} ${l.session}`).join(' ')} 配對成功`
                 });
             }
@@ -339,6 +542,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                 isMatched: false,
                 criteriaHtml: formatStatsUserCriteriaHtml(liveU, archiveByPid.get(pid)),
                 resultHtml: `<span class="text-amber-800 font-medium">${escapeActStatHtml(reason)}</span>`,
+                roleTypeHtml: `${liveU.gender || '?'} > 未配對`,
                 searchText: `${pid} ${liveU.nickname || ''} ${reason} 配對失敗 尚未配對`
             });
         });
@@ -412,25 +616,28 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
             });
         }
 
-        // 雙向對稱補齊本場次所有已配對玩家（單一場次嚴格 1 對 1：每人最多 1 位對象，並偵測是否有殘留重複紀錄供一鍵清理）
+        // 嚴格 1 對 1 雙向互鎖配對表：唯有雙方皆尚未在本場次配對時才建立雙向連線，確保 成功配對人數 = 成功對數 × 2（如 72 人 = 36 對）
         let hasRawDuplicateInSession = false;
         const sessionLinksByPid = new Map();
-        const ensureSessionLink = (ownerId, linkObj) => {
-            const oid = String(ownerId || '').trim();
-            const pid = String((linkObj && linkObj.partnerId) || '').trim();
-            if (!oid || !pid || oid === pid) return;
-            if (!sessionLinksByPid.has(oid)) sessionLinksByPid.set(oid, new Map());
-            const existingMap = sessionLinksByPid.get(oid);
-            if (!existingMap.has(pid)) {
-                if (existingMap.size >= 1) {
-                    hasRawDuplicateInSession = true;
-                    return;
-                }
-                existingMap.set(pid, {
-                    partnerId: pid,
-                    partnerName: linkObj.partnerName || ''
-                });
+        const tryBindSymmetric1to1Pair = (idA, nameA, idB, nameB) => {
+            const a = String(idA || '').trim();
+            const b = String(idB || '').trim();
+            if (!a || !b || a === b) return;
+            const mapA = sessionLinksByPid.get(a);
+            const mapB = sessionLinksByPid.get(b);
+            if (mapA && mapA.has(b) && mapB && mapB.has(a)) {
+                return;
             }
+            if ((mapA && mapA.size >= 1) || (mapB && mapB.size >= 1)) {
+                hasRawDuplicateInSession = true;
+                return;
+            }
+            const nextA = new Map();
+            nextA.set(b, { partnerId: b, partnerName: nameB || '' });
+            const nextB = new Map();
+            nextB.set(a, { partnerId: a, partnerName: nameA || '' });
+            sessionLinksByPid.set(a, nextA);
+            sessionLinksByPid.set(b, nextB);
         };
 
         validUsers.forEach(u => {
@@ -448,8 +655,13 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                 if (!regUserMap.has(pId)) {
                     regUserMap.set(pId, userById.get(pId) || { id: pId, nickname: lk.partnerName || `玩家_${pId}`, gender: pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : '') });
                 }
-                ensureSessionLink(uid, lk);
-                ensureSessionLink(pId, { partnerId: uid, partnerName: u.nickname || `玩家_${uid}` });
+                const pUser = userById.get(pId);
+                tryBindSymmetric1to1Pair(
+                    uid,
+                    u.nickname || `玩家_${uid}`,
+                    pId,
+                    (pUser && pUser.nickname) || lk.partnerName || `玩家_${pId}`
+                );
             });
         });
 
@@ -464,8 +676,12 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
             if (!regUserMap.has(pId)) {
                 regUserMap.set(pId, userById.get(pId) || { id: pId, nickname: savedM.partnerName || `玩家_${pId}`, gender: pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : '') });
             }
-            ensureSessionLink(uid, savedM);
-            ensureSessionLink(pId, { partnerId: uid, partnerName: savedM.nickname || `玩家_${uid}` });
+            tryBindSymmetric1to1Pair(
+                uid,
+                savedM.nickname || `玩家_${uid}`,
+                pId,
+                savedM.partnerName || `玩家_${pId}`
+            );
         });
 
         const finalSessionRegUsers = Array.from(regUserMap.values());
@@ -493,6 +709,12 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                         : (pGender === '女' ? `<span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold text-[10px] ml-1">女</span>` : '');
                     return `💘 <strong>${escapeActStatHtml(pName)}</strong>${gBadgeHtml} <span class="font-mono text-gray-500">(ID:${escapeActStatHtml(pId)})</span>`;
                 }).join('<br>');
+                const roleDesc = links.map(lk => {
+                    const pId = String(lk.partnerId || '').trim();
+                    const pUser = userById.get(pId);
+                    const pGender = (pUser && pUser.gender) || (pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : ''));
+                    return `${liveU.gender || '?'} > ${pGender}`;
+                }).join('<br>');
                 rosterDetails.push({
                     playerId: pid,
                     nickname: liveU.nickname || `玩家_${pid}`,
@@ -502,6 +724,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                     isMatched: true,
                     criteriaHtml: formatStatsUserCriteriaHtml(liveU, archiveByPid.get(pid)),
                     resultHtml: partnerDesc,
+                    roleTypeHtml: roleDesc,
                     searchText: `${pid} ${liveU.nickname || ''} ${links.map(l => `${l.partnerId} ${l.partnerName}`).join(' ')} 配對成功`
                 });
             }
@@ -522,6 +745,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                 isMatched: false,
                 criteriaHtml: formatStatsUserCriteriaHtml(liveU, archiveByPid.get(pid)),
                 resultHtml: `<span class="text-amber-800 font-medium">${escapeActStatHtml(reason)}</span>`,
+                roleTypeHtml: `${liveU.gender || '?'} > 未配對`,
                 searchText: `${pid} ${liveU.nickname || ''} ${reason} 配對失敗 尚未配對`
             });
         });
@@ -606,6 +830,12 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                         : (pGender === '女' ? `<span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold text-[10px] ml-1">女</span>` : '');
                     return `💘 <strong>${escapeActStatHtml(pName)}</strong>${gBadgeHtml} <span class="font-mono text-gray-500">(ID:${escapeActStatHtml(pId)})</span>`;
                 }).join('<br>');
+                const roleDesc = links.map(lk => {
+                    const pId = String(lk.partnerId || '').trim();
+                    const pUser = userById.get(pId);
+                    const pGender = (pUser && pUser.gender) || (pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : ''));
+                    return `${liveU.gender || '?'} > ${pGender}`;
+                }).join('<br>');
                 rosterDetails.push({
                     playerId: pid,
                     nickname: liveU.nickname || `玩家_${pid}`,
@@ -615,6 +845,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                     isMatched: true,
                     criteriaHtml: choiceBadgeHtml,
                     resultHtml: partnerDesc,
+                    roleTypeHtml: roleDesc,
                     searchText: `${pid} ${liveU.nickname || ''} ${links.map(l => `${l.partnerId} ${l.partnerName}`).join(' ')} 配對成功`
                 });
             }
@@ -645,6 +876,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                 isMatched: false,
                 criteriaHtml: choiceBadgeHtml,
                 resultHtml: `<span class="text-amber-800 font-medium">${escapeActStatHtml(reasonText)}</span>`,
+                roleTypeHtml: `${liveU.gender || '?'} > 未配對`,
                 searchText: `${pid} ${liveU.nickname || ''} ${reasonText} 配對失敗 尚未配對`
             });
         });
@@ -763,7 +995,7 @@ function renderSelectedActivityRosterDetails(activeStats) {
     }
 
     const rowsHtml = pagedItems.length === 0
-        ? `<tr><td colspan="4" class="p-6 text-center text-gray-400">目前篩選條件下沒有符合的報名／配對紀錄。</td></tr>`
+        ? `<tr><td colspan="5" class="p-6 text-center text-gray-400">目前篩選條件下沒有符合的報名／配對紀錄。</td></tr>`
         : pagedItems.map(it => {
             const statusBadge = it.isMatched
                 ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-[11px] font-bold">💘 配對成功</span>`
@@ -783,6 +1015,7 @@ function renderSelectedActivityRosterDetails(activeStats) {
                     </td>
                     <td class="p-3 text-[11px] leading-relaxed">${it.criteriaHtml}</td>
                     <td class="p-3 text-xs leading-relaxed">${it.resultHtml}</td>
+                    <td class="p-3 text-xs font-bold text-gray-500 whitespace-nowrap">${it.roleTypeHtml || ''}</td>
                 </tr>
             `;
         }).join('');
@@ -846,6 +1079,7 @@ function renderSelectedActivityRosterDetails(activeStats) {
                             <th class="p-3 w-48">報名玩家</th>
                             <th class="p-3 w-64">報名條件設定</th>
                             <th class="p-3">配對對象 / 未配對原因明細</th>
+                            <th class="p-3 w-32">角色型別</th>
                         </tr>
                     </thead>
                     <tbody>${rowsHtml}</tbody>

@@ -811,8 +811,27 @@ function switchTab(tabName) {
 }
 
 // ==================== 週三 (3) 與週六 (6) 20:00 倒數計時 ====================
+let lastRegularSessionCutoffSig = '';
+
 function updateNextMatchCountdown() {
     const now = new Date();
+    const nowMs = now.getTime();
+    if (typeof getBatchScheduleInfo === 'function' && typeof getCurrentBatchNumber === 'function' && typeof isRegularSessionRegistrationClosed === 'function') {
+        const curSched = getBatchScheduleInfo(getCurrentBatchNumber());
+        const wedClosed = isRegularSessionRegistrationClosed(curSched.wedLabel, nowMs);
+        const satClosed = isRegularSessionRegistrationClosed(curSched.satLabel, nowMs);
+        const cutoffSig = `${curSched.batch}:${wedClosed}:${satClosed}`;
+        if (lastRegularSessionCutoffSig && cutoffSig !== lastRegularSessionCutoffSig) {
+            lastRegularSessionCutoffSig = cutoffSig;
+            if (typeof refreshAllUI === 'function') refreshAllUI();
+            const regModalEl = document.getElementById('registerModal');
+            if (regModalEl && !regModalEl.classList.contains('hidden') && typeof renderRegisterModalSessionOptions === 'function') {
+                renderRegisterModalSessionOptions(nowMs);
+            }
+        } else {
+            lastRegularSessionCutoffSig = cutoffSig;
+        }
+    }
     let target = new Date(now);
     target.setHours(20, 0, 0, 0);
 

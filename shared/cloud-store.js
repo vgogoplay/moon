@@ -849,7 +849,11 @@ const CloudSync = {
                 });
             }
         }
-        this.reconcileSymmetricMatches(usersArr, this.initialized && this.isBackendContext());
+        const shouldPersistSymmetricRepair = Boolean(this.initialized && this.isBackendContext() && !this._hasRunInitialSymmetricPersist);
+        if (shouldPersistSymmetricRepair) {
+            this._hasRunInitialSymmetricPersist = true;
+        }
+        this.reconcileSymmetricMatches(usersArr, shouldPersistSymmetricRepair);
         this.writeLocalIfChanged(USERS_KEY, JSON.stringify(usersArr));
         usersArr.forEach(u => {
             if (u && u.id) {

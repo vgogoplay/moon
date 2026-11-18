@@ -788,17 +788,14 @@ function checkAutoSchedule2000() {
         `距離下次 ${dayLabel} 20:00 自動配對：${days}天 ${String(hours).padStart(2, '0')}時 ${String(mins).padStart(2, '0')}分 ${String(secs).padStart(2, '0')}秒`;
 
     const day = now.getDay();
-    if ((day === 3 || day === 6) && now.getHours() >= 20) {
+    const isAutoWindow = (day === 3 || day === 6) && now.getHours() === 20 && now.getMinutes() <= 15;
+    if (isAutoWindow && typeof CloudSync !== 'undefined' && CloudSync.initialized && CloudSync.inFlightWrites === 0 && !sessionMatchRunInProgress) {
         const dateKey = `${now.toDateString()}_2000`;
         const executedMap = JSON.parse(localStorage.getItem(AUTO_RUN_LOG_KEY) || '{}');
         if (!executedMap[dateKey]) {
             executedMap[dateKey] = true;
             localStorage.setItem(AUTO_RUN_LOG_KEY, JSON.stringify(executedMap));
-            CloudSync.putNode(AUTO_RUN_LOG_KEY, executedMap);
-            const sched = getBatchScheduleInfo(getCurrentBatch());
-            const autoSession = day === 3 ? sched.wedLabel : sched.satLabel;
-            const autoSelEl = document.getElementById('adminSessionSelect'); if (autoSelEl) autoSelEl.value = autoSession;
-            runSessionMatch(true);
+            claimAndRunAutoSchedule2000(dateKey, day);
         }
     }
 
@@ -1315,9 +1312,293 @@ function saveSessionMatchResultRecord(targetSession, allSessionUsers, users, res
     return record;
 }
 
+let autoSchedule2000ClaimInFlight = false;
+
+async function claimAndRunAutoSchedule2000(dateKey, dayOfWeek) {
+    if (autoSchedule2000ClaimInFlight) return;
+    autoSchedule2000ClaimInFlight = true;
+    try {
+        const sched = getBatchScheduleInfo(getCurrentBatch());
+        const autoSession = dayOfWeek === 3 ? sched.wedLabel : sched.satLabel;
+
+        // 1. 先從雲端確認今天 20:00 是否已被其他後台分頁／裝置執行過，若已執行則直接同步本地鎖並停止
+        if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl) {
+            try {
+                const encodedLogPath = CloudSync.encodePath(AUTO_RUN_LOG_KEY);
+                const res = await fetch(`${CloudSync.dbUrl}/${encodedLogPath}.json`, { method: 'GET', cache: 'no-store' });
+                if (res.ok) {
+                    const remoteMap = await res.json();
+                    if (remoteMap && typeof remoteMap === 'object' && remoteMap[dateKey]) {
+                        localStorage.setItem(AUTO_RUN_LOG_KEY, JSON.stringify(remoteMap));
+                        return;
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // 2. 檢查該場次是否已有配對成功紀錄或結算快照；若已有紀錄代表已結算過，補寫鎖定旗標後立即停止不再重跑
+        const latestUsers = getUsers();
+        const alreadyHasSessionMatches = latestUsers.some(u => u && hasUserMatchedInRegularSession(u, autoSession));
+        let hasSavedSnap = false;
+        try {
+            const smrKey = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined') ? SESSION_MATCH_RESULTS_KEY : 'yuelao_session_match_results';
+            const smrMap = JSON.parse(localStorage.getItem(smrKey) || '{}');
+            hasSavedSnap = Object.values(smrMap || {}).some(s => s && isSameSession(s.session, autoSession) && Number(s.matchedPairCount || 0) > 0);
+        } catch (e) {}
+
+        const executedMap = JSON.parse(localStorage.getItem(AUTO_RUN_LOG_KEY) || '{}');
+        executedMap[dateKey] = true;
+        localStorage.setItem(AUTO_RUN_LOG_KEY, JSON.stringify(executedMap));
+        if (typeof CloudSync !== 'undefined') {
+            await CloudSync.putNode(AUTO_RUN_LOG_KEY, executedMap);
+        }
+
+        if (alreadyHasSessionMatches || hasSavedSnap) {
+            return;
+        }
+
+        const autoSelEl = document.getElementById('adminSessionSelect');
+        if (autoSelEl) autoSelEl.value = autoSession;
+        runSessionMatch(true, autoSession);
+    } finally {
+        autoSchedule2000ClaimInFlight = false;
+    }
+}
+
 let sessionMatchRunInProgress = false;
 
-function runSessionMatch(isAuto = false, overrideSession = null) {
+function collectSessionParticipantsAndMatchedIds(targetSession, users) {
+    const pairedThisSessionIds = new Set();
+    const userById = new Map();
+    const sessionRegUserMap = new Map();
+
+    (users || []).forEach(u => {
+        if (!u || !u.id) return;
+        const uid = String(u.id).trim();
+        userById.set(uid, u);
+
+        if (hasUserMatchedInRegularSession(u, targetSession)) {
+            pairedThisSessionIds.add(uid);
+        }
+        const rawHist = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+            ? CloudSync.mapToArray(u.matchedHistory)
+            : (Array.isArray(u.matchedHistory) ? u.matchedHistory : []);
+        rawHist.forEach(h => {
+            if (h && !h.activityId && isSameSession(h.session, targetSession)) {
+                pairedThisSessionIds.add(uid);
+                const pId = String(h.partnerId || '').trim();
+                if (pId) pairedThisSessionIds.add(pId);
+            }
+        });
+        if (u.matchedWithId && u.matchedSession && isSameSession(u.matchedSession, targetSession)) {
+            pairedThisSessionIds.add(uid);
+            pairedThisSessionIds.add(String(u.matchedWithId).trim());
+        }
+
+        const sessions = Array.isArray(u.registeredSessions)
+            ? u.registeredSessions
+            : (u.registeredSession ? [u.registeredSession] : []);
+        if (sessions.some(s => isSameSession(s, targetSession))) {
+            sessionRegUserMap.set(uid, u);
+        }
+    });
+
+    try {
+        const smrKey = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined') ? SESSION_MATCH_RESULTS_KEY : 'yuelao_session_match_results';
+        const smrMap = JSON.parse(localStorage.getItem(smrKey) || '{}');
+        const snap = Object.values(smrMap || {}).find(s => s && isSameSession(s.session, targetSession));
+        if (snap) {
+            (snap.matchedUsers || []).forEach(mu => {
+                if (mu && mu.playerId) pairedThisSessionIds.add(String(mu.playerId).trim());
+                if (mu && mu.partnerId) pairedThisSessionIds.add(String(mu.partnerId).trim());
+            });
+            (snap.matchedPairs || []).forEach(mp => {
+                if (mp && mp.idA) pairedThisSessionIds.add(String(mp.idA).trim());
+                if (mp && mp.idB) pairedThisSessionIds.add(String(mp.idB).trim());
+            });
+        }
+    } catch (e) {}
+
+    if (typeof getActivityRegHistory === 'function') {
+        const regHist = getActivityRegHistory();
+        Object.values(regHist).forEach(rec => {
+            if (rec && rec.kind === 'regular' && rec.session && isSameSession(rec.session, targetSession)) {
+                const pid = String(rec.playerId || '').trim();
+                const liveU = userById.get(pid);
+                if (liveU && !sessionRegUserMap.has(pid)) {
+                    sessionRegUserMap.set(pid, liveU);
+                }
+            }
+        });
+    }
+
+    return {
+        pairedThisSessionIds,
+        userById,
+        allSessionUsers: Array.from(sessionRegUserMap.values())
+    };
+}
+
+function previewSessionSupplementaryMatch(rawTargetSession) {
+    const targetSession = (typeof normalizeSessionLabel === 'function')
+        ? normalizeSessionLabel(rawTargetSession)
+        : String(rawTargetSession || '').trim();
+    if (!targetSession) return null;
+
+    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+        AdminMemoryCache.invalidate('users');
+    }
+    const users = getUsers();
+    const rules = getForceRules();
+    const batchName = extractBatchLabel(targetSession);
+    const activeBatchRules = rules.filter(r => extractBatchLabel(r.batch) === batchName);
+    const reservedIds = new Set();
+    activeBatchRules.forEach(r => {
+        reservedIds.add(String(r.adminId));
+        reservedIds.add(String(r.targetId));
+    });
+
+    const { pairedThisSessionIds, allSessionUsers } = collectSessionParticipantsAndMatchedIds(targetSession, users);
+
+    // 所有該場次尚未配對成功的報名玩家
+    const allUnmatchedSessionUsers = allSessionUsers.filter(u => {
+        const uidStr = String(u.id).trim();
+        return !pairedThisSessionIds.has(uidStr) && !hasUserMatchedInRegularSession(u, targetSession);
+    });
+
+    const dryRunPairedIds = new Set(pairedThisSessionIds);
+    const plannedPairs = [];
+    const plannedPartnerByPid = new Map();
+
+    // 1. 先模擬尚未執行的秘密強制配對規則
+    activeBatchRules.forEach(rule => {
+        if (rule.executed) return;
+        const adminIdStr = String(rule.adminId || '').trim();
+        const targetIdStr = String(rule.targetId || '').trim();
+        if (dryRunPairedIds.has(adminIdStr) || dryRunPairedIds.has(targetIdStr)) return;
+
+        const adminUser = allUnmatchedSessionUsers.find(u => String(u.id).trim() === adminIdStr) || users.find(u => String(u.id).trim() === adminIdStr);
+        const targetUser = allUnmatchedSessionUsers.find(u => String(u.id).trim() === targetIdStr) || users.find(u => String(u.id).trim() === targetIdStr);
+
+        if (adminUser && targetUser && !adminUser.isWarned && !adminUser.isMatchBanned && !targetUser.isWarned && !targetUser.isMatchBanned) {
+            dryRunPairedIds.add(adminIdStr);
+            dryRunPairedIds.add(targetIdStr);
+            plannedPairs.push({
+                idA: adminIdStr,
+                nameA: adminUser.nickname || `玩家_${adminIdStr}`,
+                genderA: adminUser.gender || '',
+                idB: targetIdStr,
+                nameB: targetUser.nickname || `玩家_${targetIdStr}`,
+                genderB: targetUser.gender || '',
+                session: targetSession,
+                isForceRule: true
+            });
+            plannedPartnerByPid.set(adminIdStr, { partner: targetUser, isForceRule: true });
+            plannedPartnerByPid.set(targetIdStr, { partner: adminUser, isForceRule: true });
+        }
+    });
+
+    // 2. 篩選出可進入補跑池的未配對玩家
+    const eligiblePool = allUnmatchedSessionUsers.filter(u => {
+        if (u.isWarned || u.isMatchBanned) return false;
+        const uidStr = String(u.id).trim();
+        if (dryRunPairedIds.has(uidStr)) return false;
+        if (reservedIds.has(uidStr)) return false;
+        return true;
+    });
+
+    const adj = Array.from({ length: eligiblePool.length }, () => []);
+    for (let i = 0; i < eligiblePool.length; i++) {
+        for (let j = i + 1; j < eligiblePool.length; j++) {
+            if (canPair(eligiblePool[i], eligiblePool[j])) {
+                adj[i].push(j);
+                adj[j].push(i);
+            }
+        }
+    }
+
+    const matchOf = findMaximumCompatibilityMatching(eligiblePool, adj);
+    for (let i = 0; i < eligiblePool.length; i++) {
+        const j = matchOf[i];
+        if (j > i) {
+            const A = eligiblePool[i];
+            const B = eligiblePool[j];
+            const idA = String(A.id).trim();
+            const idB = String(B.id).trim();
+            if (dryRunPairedIds.has(idA) || dryRunPairedIds.has(idB)) continue;
+            dryRunPairedIds.add(idA);
+            dryRunPairedIds.add(idB);
+            plannedPairs.push({
+                idA,
+                nameA: A.nickname || `玩家_${idA}`,
+                genderA: A.gender || '',
+                idB,
+                nameB: B.nickname || `玩家_${idB}`,
+                genderB: B.gender || '',
+                session: targetSession,
+                isForceRule: false
+            });
+            plannedPartnerByPid.set(idA, { partner: B, isForceRule: false });
+            plannedPartnerByPid.set(idB, { partner: A, isForceRule: false });
+        }
+    }
+
+    const candidateRows = allUnmatchedSessionUsers.map(u => {
+        const pid = String(u.id).trim();
+        const plan = plannedPartnerByPid.get(pid) || null;
+        if (plan && plan.partner) {
+            const pObj = plan.partner;
+            const pId = String(pObj.id).trim();
+            const pGender = pObj.gender || (pId.startsWith('1') ? '男' : (pId.startsWith('2') ? '女' : ''));
+            return {
+                session: targetSession,
+                playerId: pid,
+                nickname: u.nickname || `玩家_${pid}`,
+                gender: u.gender || '',
+                age: u.age || '',
+                region: u.region || '',
+                userObj: u,
+                willMatch: true,
+                isExcluded: false,
+                partnerId: pId,
+                partnerName: pObj.nickname || `玩家_${pId}`,
+                partnerGender: pGender,
+                reasonText: plan.isForceRule ? '⚡ 秘密強制通道配對' : '💘 條件雙向吻合（1對1補跑成功）',
+                roleTypeText: `${u.gender || '?'} > ${pGender || '?'}`
+            };
+        }
+
+        const isExcluded = Boolean(u.isWarned || u.isMatchBanned);
+        const failReason = diagnoseSessionUnmatchedReason(u, allUnmatchedSessionUsers, reservedIds);
+        return {
+            session: targetSession,
+            playerId: pid,
+            nickname: u.nickname || `玩家_${pid}`,
+            gender: u.gender || '',
+            age: u.age || '',
+            region: u.region || '',
+            userObj: u,
+            willMatch: false,
+            isExcluded,
+            partnerId: '',
+            partnerName: '',
+            partnerGender: '',
+            reasonText: failReason,
+            roleTypeText: `${u.gender || '?'} > 未配對`
+        };
+    });
+
+    return {
+        session: targetSession,
+        totalSessionUsersCount: allSessionUsers.length,
+        alreadyMatchedCount: pairedThisSessionIds.size,
+        unmatchedPoolCount: allUnmatchedSessionUsers.length,
+        plannedPairs,
+        candidateRows
+    };
+}
+
+function runSessionMatch(isAuto = false, overrideSession = null, options = {}) {
     if (sessionMatchRunInProgress) {
         if (!isAuto) alert('⏳ 系統正在執行本場次配對結算中，請稍候再試！');
         return null;
@@ -1362,43 +1643,7 @@ function runSessionMatch(isAuto = false, overrideSession = null) {
         });
 
         // 雙向收集本場次所有已配對玩家 ID（包含本人紀錄、對方紀錄的 partnerId、以及場次結算快照），確保已配對的 A 與 B 絕不再進入補跑名單
-        const pairedThisSessionIds = new Set();
-        users.forEach(u => {
-            if (!u || !u.id) return;
-            const uid = String(u.id).trim();
-            if (hasUserMatchedInRegularSession(u, targetSession)) {
-                pairedThisSessionIds.add(uid);
-            }
-            const rawHist = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
-                ? CloudSync.mapToArray(u.matchedHistory)
-                : (Array.isArray(u.matchedHistory) ? u.matchedHistory : []);
-            rawHist.forEach(h => {
-                if (h && !h.activityId && isSameSession(h.session, targetSession)) {
-                    pairedThisSessionIds.add(uid);
-                    const pId = String(h.partnerId || '').trim();
-                    if (pId) pairedThisSessionIds.add(pId);
-                }
-            });
-            if (u.matchedWithId && u.matchedSession && isSameSession(u.matchedSession, targetSession)) {
-                pairedThisSessionIds.add(uid);
-                pairedThisSessionIds.add(String(u.matchedWithId).trim());
-            }
-        });
-        try {
-            const smrKey = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined') ? SESSION_MATCH_RESULTS_KEY : 'yuelao_session_match_results';
-            const smrMap = JSON.parse(localStorage.getItem(smrKey) || '{}');
-            const snap = Object.values(smrMap || {}).find(s => s && isSameSession(s.session, targetSession));
-            if (snap) {
-                (snap.matchedUsers || []).forEach(mu => {
-                    if (mu && mu.playerId) pairedThisSessionIds.add(String(mu.playerId).trim());
-                    if (mu && mu.partnerId) pairedThisSessionIds.add(String(mu.partnerId).trim());
-                });
-                (snap.matchedPairs || []).forEach(mp => {
-                    if (mp && mp.idA) pairedThisSessionIds.add(String(mp.idA).trim());
-                    if (mp && mp.idB) pairedThisSessionIds.add(String(mp.idB).trim());
-                });
-            }
-        } catch (e) {}
+        const { pairedThisSessionIds, userById, allSessionUsers } = collectSessionParticipantsAndMatchedIds(targetSession, users);
 
         let pairCount = 0;
         const triggerLabel = isAuto ? '20:00 到點自動配對' : '20:00 配對執行';
@@ -1431,32 +1676,27 @@ function runSessionMatch(isAuto = false, overrideSession = null) {
             saveForceRules(rules);
         }
 
-        // 合併「目前仍在報名場次中」與「統計封存紀錄（ActivityRegArchive）」的該場次完整報名玩家（確保活動結束3分鐘後補跑也能抓到全部未配對名單）
-        const sessionRegUserMap = new Map();
-        const userById = new Map();
-        users.forEach(u => {
-            if (!u || !u.id) return;
-            userById.set(String(u.id).trim(), u);
-            const sessions = Array.isArray(u.registeredSessions)
-                ? u.registeredSessions
-                : (u.registeredSession ? [u.registeredSession] : []);
-            if (sessions.some(s => isSameSession(s, targetSession))) {
-                sessionRegUserMap.set(String(u.id).trim(), u);
+        // 若管理員已透過「補跑名單預覽視窗」確認名單，優先套用預覽清單中的 1 對 1 組合，確保預覽與執行 100% 一致
+        const preferredPairs = (options && Array.isArray(options.preferredPairs)) ? options.preferredPairs : [];
+        preferredPairs.forEach(pair => {
+            if (!pair || !pair.idA || !pair.idB) return;
+            const idA = String(pair.idA).trim();
+            const idB = String(pair.idB).trim();
+            if (!idA || !idB || idA === idB) return;
+            if (pairedThisSessionIds.has(idA) || pairedThisSessionIds.has(idB)) return;
+            const uA = userById.get(idA);
+            const uB = userById.get(idB);
+            if (!uA || !uB || uA.isWarned || uA.isMatchBanned || uB.isWarned || uB.isMatchBanned) return;
+            if (!canPair(uA, uB)) return;
+            if (recordPairMatch(uA, uB, targetSession, nowTs)) {
+                pairedThisSessionIds.add(idA);
+                pairedThisSessionIds.add(idB);
+                pairCount++;
+                if (pairCount <= 15) {
+                    appendLog(`<span class="text-emerald-400">[補跑配對成功 #${pairCount}]</span> ID:${uA.id}（${uA.nickname}）⇄ ID:${uB.id}（${uB.nickname}）`);
+                }
             }
         });
-        if (typeof getActivityRegHistory === 'function') {
-            const regHist = getActivityRegHistory();
-            Object.values(regHist).forEach(rec => {
-                if (rec && rec.kind === 'regular' && rec.session && isSameSession(rec.session, targetSession)) {
-                    const pid = String(rec.playerId || '').trim();
-                    const liveU = userById.get(pid);
-                    if (liveU && !sessionRegUserMap.has(pid)) {
-                        sessionRegUserMap.set(pid, liveU);
-                    }
-                }
-            });
-        }
-        const allSessionUsers = Array.from(sessionRegUserMap.values());
 
         // 嚴格過濾：只把「本場次尚未配對過（1對1）」且符合資格的玩家放進待配對池
         const eligiblePool = shuffle(allSessionUsers.filter(u => {

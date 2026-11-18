@@ -1242,7 +1242,6 @@ async function unlockAdminUI() {
         badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-800 font-semibold';
         badge.textContent = '⚡ 已載入本地快取（雲端背景同步中...）';
     }
-    checkAutoSchedule2000();
     renderAdminAll(true);
 
     // 2. 雲端背景靜默同步：下載完成後自動比對更新並開啟即時 SSE 推播

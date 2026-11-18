@@ -214,14 +214,90 @@
         </div>
     </div>
 
+    <!-- 💘 補跑名單預覽確認 Modal（點擊補跑名單後先列出完整待補跑名單，再次點擊確認按鈕才正式執行） -->
+    <div id="supplementaryMatchPreviewModal" class="hidden fixed inset-0 bg-black/55 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border-2 border-pink-200 overflow-hidden">
+            <div class="p-5 md:p-6 border-b border-pink-100 bg-gradient-to-r from-rose-50/70 via-white to-pink-50/70 flex items-start justify-between gap-3 shrink-0">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h3 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">💘 補跑名單預覽確認（尚未執行配對）</h3>
+                        <span id="suppPreviewSessionBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-pink-100 border border-pink-300 text-[#8f4452] font-bold"></span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">
+                        以下為本次將進入補跑名單的「尚未配對玩家」與預計配對結果預覽；請確認無誤後，點擊右下角<strong>「💘 確認執行補跑名單」</strong>才會正式進行配對。
+                    </p>
+                </div>
+                <button type="button" onclick="closeSupplementaryMatchPreviewModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0">✕</button>
+            </div>
+
+            <div class="p-5 overflow-y-auto space-y-4 flex-1">
+                <!-- 摘要統計卡 -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200">
+                        <p class="text-[11px] text-gray-500 font-semibold">本次待補跑未配對名單</p>
+                        <p class="text-xl font-bold text-amber-700 mt-0.5" id="suppPreviewTotalCount">0 人</p>
+                        <p class="text-[11px] text-gray-500 mt-0.5" id="suppPreviewGenderBreakdown">男 0 人 ／ 女 0 人</p>
+                    </div>
+                    <div class="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200">
+                        <p class="text-[11px] text-gray-500 font-semibold">預計本次可新增配對</p>
+                        <p class="text-xl font-bold text-emerald-700 mt-0.5" id="suppPreviewMatchedCount">0 對（0 人）</p>
+                        <p class="text-[11px] text-emerald-700/80 mt-0.5">嚴格 1 對 1 且 100% 符合雙方條件</p>
+                    </div>
+                    <div class="p-3.5 rounded-2xl bg-pink-50/55 border border-pink-200">
+                        <p class="text-[11px] text-gray-500 font-semibold">預計補跑後仍無對象</p>
+                        <p class="text-xl font-bold text-[#8f4452] mt-0.5" id="suppPreviewRemainUnmatchedCount">0 人</p>
+                        <p class="text-[11px] text-gray-500 mt-0.5">剩餘池內暫無雙向符合條件者</p>
+                    </div>
+                </div>
+
+                <!-- 篩選與搜尋列 -->
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div id="suppPreviewStatusFilterBar" class="flex flex-wrap items-center gap-1.5"></div>
+                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                        <div id="suppPreviewGenderFilterBar" class="inline-flex items-center gap-1 bg-pink-50/50 px-2 py-1 rounded-xl border border-pink-200"></div>
+                        <input type="text" id="suppPreviewSearchInput" oninput="onSuppPreviewSearchInput(this.value)" placeholder="搜尋 ID、暱稱或條件..." class="h-8 w-44 sm:w-52 px-2.5 admin-input-box text-xs text-[#8f4452]">
+                    </div>
+                </div>
+
+                <!-- 補跑名單預覽表格 -->
+                <div class="overflow-x-auto bg-white rounded-2xl border border-pink-200 p-2">
+                    <table class="admin-grid-table text-left text-xs">
+                        <thead>
+                            <tr class="text-xs">
+                                <th class="p-3 w-32">預計結果</th>
+                                <th class="p-3 w-48">待補跑玩家</th>
+                                <th class="p-3 w-60">報名條件設定</th>
+                                <th class="p-3">預計配對對象 / 無法配對原因</th>
+                                <th class="p-3 w-28">角色型別</th>
+                            </tr>
+                        </thead>
+                        <tbody id="suppPreviewTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="p-4 md:px-6 border-t border-pink-100 bg-rose-50/40 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <span class="text-xs text-gray-500">💡 已配對成功的玩家不會受到任何影響，僅針對上述未配對名單進行 1 對 1 補跑。</span>
+                <div class="flex items-center gap-2.5 ml-auto">
+                    <button type="button" onclick="closeSupplementaryMatchPreviewModal()" class="px-5 py-2.5 rounded-xl bg-white border border-gray-300 text-xs font-bold text-gray-600 hover:bg-gray-50 transition">
+                        取消
+                    </button>
+                    <button type="button" id="confirmRunSuppMatchBtn" onclick="confirmAndRunSupplementaryMatch()" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs md:text-sm font-bold shadow-md hover:opacity-95 transition">
+                        💘 確認執行補跑名單
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 前後台共用核心層 -->
     <script src="shared/schedule.js?v=20261118aa"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261118ag"></script>
+    <script src="shared/cloud-store.js?v=20261118al"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261118ae"></script>
-    <script src="backend/matching.js?v=20261118ah"></script>
-    <script src="backend/activity-stats.js?v=20261118ai"></script>
+    <script src="backend/state.js?v=20261118al"></script>
+    <script src="backend/matching.js?v=20261118am"></script>
+    <script src="backend/activity-stats.js?v=20261118am"></script>
     <script src="backend/custom-activities.js?v=20261118aa"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261118o"></script>

@@ -1010,6 +1010,11 @@ function getRegularSessionEndTs(sessionStr) {
     return targetDate.getTime();
 }
 
+function isRegularSessionRegistrationClosed(sessionStr, nowTs = Date.now()) {
+    const endTs = getRegularSessionEndTs(sessionStr);
+    return endTs > 0 && Number(nowTs) >= endTs;
+}
+
 function getCustomActivityClearRegsTs(act) {
     if (!act || typeof act !== 'object') return 0;
     const endTs = parseLocalDateTimeTs(act.endTime || act.endTimeTs);

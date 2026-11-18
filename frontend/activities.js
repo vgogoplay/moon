@@ -327,7 +327,65 @@ function handleApplyClick() {
         return;
     }
 
+    const schedCheck = getBatchScheduleInfo(getCurrentBatchNumber());
+    const nowCheckTs = Date.now();
+    const isWedClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(schedCheck.wedLabel, nowCheckTs);
+    const isSatClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(schedCheck.satLabel, nowCheckTs);
+    if (isWedClosed && isSatClosed) {
+        showMiniNotice('⏳ 本屆場次已截止報名', `${schedCheck.batchPrefix}（${schedCheck.wedLabel}、${schedCheck.satLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
+        return;
+    }
+
     openRegisterModal();
+}
+
+function renderRegisterModalSessionOptions(nowTs = Date.now()) {
+    const listEl = document.getElementById('sessionOptionsList');
+    if (!listEl) return;
+
+    const sched = getBatchScheduleInfo(getCurrentBatchNumber());
+    const wedLabel = sched.wedLabel;
+    const satLabel = sched.satLabel;
+    const savedSessions = Array.isArray(appState.registeredSessions) ? appState.registeredSessions : [];
+
+    listEl.innerHTML = [wedLabel, satLabel].map(opt => {
+        const isClosed = (typeof isRegularSessionRegistrationClosed === 'function')
+            ? isRegularSessionRegistrationClosed(opt, nowTs)
+            : false;
+        const wasRegistered = savedSessions.some(s => isSameSession(s, opt));
+        const checked = !isClosed && wasRegistered;
+
+        if (isClosed) {
+            return `
+                <label title="此場次已於當日 20:00 截止報名，無法再勾選" class="flex items-center gap-2.5 p-3 rounded-2xl border border-gray-200 bg-gray-100/90 text-gray-400 opacity-80 cursor-not-allowed select-none">
+                    <input type="checkbox" name="regSessionCheck" value="${opt}" disabled class="w-4 h-4 accent-gray-400 cursor-not-allowed">
+                    <div class="min-w-0">
+                        <div class="font-bold text-xs text-gray-400 line-through">${opt}</div>
+                        <div class="text-[10px] text-rose-500 font-bold mt-0.5">🚫 已截止報名（20:00 已過）</div>
+                    </div>
+                </label>
+            `;
+        }
+
+        return `
+            <label class="flex items-center gap-2.5 p-3 rounded-2xl border border-pink-200 bg-pink-50/40 cursor-pointer hover:bg-pink-50 transition">
+                <input type="checkbox" name="regSessionCheck" value="${opt}" ${checked ? 'checked' : ''} onchange="onRegSessionCheckChange()" class="accent-[#c96a7b] w-4 h-4">
+                <div class="min-w-0">
+                    <div class="font-bold text-xs text-[#8f4452]">${opt}</div>
+                    <div class="text-[10px] text-emerald-700 font-semibold mt-0.5">🟢 開放報名中（當日 20:00 截止）</div>
+                </div>
+            </label>
+        `;
+    }).join('');
+
+    onRegSessionCheckChange();
+    const activeSavedOpenSessions = savedSessions.filter(s =>
+        !(typeof isRegularSessionRegistrationClosed === 'function' && isRegularSessionRegistrationClosed(s, nowTs))
+    );
+    const cancelRegBtn = document.getElementById('cancelRegularRegBtn');
+    if (cancelRegBtn) {
+        cancelRegBtn.classList.toggle('hidden', activeSavedOpenSessions.length === 0);
+    }
 }
 
 function openRegisterModal() {
@@ -337,26 +395,16 @@ function openRegisterModal() {
     }
 
     const sched = getBatchScheduleInfo(getCurrentBatchNumber());
-    const wedLabel = sched.wedLabel;
-    const satLabel = sched.satLabel;
-    const savedSessions = Array.isArray(appState.registeredSessions) ? appState.registeredSessions : [];
-
-    document.getElementById('sessionOptionsList').innerHTML = [wedLabel, satLabel].map(opt => {
-        const checked = savedSessions.some(s => isSameSession(s, opt));
-        return `
-            <label class="flex items-center gap-2.5 p-3 rounded-2xl border border-pink-200 bg-pink-50/40 cursor-pointer hover:bg-pink-50">
-                <input type="checkbox" name="regSessionCheck" value="${opt}" ${checked ? 'checked' : ''} onchange="onRegSessionCheckChange()" class="accent-[#c96a7b] w-4 h-4">
-                <div>
-                    <div class="font-bold text-xs text-[#8f4452]">${opt}</div>
-                </div>
-            </label>
-        `;
-    }).join('');
-    onRegSessionCheckChange();
-    const cancelRegBtn = document.getElementById('cancelRegularRegBtn');
-    if (cancelRegBtn) {
-        cancelRegBtn.classList.toggle('hidden', savedSessions.length === 0);
+    const nowTs = Date.now();
+    const isWedClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.wedLabel, nowTs);
+    const isSatClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.satLabel, nowTs);
+    if (isWedClosed && isSatClosed) {
+        closeRegisterModal();
+        showMiniNotice('⏳ 本屆場次已截止報名', `${sched.batchPrefix}（${sched.wedLabel}、${sched.satLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
+        return;
     }
+
+    renderRegisterModalSessionOptions(nowTs);
 
     const savedCriteria = appState.exactMatchCriteria || {};
     const savedMustKeys = Array.isArray(appState.mustMatchKeys) ? appState.mustMatchKeys : [];
@@ -566,7 +614,7 @@ function collectDualCriteriaFromDom(scope) {
 }
 
 window.onRegSessionCheckChange = function() {
-    const checkedSessions = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:checked')).map(cb => cb.value);
+    const checkedSessions = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:not(:disabled):checked')).map(cb => cb.value);
     const submitBtn = document.querySelector('#registerModal button[onclick="confirmRegistration()"]');
     if (submitBtn) {
         if (checkedSessions.length === 0) {
@@ -621,6 +669,7 @@ function formatCriteriaSummaryText(criteria, mustMatchKeys = []) {
 }
 
 async function cancelRegularRegistration() {
+    const nowTs = Date.now();
     const prevCancelledSessions = Array.isArray(appState.registeredSessions) ? [...appState.registeredSessions] : [];
     document.querySelectorAll('input[name="regSessionCheck"]').forEach(cb => {
         cb.checked = false;
@@ -630,7 +679,12 @@ async function cancelRegularRegistration() {
     appState.exactMatchCriteria = {};
     appState.mustMatchKeys = [];
     if (appState.playerId && typeof ActivityRegArchive !== 'undefined') {
-        prevCancelledSessions.forEach(s => ActivityRegArchive.removeRegular(s, appState.playerId));
+        prevCancelledSessions.forEach(s => {
+            const wasAlreadyClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(s, nowTs);
+            if (!wasAlreadyClosed) {
+                ActivityRegArchive.removeRegular(s, appState.playerId);
+            }
+        });
     }
 
     closeRegisterModal();
@@ -651,7 +705,20 @@ async function confirmRegistration() {
         return;
     }
 
-    const selectedSessions = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:checked')).map(cb => cb.value);
+    const nowSubmitTs = Date.now();
+    const rawCheckedSessions = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:not(:disabled):checked')).map(cb => cb.value);
+    const blockedClosedSessions = rawCheckedSessions.filter(s =>
+        (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(s, nowSubmitTs)
+    );
+    const selectedSessions = rawCheckedSessions.filter(s =>
+        !(typeof isRegularSessionRegistrationClosed === 'function' && isRegularSessionRegistrationClosed(s, nowSubmitTs))
+    );
+    if (blockedClosedSessions.length > 0 && selectedSessions.length === 0) {
+        renderRegisterModalSessionOptions(nowSubmitTs);
+        showMiniNotice('🚫 該場次已截止報名', `【${blockedClosedSessions.join('、')}】已超過 20:00 報名截止時間，請改選其他尚未截止的場次！`);
+        return;
+    }
+
     const { criteria, mustMatchKeys } = collectDualCriteriaFromDom('regular');
 
     const prevRegisteredList = Array.isArray(appState.registeredSessions) ? [...appState.registeredSessions] : [];
@@ -663,8 +730,9 @@ async function confirmRegistration() {
     appState.mustMatchKeys = finalMustKeys;
     if (appState.playerId && typeof ActivityRegArchive !== 'undefined') {
         prevRegisteredList.forEach(oldS => {
+            const wasAlreadyClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(oldS, nowSubmitTs);
             const stillSelected = selectedSessions.some(ns => isSameSession(ns, oldS));
-            if (!stillSelected) {
+            if (!stillSelected && !wasAlreadyClosed) {
                 ActivityRegArchive.removeRegular(oldS, appState.playerId);
             }
         });
@@ -1134,9 +1202,19 @@ function refreshAllUI() {
     const isBothGenderFullForNew = !appState.playerId && quota.bothFull;
     const batchNum = sysConfig.currentBatch;
     const sched = getBatchScheduleInfo(batchNum);
+    const nowRefreshTs = Date.now();
+    const isWedClosedNow = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.wedLabel, nowRefreshTs);
+    const isSatClosedNow = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.satLabel, nowRefreshTs);
+    const isAllBatchSessionsClosed = isWedClosedNow && isSatClosedNow;
+    const openBatchSessionLabels = [
+        !isWedClosedNow ? sched.wedLabel : '',
+        !isSatClosedNow ? sched.satLabel : ''
+    ].filter(Boolean);
+
     const normalizedAllSessions = Array.from(new Set((appState.registeredSessions || []).map(s => normalizeSessionLabel(s)).filter(Boolean)));
     const currentBatchSessions = normalizedAllSessions.filter(s =>
-        sched.sessions.some(target => isSameSession(s, target))
+        sched.sessions.some(target => isSameSession(s, target)) &&
+        !(typeof isRegularSessionRegistrationClosed === 'function' && isRegularSessionRegistrationClosed(s, nowRefreshTs))
     );
 
     const periodBadgeEl = document.getElementById('currentPeriodBadge');
@@ -1197,17 +1275,27 @@ function refreshAllUI() {
         } else {
             alertBox.innerHTML = `有報名選擇場次的玩家才會進入配對池，未報名不會配對！`;
         }
+    } else if (isAllBatchSessionsClosed) {
+        badge.textContent = `⏳ ${sched.batchPrefix}已截止報名`;
+        applyBtn.disabled = true;
+        applyBtn.textContent = `⏳ ${sched.batchPrefix}已截止報名（請靜待下期開放）`;
+        alertBox.innerHTML = `<span class="text-gray-500 font-bold">${sched.wedLabel} 與 ${sched.satLabel} 皆已過 20:00 截止報名</span>，請靜待下一期開放報名！`;
     } else if (currentBatchSessions.length > 0) {
         const criteriaSummary = formatCriteriaSummaryText(appState.exactMatchCriteria || {}, appState.mustMatchKeys || []);
+        const closedHint = isWedClosedNow ? `<br><span class="text-[11px] text-gray-400">（${sched.wedLabel} 已於 20:00 截止報名）</span>` : '';
         badge.textContent = `⏳ 已報名 (${currentBatchSessions.length}場)`;
         applyBtn.disabled = false;
         applyBtn.textContent = `✅ 已報名【${currentBatchSessions.join('、')}】（點此修改）`;
-        alertBox.innerHTML = `你已成功報名 <strong>${currentBatchSessions.join('、')}</strong>！<br>配對條件：<strong>${criteriaSummary}</strong>。`;
+        alertBox.innerHTML = `你已成功報名 <strong>${currentBatchSessions.join('、')}</strong>！<br>配對條件：<strong>${criteriaSummary}</strong>。${closedHint}`;
     } else {
         badge.textContent = `✨ ${sched.batchPrefix}開始報名中`;
         applyBtn.disabled = false;
         applyBtn.textContent = `🌸 開始報名（${sched.batchPrefix}）`;
-        alertBox.innerHTML = `目前開放報名 <strong>${sched.wedLabel}</strong> 或 <strong>${sched.satLabel}</strong>（可複選），有報名才會參與配對！`;
+        if (isWedClosedNow) {
+            alertBox.innerHTML = `目前開放報名 <strong>${sched.satLabel}</strong>（<span class="text-gray-400 line-through">${sched.wedLabel}</span> 已於 20:00 截止報名），有報名才會參與配對！`;
+        } else {
+            alertBox.innerHTML = `目前開放報名 <strong>${openBatchSessionLabels.join('</strong> 或 <strong>')}</strong>（可複選），有報名才會參與配對！`;
+        }
     }
 
     // 渲染第 2 種活動（後台創建並開啟的專屬活動按鈕，僅在後台開啟時顯示）
