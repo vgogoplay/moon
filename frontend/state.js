@@ -9,6 +9,9 @@ let lastCustomActivityPhaseSnapshot = '';
 let lastGenderQuotaSnapshot = JSON.stringify(Store.getGenderQuotaStatus());
 let lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
 let lastReportsFrontendSnapshot = localStorage.getItem(REPORTS_KEY) || '[]';
+let lastFateWallFrontendSnapshot = '';
+let lastWishWallFrontendSnapshot = '';
+let lastReconciledUsersRaw = '';
 let lastUsersStatsSnapshot = '';
 let lastActiveBatch = getCurrentBatchNumber();
 let lastRenderedChatSignature = '';
@@ -96,10 +99,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateMailboxBadge();
     if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
 
+    const FRONTEND_MAIN_SYNC_INTERVAL_MS = 15000;
+    // 倒數計時維持每秒更新（分頁隱藏時暫停省電）；主同步改為事件驅動＋15 秒低頻時間檢查
     setInterval(() => {
-        updateNextMatchCountdown();
-        syncFromSharedStorage();
+        if (!document.hidden) {
+            updateNextMatchCountdown();
+        }
     }, 1000);
+    setInterval(() => {
+        if (!document.hidden) {
+            syncFromSharedStorage();
+        }
+    }, FRONTEND_MAIN_SYNC_INTERVAL_MS);
+    document.addEventListener('visibilitychange', () => {
+        updateSakuraAnimationState();
+        if (!document.hidden) {
+            updateNextMatchCountdown();
+            syncFromSharedStorage();
+        }
+    });
     updateNextMatchCountdown();
 
     window.addEventListener('storage', (e) => {
@@ -147,10 +165,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function syncFromSharedStorage() {
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-    if (typeof CloudSync !== 'undefined' && typeof CloudSync.reconcileSymmetricMatches === 'function') {
-        if (CloudSync.reconcileSymmetricMatches(users, true)) {
-            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    const rawUsersStr = localStorage.getItem(USERS_KEY) || '[]';
+    const users = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function')
+        ? Store.getUsersArray()
+        : JSON.parse(rawUsersStr);
+    if (rawUsersStr !== lastReconciledUsersRaw) {
+        lastReconciledUsersRaw = rawUsersStr;
+        if (typeof CloudSync !== 'undefined' && typeof CloudSync.reconcileSymmetricMatches === 'function') {
+            if (CloudSync.reconcileSymmetricMatches(users, false)) {
+                localStorage.setItem(USERS_KEY, JSON.stringify(users));
+                if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_KEY);
+            }
         }
     }
     let stateChanged = false;
@@ -254,7 +279,11 @@ function syncFromSharedStorage() {
     }
 
     if (appState.playerId) {
-        const me = users.find(u => String(u.id) === String(appState.playerId));
+        const userById = new Map();
+        users.forEach(u => {
+            if (u && u.id) userById.set(String(u.id), u);
+        });
+        const me = userById.get(String(appState.playerId));
 
         // 2. 若雲端已初始化且玩家資料已被後台管理員整筆刪除，同步重置前台本地狀態
         const isDeletedByAdmin = (typeof CloudSync !== 'undefined' && typeof CloudSync.isUserDeleted === 'function' && CloudSync.isUserDeleted(appState.playerId));
@@ -351,8 +380,18 @@ function syncFromSharedStorage() {
             const localExactCriteria = (appState.exactMatchCriteria && typeof appState.exactMatchCriteria === 'object' && !Array.isArray(appState.exactMatchCriteria))
                 ? appState.exactMatchCriteria
                 : {};
-            if (JSON.stringify(cloudExactCriteria) !== JSON.stringify(localExactCriteria)) {
+            const cloudMustKeys = (typeof normalizeMustMatchKeysList === 'function')
+                ? normalizeMustMatchKeysList(me.mustMatchKeys, cloudExactCriteria)
+                : (Array.isArray(me.mustMatchKeys) ? me.mustMatchKeys.slice(0, 2) : []);
+            const localMustKeys = (typeof normalizeMustMatchKeysList === 'function')
+                ? normalizeMustMatchKeysList(appState.mustMatchKeys, localExactCriteria)
+                : (Array.isArray(appState.mustMatchKeys) ? appState.mustMatchKeys.slice(0, 2) : []);
+            if (
+                JSON.stringify(cloudExactCriteria) !== JSON.stringify(localExactCriteria) ||
+                JSON.stringify(cloudMustKeys) !== JSON.stringify(localMustKeys)
+            ) {
                 appState.exactMatchCriteria = { ...cloudExactCriteria };
+                appState.mustMatchKeys = [...cloudMustKeys];
                 stateChanged = true;
             }
 
@@ -390,7 +429,7 @@ function syncFromSharedStorage() {
         }
 
         historyList.forEach(item => {
-            const partner = users.find(u => String(u.id) === String(item.partnerId));
+            const partner = userById.get(String(item.partnerId));
             if (partner && !appState.friends.some(f => String(f.id) === String(partner.id))) {
                 const now = item.matchedAt || Date.now();
                 const willReachMulti = appState.friends.length >= 1;
@@ -456,7 +495,7 @@ function syncFromSharedStorage() {
         // 5. 同步所有真實配對好友的最新資料、延長後的 matchedAt、雙方繼續配對狀態與共享聊天紀錄
         appState.friends.forEach(f => {
             if (String(f.id).startsWith('MOCK_FRIEND_')) return;
-            const latestPartner = users.find(u => String(u.id) === String(f.id));
+            const latestPartner = userById.get(String(f.id));
             if (latestPartner) {
                 f.nickname = latestPartner.nickname || f.nickname;
                 f.profile = { ...latestPartner };
@@ -530,20 +569,29 @@ function syncFromSharedStorage() {
             Store.save(appState, false, true);
             if (typeof updateFriendUnreadDot === 'function') updateFriendUnreadDot();
         }
-        if (typeof renderHomeFateWall === 'function') {
-            renderHomeFateWall();
+        const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
+        const curFateWallRaw = localStorage.getItem(fwKey) || '[]';
+        if (curFateWallRaw !== lastFateWallFrontendSnapshot) {
+            lastFateWallFrontendSnapshot = curFateWallRaw;
+            if (typeof renderHomeFateWall === 'function') {
+                renderHomeFateWall();
+            }
         }
-        if (typeof updateWishNavBadge === 'function') {
-            updateWishNavBadge();
+        const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+        const curWishWallRaw = localStorage.getItem(wwKey) || '[]';
+        if (curWishWallRaw !== lastWishWallFrontendSnapshot) {
+            lastWishWallFrontendSnapshot = curWishWallRaw;
+            if (typeof updateWishNavBadge === 'function') {
+                updateWishNavBadge();
+            }
+            if (!document.getElementById('tab-wishes')?.classList.contains('hidden') && typeof renderWishWallTab === 'function') {
+                renderWishWallTab();
+            }
         }
-        if (!document.getElementById('tab-wishes')?.classList.contains('hidden') && typeof renderWishWallTab === 'function') {
-            renderWishWallTab();
+        if (typeof renderHomeStatsCharts === 'function') {
+            renderHomeStatsCharts(false);
         }
-        const curUsersRaw = localStorage.getItem(USERS_KEY) || '[]';
-        if (curUsersRaw !== lastUsersStatsSnapshot) {
-            renderHomeStatsCharts();
-        }
-        if (!document.getElementById('tab-friends').classList.contains('hidden')) {
+        if (chatsChanged && !document.getElementById('tab-friends').classList.contains('hidden')) {
             renderFriendsSection();
         }
         const curSched = getBatchScheduleInfo(getCurrentBatchNumber());
@@ -719,6 +767,15 @@ function renderRandomMoment() {
     document.getElementById('momentText').textContent = item.text;
 }
 
+function updateSakuraAnimationState(activeTabName = null) {
+    const container = document.getElementById('sakuraContainer');
+    if (!container) return;
+    const isHomeActive = activeTabName
+        ? activeTabName === 'home'
+        : !document.getElementById('tab-home')?.classList.contains('hidden');
+    container.classList.toggle('sakura-paused', Boolean(document.hidden || !isHomeActive));
+}
+
 function switchTab(tabName) {
     document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
     document.getElementById(`tab-${tabName}`).classList.remove('hidden');
@@ -726,7 +783,12 @@ function switchTab(tabName) {
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tabBtn === tabName);
     });
+    updateSakuraAnimationState(tabName);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (tabName === 'home' && typeof renderHomeStatsCharts === 'function') {
+        renderHomeStatsCharts(true);
+    }
 
     if (tabName === 'wishes' && typeof renderWishWallTab === 'function') {
         renderWishWallTab(true);

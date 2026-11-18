@@ -1,5 +1,20 @@
 /* backend/roster.js - 後台玩家資料庫列表、分頁、禁用控制、編輯玩家資料與問題回報 */
 
+let rosterSearchDebounceTimer = null;
+window.onRosterSearchInput = function(val) {
+    rosterSearchKeyword = String(val || '').trim();
+    const clearBtn = document.getElementById('clearRosterSearchBtn');
+    if (clearBtn) {
+        clearBtn.classList.toggle('hidden', rosterSearchKeyword === '');
+    }
+    currentRosterPage = 1;
+    if (rosterSearchDebounceTimer) clearTimeout(rosterSearchDebounceTimer);
+    rosterSearchDebounceTimer = setTimeout(() => {
+        rosterSearchDebounceTimer = null;
+        renderAdminAll();
+    }, 180);
+};
+
 function clearPlayerRegularSession(playerId, sessionLabel) {
     const users = getUsers();
     const target = users.find(u => String(u.id) === String(playerId));
@@ -15,6 +30,7 @@ function clearPlayerRegularSession(playerId, sessionLabel) {
     delete target.registeredSession;
     if (target.registeredSessions.length === 0) {
         target.exactMatchCriteria = {};
+        target.mustMatchKeys = [];
     }
 
     if (typeof ActivityRegArchive !== 'undefined') {
@@ -24,7 +40,8 @@ function clearPlayerRegularSession(playerId, sessionLabel) {
         saveSingleUserPatch(users, target, {
             registeredSessions: target.registeredSessions,
             registeredSession: null,
-            exactMatchCriteria: target.exactMatchCriteria || {}
+            exactMatchCriteria: target.exactMatchCriteria || {},
+            mustMatchKeys: target.mustMatchKeys || []
         });
     } else {
         saveUsers(users);
@@ -572,17 +589,34 @@ function toggleReportStatus(reportId) {
     }
 }
 
-function formatCriteriaHtml(criteria) {
+function formatCriteriaHtml(criteria, mustMatchKeys = []) {
     const cKeys = Object.keys(criteria || {}).filter(k => !(k === 'city' && criteria.region));
     if (cKeys.length === 0) {
         return '<span class="text-gray-400">未選（不限制隨機配對）</span>';
     }
-    return cKeys.map(k => {
+    const mustSet = new Set(
+        (Array.isArray(mustMatchKeys) ? mustMatchKeys : [])
+            .map(String)
+            .filter(k => cKeys.includes(k))
+            .slice(0, 2)
+    );
+    const renderOne = (k) => {
         if (k === 'region') {
             return `當前居住地區：<strong>${criteria.region}</strong>`;
         }
         return `${FIELD_LABELS[k] || k}：<strong>${criteria[k]}</strong>`;
-    }).join(' <span class="text-pink-400">OR</span> ');
+    };
+    const mustList = cKeys.filter(k => mustSet.has(k)).map(renderOne);
+    const orList = cKeys.filter(k => !mustSet.has(k)).map(renderOne);
+
+    const blocks = [];
+    if (mustList.length > 0) {
+        blocks.push(`<div class="leading-relaxed"><span class="inline-block px-1.5 py-0.2 rounded bg-rose-100 border border-rose-300 text-[#8f4452] text-[10px] font-bold mr-1">🔒 必須吻合</span>${mustList.join(' <span class="text-rose-500 font-bold">AND</span> ')}</div>`);
+    }
+    if (orList.length > 0) {
+        blocks.push(`<div class="leading-relaxed"><span class="inline-block px-1.5 py-0.2 rounded bg-pink-50 border border-pink-200 text-[#c96a7b] text-[10px] font-bold mr-1">✨ 任一符合</span>${orList.join(' <span class="text-pink-400">OR</span> ')}</div>`);
+    }
+    return blocks.join('');
 }
 
 let lastMemberRenderSig = '';
@@ -607,7 +641,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
         rules: forceRulesList,
         users: users.map(u => [
             u.id, u.nickname, u.gender, u.age, u.ig, u.region, u.city,
-            u.registeredSessions, u.customActivityRegs, u.exactMatchCriteria,
+            u.registeredSessions, u.customActivityRegs, u.exactMatchCriteria, u.mustMatchKeys,
             u.isMatchBanned, u.isChatBanned, u.isWarned,
             u.matchedHistory, u.matchedWithId, u.matchedWithName
         ])
@@ -847,7 +881,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
     } else {
         pBody.innerHTML = pageUsers.map(u => {
             const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);
-            const criteriaHtml = formatCriteriaHtml(u.exactMatchCriteria || {});
+            const criteriaHtml = formatCriteriaHtml(u.exactMatchCriteria || {}, u.mustMatchKeys || []);
             const displayRegion = u.region || inferRegionByCity(u.city);
             const locationLabel = displayRegion ? `${displayRegion}・${u.city || '-'}` : (u.city || '-');
             const displayMbtiGrp = u.mbtiGroup || inferMbtiGroup(u.mbti);

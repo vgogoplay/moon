@@ -22,10 +22,46 @@ const UNMATCHED_PAIRS_SYNC_KEY = 'yuelao_unmatched_pairs_sync';
 const UNMATCHED_PAIRS_CLOUD_NODE = 'yuelao_unmatched_pairs';
 const MATCH_LOGS_KEY = 'yuelao_match_logs';
 const MATCH_LOGS_MAX_COUNT = 30;
+const PLAYER_OP_LOGS_KEY = 'yuelao_player_op_logs';
+const PLAYER_OP_LOGS_MAX_COUNT = 30;
 const FATE_WALL_KEY = 'yuelao_fate_wall';
 const WISH_WALL_KEY = 'yuelao_wish_wall';
 
 const FIREBASE_DB_URL = 'https://moon-8b627-default-rtdb.asia-southeast1.firebasedatabase.app';
+
+// ==================== ⚡ 本地 JSON 解析記憶體快取（避免重複 JSON.parse 造成 CPU 與 GC 負擔） ====================
+const LocalJsonCache = {
+    entries: Object.create(null),
+    get(key, fallbackFactory) {
+        let raw = null;
+        try {
+            raw = localStorage.getItem(key);
+        } catch (e) {}
+        if (raw === null || raw === '') {
+            delete this.entries[key];
+            return typeof fallbackFactory === 'function' ? fallbackFactory() : fallbackFactory;
+        }
+        const cached = this.entries[key];
+        if (cached && cached.raw === raw) {
+            return cached.val;
+        }
+        try {
+            const parsed = JSON.parse(raw);
+            this.entries[key] = { raw, val: parsed };
+            return parsed;
+        } catch (e) {
+            delete this.entries[key];
+            return typeof fallbackFactory === 'function' ? fallbackFactory() : fallbackFactory;
+        }
+    },
+    invalidate(key) {
+        if (!key) {
+            this.entries = Object.create(null);
+        } else {
+            delete this.entries[key];
+        }
+    }
+};
 
 // ==================== ☁️ Firebase Realtime Database 跨裝置即時雲端同步中樞 ====================
 const CloudSync = {
@@ -43,6 +79,30 @@ const CloudSync = {
     pendingUsers: {},
     deletedUsers: {},
     unmatchedPairs: {},
+    streamFlushTimer: null,
+
+    isBackendContext() {
+        if (typeof document === 'undefined' || !document.body) return false;
+        return Boolean(document.body.dataset && document.body.dataset.adminPage);
+    },
+
+    getActiveFrontendPlayerId() {
+        if (this.isBackendContext()) return '';
+        try {
+            if (typeof appState !== 'undefined' && appState && appState.playerId) {
+                return String(appState.playerId).trim();
+            }
+        } catch (e) {}
+        try {
+            const tabPid = sessionStorage.getItem(TAB_PLAYER_ID_KEY);
+            if (tabPid) return String(tabPid).trim();
+        } catch (e) {}
+        try {
+            const parsed = LocalJsonCache.get(STORAGE_KEY, null);
+            if (parsed && parsed.playerId) return String(parsed.playerId).trim();
+        } catch (e) {}
+        return '';
+    },
 
     loadSharedPendingUsers() {
         const now = Date.now();
@@ -327,6 +387,64 @@ const CloudSync = {
         return entry;
     },
 
+    recordPlayerOpLog(playerId, playerName = '', actionType = '玩家操作', detailText = '', opTs = Date.now()) {
+        const pid = String(playerId || '').trim();
+        if (!pid) return null;
+        const tsNum = Number(opTs) || Date.now();
+        const d = new Date(tsNum);
+        const createdAtStr = Number.isNaN(d.getTime())
+            ? new Date().toLocaleString('zh-TW', { hour12: false })
+            : d.toLocaleString('zh-TW', { hour12: false });
+
+        const entry = {
+            id: 'PO_' + tsNum + '_' + Math.random().toString(36).slice(2, 6),
+            playerId: pid,
+            playerName: String(playerName || `玩家_${pid}`).trim(),
+            actionType: String(actionType || '玩家操作').trim(),
+            detail: String(detailText || '').trim(),
+            ts: tsNum,
+            createdAt: createdAtStr
+        };
+
+        let logs = [];
+        try {
+            const raw = JSON.parse(localStorage.getItem(PLAYER_OP_LOGS_KEY) || '[]');
+            if (Array.isArray(raw)) logs = raw;
+        } catch (e) {}
+
+        logs.unshift(entry);
+        logs.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+        const removedLogs = logs.length > PLAYER_OP_LOGS_MAX_COUNT ? logs.slice(PLAYER_OP_LOGS_MAX_COUNT) : [];
+        const keptLogs = logs.slice(0, PLAYER_OP_LOGS_MAX_COUNT);
+
+        try {
+            localStorage.setItem(PLAYER_OP_LOGS_KEY, JSON.stringify(keptLogs));
+            if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(PLAYER_OP_LOGS_KEY);
+        } catch (e) {}
+
+        if (this.tree && typeof this.tree === 'object') {
+            if (!this.tree[PLAYER_OP_LOGS_KEY] || typeof this.tree[PLAYER_OP_LOGS_KEY] !== 'object') {
+                this.tree[PLAYER_OP_LOGS_KEY] = {};
+            }
+            this.tree[PLAYER_OP_LOGS_KEY][entry.id] = { ...entry };
+            removedLogs.forEach(oldItem => {
+                if (oldItem && oldItem.id && Object.prototype.hasOwnProperty.call(this.tree[PLAYER_OP_LOGS_KEY], oldItem.id)) {
+                    delete this.tree[PLAYER_OP_LOGS_KEY][oldItem.id];
+                }
+            });
+        }
+
+        if (this.initialized) {
+            this.putNode(`${PLAYER_OP_LOGS_KEY}/${entry.id}`, entry);
+            removedLogs.forEach(oldItem => {
+                if (oldItem && oldItem.id) {
+                    this.deleteNode(`${PLAYER_OP_LOGS_KEY}/${oldItem.id}`);
+                }
+            });
+        }
+        return entry;
+    },
+
     mapToArray(raw) {
         if (!raw) return [];
         if (Array.isArray(raw)) return raw.filter(item => item && typeof item === 'object');
@@ -562,7 +680,15 @@ const CloudSync = {
     chatsMapToLocal(raw) {
         const result = {};
         if (!raw || typeof raw !== 'object') return result;
+        const isBackend = this.isBackendContext();
+        const activePid = isBackend ? '' : this.getActiveFrontendPlayerId();
+        // 前台未登入任何玩家 ID 時無需快取全站所有配對聊天室，避免佔用 localStorage 空間
+        if (!isBackend && !activePid) return result;
+
         Object.keys(raw).forEach(pairKey => {
+            if (!isBackend && !String(pairKey).split('__').includes(activePid)) {
+                return;
+            }
             const threadRaw = raw[pairKey];
             const msgs = this.mapToArray(threadRaw);
             msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
@@ -575,6 +701,7 @@ const CloudSync = {
     writeLocalIfChanged(key, nextStr) {
         if (localStorage.getItem(key) !== nextStr) {
             localStorage.setItem(key, nextStr);
+            LocalJsonCache.invalidate(key);
         }
     },
 
@@ -618,6 +745,9 @@ const CloudSync = {
             cleanUser.exactMatchCriteria = (cleanUser.exactMatchCriteria && typeof cleanUser.exactMatchCriteria === 'object' && !Array.isArray(cleanUser.exactMatchCriteria))
                 ? cleanUser.exactMatchCriteria
                 : {};
+            cleanUser.mustMatchKeys = (typeof normalizeMustMatchKeysList === 'function')
+                ? normalizeMustMatchKeysList(cleanUser.mustMatchKeys, cleanUser.exactMatchCriteria)
+                : this.normalizeStringArray(cleanUser.mustMatchKeys).filter(k => Object.prototype.hasOwnProperty.call(cleanUser.exactMatchCriteria, k)).slice(0, 2);
             cleanUser.customActivityRegs = (cleanUser.customActivityRegs && typeof cleanUser.customActivityRegs === 'object' && !Array.isArray(cleanUser.customActivityRegs))
                 ? cleanUser.customActivityRegs
                 : {};
@@ -647,7 +777,7 @@ const CloudSync = {
                 });
             }
         }
-        this.reconcileSymmetricMatches(usersArr, this.initialized);
+        this.reconcileSymmetricMatches(usersArr, this.initialized && this.isBackendContext());
         this.writeLocalIfChanged(USERS_KEY, JSON.stringify(usersArr));
         usersArr.forEach(u => {
             if (u && u.id) {
@@ -712,6 +842,11 @@ const CloudSync = {
             const matchLogsArr = this.mapToArray(t[MATCH_LOGS_KEY]);
             matchLogsArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
             this.writeLocalIfChanged(MATCH_LOGS_KEY, JSON.stringify(matchLogsArr.slice(0, MATCH_LOGS_MAX_COUNT)));
+        }
+        if (t[PLAYER_OP_LOGS_KEY] !== undefined) {
+            const playerOpArr = this.mapToArray(t[PLAYER_OP_LOGS_KEY]);
+            playerOpArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+            this.writeLocalIfChanged(PLAYER_OP_LOGS_KEY, JSON.stringify(playerOpArr.slice(0, PLAYER_OP_LOGS_MAX_COUNT)));
         }
 
         // 8. ID 計數器
@@ -861,6 +996,51 @@ const CloudSync = {
         }
     },
 
+    isRelevantStreamEvent(eventType, payload) {
+        if (this.isBackendContext()) return true;
+        if (!payload || !payload.path) return true;
+        const cleanPath = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
+        if (!cleanPath) return true;
+        const parts = cleanPath.split('/');
+        const topNode = parts[0];
+
+        // 後台專用日誌與內部排程節點不影響前台畫面，略過重繪
+        if (
+            topNode === 'yuelao_admin_login_logs' ||
+            topNode === PLAYER_OP_LOGS_KEY ||
+            topNode === MATCH_LOGS_KEY ||
+            topNode === REG_HISTORY_KEY ||
+            topNode === FORCE_KEY ||
+            topNode === AUTO_RUN_LOG_KEY
+        ) {
+            return false;
+        }
+
+        // 前台只關注與自己有關的聊天室事件，忽略其他 99 位玩家的私密對話推播
+        if (topNode === CHATS_KEY && parts.length >= 2) {
+            const activePid = this.getActiveFrontendPlayerId();
+            if (!activePid) return false;
+            return String(parts[1]).split('__').includes(activePid);
+        }
+
+        return true;
+    },
+
+    scheduleStreamFlush(delayMs = 180) {
+        if (this.streamFlushTimer) return;
+        this.streamFlushTimer = setTimeout(() => {
+            this.streamFlushTimer = null;
+            if (this.inFlightWrites > 0) {
+                this.scheduleStreamFlush(120);
+                return;
+            }
+            this.applyTreeToLocalStorage();
+            if (typeof this.onUpdateCallback === 'function') {
+                this.onUpdateCallback();
+            }
+        }, delayMs);
+    },
+
     startRealtimeStream() {
         if (typeof EventSource === 'undefined') return;
         if (this.eventSource) {
@@ -882,10 +1062,12 @@ const CloudSync = {
                     } else {
                         this.applyStreamPatch(payload.path, payload.data);
                     }
-                    this.applyTreeToLocalStorage();
-                    if (typeof this.onUpdateCallback === 'function') {
-                        this.onUpdateCallback();
+                    if (!this.isRelevantStreamEvent(e.type, payload)) {
+                        return;
                     }
+                    const cleanPath = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
+                    const isFastLane = cleanPath.startsWith(CHATS_KEY) || cleanPath.startsWith('yuelao_test_event');
+                    this.scheduleStreamFlush(isFastLane ? 60 : 180);
                 } catch (err) {}
             };
             es.onopen = () => {
@@ -1096,6 +1278,9 @@ const CloudSync = {
         cleanRecord.exactMatchCriteria = (cleanRecord.exactMatchCriteria && typeof cleanRecord.exactMatchCriteria === 'object' && !Array.isArray(cleanRecord.exactMatchCriteria))
             ? cleanRecord.exactMatchCriteria
             : {};
+        cleanRecord.mustMatchKeys = (typeof normalizeMustMatchKeysList === 'function')
+            ? normalizeMustMatchKeysList(cleanRecord.mustMatchKeys, cleanRecord.exactMatchCriteria)
+            : this.normalizeStringArray(cleanRecord.mustMatchKeys).filter(k => Object.prototype.hasOwnProperty.call(cleanRecord.exactMatchCriteria, k)).slice(0, 2);
         cleanRecord.customActivityRegs = (cleanRecord.customActivityRegs && typeof cleanRecord.customActivityRegs === 'object' && !Array.isArray(cleanRecord.customActivityRegs))
             ? cleanRecord.customActivityRegs
             : {};
@@ -1124,6 +1309,9 @@ const CloudSync = {
         if (Object.keys(cleanRecord.exactMatchCriteria).length === 0) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/exactMatchCriteria`));
         }
+        if (!Array.isArray(cleanRecord.mustMatchKeys) || cleanRecord.mustMatchKeys.length === 0) {
+            cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/mustMatchKeys`));
+        }
         const prevTreeUser = (this.tree && this.tree[USERS_KEY] && this.tree[USERS_KEY][pid]) ? this.tree[USERS_KEY][pid] : null;
         const prevCustomKeys = (prevTreeUser && prevTreeUser.customActivityRegs && typeof prevTreeUser.customActivityRegs === 'object')
             ? Object.keys(prevTreeUser.customActivityRegs)
@@ -1148,14 +1336,38 @@ const CloudSync = {
         }
     },
 
-    syncUsersArray(usersArr, options = { isMatchMutation: false }) {
+    syncUsersArray(usersArr, options = { isMatchMutation: false, targetIds: [] }) {
         const list = Array.isArray(usersArr) ? usersArr : [];
         const forcePush = Boolean(options && options.isMatchMutation);
-        // 僅同步更新名單內的玩家，絕不因舊快照暫時缺少某 ID 而誤發 DELETE 刪除雲端玩家（刪除僅由管理員明確刪除操作觸發）
+        const restrictIds = Array.isArray(options.targetIds) && options.targetIds.length > 0
+            ? new Set(options.targetIds.map(String))
+            : null;
+
         list.forEach(u => {
-            if (u && u.id && !this.isUserDeleted(u.id)) {
-                this.upsertUser(u, forcePush, options);
+            if (!u || !u.id || this.isUserDeleted(u.id)) return;
+            const uid = String(u.id).trim();
+
+            if (restrictIds && !restrictIds.has(uid)) {
+                // 若有指定目標，但此玩家不在目標名單內，且資料內容確實沒變，就直接跳過，大幅降低寫入風暴
+                const cleanRecord = { ...u };
+                delete cleanRecord.registeredSession;
+                cleanRecord.city = String(cleanRecord.city || '').trim();
+                cleanRecord.region = String(cleanRecord.region || (typeof inferRegionByCity === 'function' ? inferRegionByCity(cleanRecord.city) : '') || '').trim();
+                cleanRecord.mbti = String(cleanRecord.mbti || '').trim();
+                cleanRecord.mbtiGroup = String(cleanRecord.mbtiGroup || (typeof inferMbtiGroup === 'function' ? inferMbtiGroup(cleanRecord.mbti) : '') || '').trim();
+                cleanRecord.registeredSessions = Array.from(new Set(this.normalizeStringArray(cleanRecord.registeredSessions).map(s => (typeof normalizeSessionLabel === 'function' ? normalizeSessionLabel(s) : s)).filter(Boolean)));
+                cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory).filter(h => !this.isPairRecentlyUnmatched(uid, h.partnerId));
+                cleanRecord.exactMatchCriteria = (cleanRecord.exactMatchCriteria && typeof cleanRecord.exactMatchCriteria === 'object' && !Array.isArray(cleanRecord.exactMatchCriteria)) ? cleanRecord.exactMatchCriteria : {};
+                cleanRecord.mustMatchKeys = (typeof normalizeMustMatchKeysList === 'function')
+                    ? normalizeMustMatchKeysList(cleanRecord.mustMatchKeys, cleanRecord.exactMatchCriteria)
+                    : this.normalizeStringArray(cleanRecord.mustMatchKeys).filter(k => Object.prototype.hasOwnProperty.call(cleanRecord.exactMatchCriteria, k)).slice(0, 2);
+                cleanRecord.customActivityRegs = (cleanRecord.customActivityRegs && typeof cleanRecord.customActivityRegs === 'object' && !Array.isArray(cleanRecord.customActivityRegs)) ? cleanRecord.customActivityRegs : {};
+                
+                if (this.lastPushedUsersJson[uid] === JSON.stringify(cleanRecord)) {
+                    return;
+                }
             }
+            this.upsertUser(u, forcePush, options);
         });
     },
 
@@ -1215,10 +1427,15 @@ const IdAllocator = {
 
 // 5. 跨版本永久儲存管理器、禁止字眼、信件與系統開關控制
 const Store = {
+    getUsersArray() {
+        const arr = LocalJsonCache.get(USERS_KEY, () => []);
+        return Array.isArray(arr) ? arr : [];
+    },
+
     getSystemConfig() {
         const autoBatch = calcAutoBatchNumber(new Date());
         try {
-            const sys = JSON.parse(localStorage.getItem(SYSTEM_STATE_KEY) || '{}');
+            const sys = LocalJsonCache.get(SYSTEM_STATE_KEY, () => ({})) || {};
             const batchOffset = Number(sys.batchOffset || 0);
             const effectiveBatch = Math.max(1, autoBatch + batchOffset);
             return {
@@ -1249,13 +1466,14 @@ const Store = {
         const current = this.getSystemConfig();
         const updated = { ...current, ...patch };
         localStorage.setItem(SYSTEM_STATE_KEY, JSON.stringify(updated));
+        LocalJsonCache.invalidate(SYSTEM_STATE_KEY);
         if (typeof CloudSync !== 'undefined') CloudSync.putNode(SYSTEM_STATE_KEY, updated);
         return updated;
     },
 
     getGenderCounts() {
         try {
-            const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            const users = this.getUsersArray();
             let male = 0;
             let female = 0;
             users.forEach(u => {
@@ -1293,13 +1511,11 @@ const Store = {
         if (!raw) {
             const initial = [{ id: 'BR_DEFAULT_1', field: 'ig', keyword: 'gak' }];
             localStorage.setItem(BANNED_RULES_KEY, JSON.stringify(initial));
+            LocalJsonCache.invalidate(BANNED_RULES_KEY);
             return initial;
         }
-        try {
-            return JSON.parse(raw);
-        } catch (e) {
-            return [];
-        }
+        const parsed = LocalJsonCache.get(BANNED_RULES_KEY, () => []);
+        return Array.isArray(parsed) ? parsed : [];
     },
 
     checkProfileBanned(profile) {
@@ -1337,47 +1553,32 @@ const Store = {
     },
 
     getMailbox() {
-        try {
-            return JSON.parse(localStorage.getItem(MAILBOX_KEY) || '[]');
-        } catch (e) {
-            return [];
-        }
+        const arr = LocalJsonCache.get(MAILBOX_KEY, () => []);
+        return Array.isArray(arr) ? arr : [];
     },
 
     getFateWallPosts() {
-        try {
-            const arr = JSON.parse(localStorage.getItem(FATE_WALL_KEY) || '[]');
-            if (!Array.isArray(arr)) return [];
-            return arr
-                .filter(item => item && typeof item === 'object' && String(item.content || '').trim() !== '')
-                .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
-        } catch (e) {
-            return [];
-        }
+        const arr = LocalJsonCache.get(FATE_WALL_KEY, () => []);
+        if (!Array.isArray(arr)) return [];
+        return arr
+            .filter(item => item && typeof item === 'object' && String(item.content || '').trim() !== '')
+            .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
     },
 
     getWishWallPosts() {
-        try {
-            const arr = JSON.parse(localStorage.getItem(WISH_WALL_KEY) || '[]');
-            if (!Array.isArray(arr)) return [];
-            return arr
-                .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
-                .filter(Boolean)
-                .sort((a, b) => (typeof compareWishWallItems === 'function')
-                    ? compareWishWallItems(a, b)
-                    : (Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0)));
-        } catch (e) {
-            return [];
-        }
+        const arr = LocalJsonCache.get(WISH_WALL_KEY, () => []);
+        if (!Array.isArray(arr)) return [];
+        return arr
+            .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
+            .filter(Boolean)
+            .sort((a, b) => (typeof compareWishWallItems === 'function')
+                ? compareWishWallItems(a, b)
+                : (Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0)));
     },
 
     getCustomActivities() {
-        try {
-            const arr = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
-            return Array.isArray(arr) ? arr.filter(a => a && typeof a === 'object' && a.id) : [];
-        } catch (e) {
-            return [];
-        }
+        const arr = LocalJsonCache.get(CUSTOM_ACTIVITIES_KEY, () => []);
+        return Array.isArray(arr) ? arr.filter(a => a && typeof a === 'object' && a.id) : [];
     },
 
     getOpenCustomActivities() {
@@ -1419,6 +1620,7 @@ const Store = {
             privacy: privacy,
             registeredSessions: [],
             exactMatchCriteria: {},
+            mustMatchKeys: [],
             customActivityRegs: {},
             matchedSession: null,
             friends: [],
@@ -1475,6 +1677,9 @@ const Store = {
             privacy: mergedPrivacy,
             registeredSessions: sessions,
             exactMatchCriteria: (parsed.exactMatchCriteria && typeof parsed.exactMatchCriteria === 'object') ? parsed.exactMatchCriteria : {},
+            mustMatchKeys: (typeof normalizeMustMatchKeysList === 'function')
+                ? normalizeMustMatchKeysList(parsed.mustMatchKeys, parsed.exactMatchCriteria || {})
+                : (Array.isArray(parsed.mustMatchKeys) ? parsed.mustMatchKeys.slice(0, 2) : []),
             customActivityRegs: (parsed.customActivityRegs && typeof parsed.customActivityRegs === 'object' && !Array.isArray(parsed.customActivityRegs)) ? parsed.customActivityRegs : {},
             friends: Array.isArray(parsed.friends) ? parsed.friends : []
         };
@@ -1491,6 +1696,9 @@ const Store = {
                 const state = this.normalizeParsedState(JSON.parse(perPlayerRaw));
                 state.playerId = pid;
                 sessionStorage.setItem(TAB_PLAYER_ID_KEY, pid);
+                if (typeof CloudSync !== 'undefined' && CloudSync.initialized && CloudSync.tree && CloudSync.tree[CHATS_KEY]) {
+                    CloudSync.writeLocalIfChanged(CHATS_KEY, JSON.stringify(CloudSync.chatsMapToLocal(CloudSync.tree[CHATS_KEY])));
+                }
                 try {
                     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
                     const userRec = users.find(u => String(u.id) === pid);
@@ -1545,9 +1753,13 @@ const Store = {
                     privacy: userRec.privacy || {},
                     registeredSessions: Array.isArray(userRec.registeredSessions) ? Array.from(new Set(userRec.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean))) : [],
                     exactMatchCriteria: userRec.exactMatchCriteria || {},
+                    mustMatchKeys: Array.isArray(userRec.mustMatchKeys) ? [...userRec.mustMatchKeys] : [],
                     customActivityRegs: (userRec.customActivityRegs && typeof userRec.customActivityRegs === 'object' && !Array.isArray(userRec.customActivityRegs)) ? userRec.customActivityRegs : {}
                 });
                 sessionStorage.setItem(TAB_PLAYER_ID_KEY, pid);
+                if (typeof CloudSync !== 'undefined' && CloudSync.initialized && CloudSync.tree && CloudSync.tree[CHATS_KEY]) {
+                    CloudSync.writeLocalIfChanged(CHATS_KEY, JSON.stringify(CloudSync.chatsMapToLocal(CloudSync.tree[CHATS_KEY])));
+                }
                 return state;
             }
         } catch (e) {}
@@ -1669,6 +1881,9 @@ const Store = {
                 isChatBanned: Boolean(authMatchSource.isChatBanned),
                 registeredSessions: state.isWarnedAccount ? [] : (Array.isArray(state.registeredSessions) ? state.registeredSessions : []),
                 exactMatchCriteria: state.exactMatchCriteria || {},
+                mustMatchKeys: (typeof normalizeMustMatchKeysList === 'function')
+                    ? normalizeMustMatchKeysList(state.mustMatchKeys, state.exactMatchCriteria || {})
+                    : (Array.isArray(state.mustMatchKeys) ? state.mustMatchKeys.slice(0, 2) : []),
                 customActivityRegs: state.isWarnedAccount ? {} : (state.customActivityRegs || {}),
                 matchedHistory: preservedMatchedHistory,
                 matchedSession: (authMatchSource.matchedWithId && !isPairUnmatchedCheck(state.playerId, authMatchSource.matchedWithId))
@@ -1718,12 +1933,8 @@ const Store = {
     },
 
     getReports() {
-        try {
-            const arr = JSON.parse(localStorage.getItem(REPORTS_KEY) || '[]');
-            return Array.isArray(arr) ? arr.filter(r => r && typeof r === 'object' && r.id) : [];
-        } catch (e) {
-            return [];
-        }
+        const arr = LocalJsonCache.get(REPORTS_KEY, () => []);
+        return Array.isArray(arr) ? arr.filter(r => r && typeof r === 'object' && r.id) : [];
     },
 
     addIssueReport(report) {
@@ -1774,15 +1985,13 @@ const ChatStore = {
     },
 
     getAll() {
-        try {
-            return JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
-        } catch (e) {
-            return {};
-        }
+        const parsed = LocalJsonCache.get(CHATS_KEY, () => ({}));
+        return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
     },
 
     saveAll(allChats) {
         localStorage.setItem(CHATS_KEY, JSON.stringify(allChats));
+        LocalJsonCache.invalidate(CHATS_KEY);
     },
 
     getMessages(id1, id2) {
@@ -2034,18 +2243,15 @@ const ActivityRegArchive = {
     },
 
     getAllMap() {
-        try {
-            const parsed = JSON.parse(localStorage.getItem(REG_HISTORY_KEY) || '{}');
-            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
-        } catch (e) {
-            return {};
-        }
+        const parsed = LocalJsonCache.get(REG_HISTORY_KEY, () => ({}));
+        return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
     },
 
     saveAllMap(mapObj) {
         const nextStr = JSON.stringify(mapObj || {});
         if (localStorage.getItem(REG_HISTORY_KEY) !== nextStr) {
             localStorage.setItem(REG_HISTORY_KEY, nextStr);
+            LocalJsonCache.invalidate(REG_HISTORY_KEY);
         }
     },
 
@@ -2082,6 +2288,12 @@ const ActivityRegArchive = {
             : ((existingEntry && existingEntry.exactMatchCriteria && typeof existingEntry.exactMatchCriteria === 'object' && !Array.isArray(existingEntry.exactMatchCriteria))
                 ? { ...existingEntry.exactMatchCriteria }
                 : {});
+        const rawMust = Array.isArray(r.mustMatchKeys)
+            ? r.mustMatchKeys
+            : (Array.isArray(existingEntry && existingEntry.mustMatchKeys) ? existingEntry.mustMatchKeys : []);
+        const mustKeysArr = (typeof normalizeMustMatchKeysList === 'function')
+            ? normalizeMustMatchKeysList(rawMust, criteriaObj)
+            : rawMust.filter(k => Object.prototype.hasOwnProperty.call(criteriaObj, k)).slice(0, 2);
         return {
             id: key,
             kind: 'custom',
@@ -2091,6 +2303,7 @@ const ActivityRegArchive = {
             fortuneNumber: r.fortuneNumber || (existingEntry && existingEntry.fortuneNumber) || null,
             twoChoiceValue: String(r.twoChoiceValue || (existingEntry && existingEntry.twoChoiceValue) || '').trim(),
             exactMatchCriteria: criteriaObj,
+            mustMatchKeys: mustKeysArr,
             playerId: pid,
             nickname: String((user && user.nickname) || (existingEntry && existingEntry.nickname) || '').trim(),
             gender: String((user && user.gender) || (existingEntry && existingEntry.gender) || '').trim(),

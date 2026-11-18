@@ -52,6 +52,8 @@ function highlightChatKeywordHtml(text, keyword) {
     return safeText.replace(regex, '<mark class="bg-amber-200 text-[#8f4452] px-0.5 rounded">$1</mark>');
 }
 
+let adminChatSearchDebounceTimer = null;
+
 function onAdminChatSearchInput(val) {
     adminChatSearchKeyword = String(val || '').trim();
     adminChatRoomsPage = 1;
@@ -61,7 +63,11 @@ function onAdminChatSearchInput(val) {
     }
     lastAdminChatRoomsSig = '';
     lastAdminChatDetailSig = '';
-    renderAdminAll(true);
+    if (adminChatSearchDebounceTimer) clearTimeout(adminChatSearchDebounceTimer);
+    adminChatSearchDebounceTimer = setTimeout(() => {
+        adminChatSearchDebounceTimer = null;
+        renderAdminAll(true);
+    }, 180);
 }
 
 function clearAdminChatSearch() {

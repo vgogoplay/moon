@@ -222,6 +222,11 @@ body {
     border-radius: 150% 0 150% 0;
     opacity: 0.55;
     animation: fall linear infinite;
+    will-change: transform;
+}
+
+.sakura-bg.sakura-paused .petal {
+    animation-play-state: paused;
 }
 
 @keyframes fall {

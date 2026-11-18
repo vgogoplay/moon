@@ -83,8 +83,8 @@ function renderAdminSharedShell() {
             key: 'logs',
             href: 'backend-logs.html',
             icon: '🛡️',
-            label: '安全防護日誌',
-            sub: '登入失敗紀錄・IP追蹤'
+            label: '操作與防護日誌',
+            sub: '玩家操作・祈願牆・配對・防護'
         }
     ];
 

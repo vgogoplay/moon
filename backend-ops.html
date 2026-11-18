@@ -6,7 +6,7 @@
     <title>信件・回報與測試 ✉️ 月老神社後台</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261115">
+    <link rel="stylesheet" href="style.css?v=20261118b">
 </head>
 <body data-admin-page="ops">
     <div id="adminLayoutMount" class="space-y-6">
@@ -231,32 +231,7 @@
                 </div>
             </div>
 
-            <div class="p-4 rounded-2xl bg-white border-2 border-pink-200 space-y-2.5">
-                <p class="text-xs font-bold text-[#8f4452]">⚡ 快速流程測試選項：</p>
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                    <button type="button" onclick="seedSampleABCDE()" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
-                        👥 1. 匯入 A~E 測試名單（A/B/C男 + D/E女）
-                    </button>
-                    <button type="button" onclick="seedAsymmetricPool()" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
-                        📊 2. 模擬 100男 (10001~10100) vs 10女 (20001~20010)
-                    </button>
-                    <button type="button" onclick="triggerFrontendTestEvent('ADVANCE_CONFESSION_2000')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
-                        💘 3. 連動前台：推進至每隔 2 天 20:00 心動抉擇
-                    </button>
-                    <button type="button" onclick="triggerFrontendTestEvent('MINUS_ONE_DAY')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
-                        ⏩ 4. 連動前台：過 20:00 剩餘天數 -1 天
-                    </button>
-                    <button type="button" onclick="triggerFrontendTestEvent('EXPIRE_TO_ZERO_DAYS')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
-                        ⏳ 5. 連動前台：剩餘 0 天（禁止發話＆觸發是否繼續）
-                    </button>
-                    <button type="button" onclick="triggerFrontendTestEvent('PARTNER_ACCEPT_CONTINUE')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
-                        💖 6. 連動前台：模擬對方按下「繼續配對」
-                    </button>
-                    <button type="button" onclick="triggerFrontendTestEvent('PARTNER_DECLINE_OR_TIMEOUT')" class="sim-btn border-2 border-pink-300 bg-pink-50/40 rounded-xl px-3.5 py-2.5 text-left">
-                        💔 7. 連動前台：模擬對方沒按繼續（雙方清空好友）
-                    </button>
-                </div>
-            </div>
+
         </div>
 
         <!-- ==================== 4. 🚫 禁止字眼與警告帳號規則管理 ==================== -->
@@ -377,14 +352,14 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261117af"></script>
+    <script src="shared/schedule.js?v=20261118f"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261118a"></script>
+    <script src="shared/cloud-store.js?v=20261118f"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261118a"></script>
-    <script src="backend/matching.js?v=20261117aaa"></script>
+    <script src="backend/state.js?v=20261118g"></script>
+    <script src="backend/matching.js?v=20261118f"></script>
     <script src="backend/ops.js?v=20261117t"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261117p"></script>
+    <script src="backend/layout.js?v=20261118e"></script>
 </body>
 </html>

@@ -474,6 +474,10 @@ function areAlreadyFriends(userA, userB) {
 function acceptsCandidateForCustomActivity(seeker, candidate, activityId) {
     const reg = seeker.customActivityRegs && seeker.customActivityRegs[activityId];
     const criteria = (reg && reg.exactMatchCriteria) ? reg.exactMatchCriteria : {};
+    const mustKeys = (reg && Array.isArray(reg.mustMatchKeys)) ? reg.mustMatchKeys : [];
+    if (typeof sharedEvaluateMatchCriteria === 'function') {
+        return sharedEvaluateMatchCriteria(seeker, candidate, criteria, mustKeys);
+    }
     if (typeof sharedMatchesGenderPreference === 'function' && !sharedMatchesGenderPreference(seeker, candidate, criteria)) {
         return false;
     }
@@ -622,7 +626,10 @@ async function recoverCustomActivityRegistrationsFromArchive(activityId, autoRun
                 recoveredAt: nowRecoveryTs,
                 exactMatchCriteria: (archiveRec.exactMatchCriteria && typeof archiveRec.exactMatchCriteria === 'object' && !Array.isArray(archiveRec.exactMatchCriteria))
                     ? { ...archiveRec.exactMatchCriteria }
-                    : ((user.exactMatchCriteria && typeof user.exactMatchCriteria === 'object' && !Array.isArray(user.exactMatchCriteria)) ? { ...user.exactMatchCriteria } : {})
+                    : ((user.exactMatchCriteria && typeof user.exactMatchCriteria === 'object' && !Array.isArray(user.exactMatchCriteria)) ? { ...user.exactMatchCriteria } : {}),
+                mustMatchKeys: Array.isArray(archiveRec.mustMatchKeys)
+                    ? [...archiveRec.mustMatchKeys]
+                    : (Array.isArray(user.mustMatchKeys) ? [...user.mustMatchKeys] : [])
             };
             if (actType === 'fortune_number' && archiveRec.fortuneNumber) {
                 restoredEntry.fortuneNumber = Number(archiveRec.fortuneNumber) || archiveRec.fortuneNumber;

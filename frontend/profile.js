@@ -905,6 +905,9 @@ document.getElementById('profileForm').addEventListener('submit', async function
     hasUnsavedProfileDraft = false;
     await Store.save(appState, true);
     renderProfileForm();
+    if (typeof renderHomeStatsCharts === 'function') {
+        renderHomeStatsCharts(true);
+    }
     refreshAllUI();
 
     const compText = document.getElementById('profileCompletenessText');
@@ -1124,6 +1127,7 @@ async function restoreFromBackupCode() {
     if (matchedUser.exactMatchCriteria && typeof matchedUser.exactMatchCriteria === 'object') {
         loadedState.exactMatchCriteria = { ...matchedUser.exactMatchCriteria };
     }
+    loadedState.mustMatchKeys = Array.isArray(matchedUser.mustMatchKeys) ? [...matchedUser.mustMatchKeys] : [];
 
     // 清空本地舊好友快取，完全依據雲端最新 matchedHistory 重建好友名單，確保每次登入一致
     loadedState.friends = [];

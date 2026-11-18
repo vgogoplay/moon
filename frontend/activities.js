@@ -164,23 +164,40 @@ function renderHomeFateWall(forceRender = false) {
     `;
 }
 
-// ==================== 前台首頁：即時男女比例與 I人 / E人 / 不知道・沒測過 統計圖表 ====================
-function renderHomeStatsCharts() {
+// ==================== 前台首頁：即時男女比例與 I人 / E人 / 不知道・沒測過 統計圖表（30 秒節流冷卻） ====================
+const HOME_STATS_COOLDOWN_MS = 30000;
+let lastHomeStatsRenderTs = 0;
+
+function renderHomeStatsCharts(forceRender = false) {
     const totalBadge = document.getElementById('homeStatsTotalBadge');
     const donutBox = document.getElementById('genderDonutChartBox');
     const ieDonutBox = document.getElementById('ieDonutChartBox');
     if (!totalBadge || !donutBox || !ieDonutBox) return;
 
-    const rawUsersStr = localStorage.getItem(USERS_KEY) || '[]';
-    lastUsersStatsSnapshot = rawUsersStr;
-
-    let users = [];
-    try {
-        users = JSON.parse(rawUsersStr);
-        if (!Array.isArray(users)) users = [];
-    } catch (e) {
-        users = [];
+    const nowTs = Date.now();
+    if (!forceRender && donutBox.dataset.rendered === '1' && (nowTs - lastHomeStatsRenderTs) < HOME_STATS_COOLDOWN_MS) {
+        return;
     }
+
+    const rawUsersStr = localStorage.getItem(USERS_KEY) || '[]';
+    if (rawUsersStr === lastUsersStatsSnapshot && donutBox.dataset.rendered === '1') {
+        lastHomeStatsRenderTs = nowTs;
+        return;
+    }
+    lastUsersStatsSnapshot = rawUsersStr;
+    lastHomeStatsRenderTs = nowTs;
+    donutBox.dataset.rendered = '1';
+
+    const users = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function')
+        ? Store.getUsersArray()
+        : (() => {
+            try {
+                const parsed = JSON.parse(rawUsersStr);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                return [];
+            }
+        })();
 
     const validUsers = users.filter(u => u && typeof u === 'object' && u.id);
     const totalCount = validUsers.length;
@@ -331,7 +348,6 @@ function openRegisterModal() {
                 <input type="checkbox" name="regSessionCheck" value="${opt}" ${checked ? 'checked' : ''} onchange="onRegSessionCheckChange()" class="accent-[#c96a7b] w-4 h-4">
                 <div>
                     <div class="font-bold text-xs text-[#8f4452]">${opt}</div>
-                    <div class="text-[10px] text-gray-500">20:00 準時進行配對</div>
                 </div>
             </label>
         `;
@@ -343,23 +359,210 @@ function openRegisterModal() {
     }
 
     const savedCriteria = appState.exactMatchCriteria || {};
-    document.getElementById('exactMatchOptionsList').innerHTML = EXACT_MATCH_OPTIONS.map(item => {
+    const savedMustKeys = Array.isArray(appState.mustMatchKeys) ? appState.mustMatchKeys : [];
+    renderDualCriteriaOptionsList('regular', savedCriteria, savedMustKeys);
+
+    document.getElementById('registerModal').classList.remove('hidden');
+}
+
+const MAX_MUST_MATCH_COUNT = 2;
+
+function getCriteriaDomPrefix(scope) {
+    return scope === 'custom'
+        ? {
+            listId: 'customActExactOptionsList',
+            summaryId: 'customActCriteriaSummaryBar',
+            checkName: 'customActExactCheck',
+            selectPrefix: 'custom-exact-select-',
+            mustInputPrefix: 'custom-must-flag-',
+            cardPrefix: 'custom-crit-card-'
+        }
+        : {
+            listId: 'exactMatchOptionsList',
+            summaryId: 'regMatchCriteriaSummaryBar',
+            checkName: 'exactFieldCheck',
+            selectPrefix: 'exact-select-',
+            mustInputPrefix: 'reg-must-flag-',
+            cardPrefix: 'reg-crit-card-'
+        };
+}
+
+function renderDualCriteriaOptionsList(scope, savedCriteria = {}, savedMustKeys = []) {
+    const cfg = getCriteriaDomPrefix(scope);
+    const listEl = document.getElementById(cfg.listId);
+    if (!listEl) return;
+
+    const validMustSet = new Set(
+        (Array.isArray(savedMustKeys) ? savedMustKeys : [])
+            .map(String)
+            .filter(k => Object.prototype.hasOwnProperty.call(savedCriteria, k))
+            .slice(0, MAX_MUST_MATCH_COUNT)
+    );
+
+    listEl.innerHTML = EXACT_MATCH_OPTIONS.map(item => {
         const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, item.key);
+        const isMust = isChecked && validMustSet.has(item.key);
         const selectedVal = savedCriteria[item.key] || item.choices[0];
+
         return `
-            <div class="p-2 rounded-xl border border-pink-100 bg-white space-y-1.5">
-                <label class="flex items-center gap-2 text-xs font-semibold text-[#5e464a] cursor-pointer">
-                    <input type="checkbox" name="exactFieldCheck" value="${item.key}" ${isChecked ? 'checked' : ''} onchange="toggleExactSelect('${item.key}')" class="accent-[#c96a7b]">
-                    <span>${item.label}</span>
-                </label>
-                <select id="exact-select-${item.key}" class="input-jp !py-1 !text-xs ${isChecked ? '' : 'hidden'}">
+            <div id="${cfg.cardPrefix}${item.key}" class="p-2.5 rounded-xl border transition space-y-1.5 ${isChecked ? (isMust ? 'border-[#c96a7b] bg-rose-50/55 shadow-2xs' : 'border-pink-200 bg-pink-50/20') : 'border-pink-100 bg-white'}">
+                <div class="flex items-center justify-between gap-1.5">
+                    <label class="flex items-center gap-2 text-xs font-semibold text-[#5e464a] cursor-pointer min-w-0">
+                        <input type="checkbox" name="${cfg.checkName}" value="${item.key}" ${isChecked ? 'checked' : ''} onchange="onDualCriterionCheckChange('${scope}', '${item.key}')" class="accent-[#c96a7b] shrink-0">
+                        <span class="truncate">${item.label}</span>
+                    </label>
+                    <input type="hidden" id="${cfg.mustInputPrefix}${item.key}" value="${isMust ? '1' : '0'}">
+                </div>
+                <select id="${cfg.selectPrefix}${item.key}" class="input-jp !py-1 !text-xs ${isChecked ? '' : 'hidden'}">
                     ${item.choices.map(c => `<option value="${c}" ${selectedVal === c ? 'selected' : ''}>${c}</option>`).join('')}
                 </select>
+                <div id="${cfg.cardPrefix}mode_${item.key}" class="${isChecked ? 'grid grid-cols-2 gap-1 pt-0.5' : 'hidden'}">
+                    <button type="button" data-role="must-btn" onclick="setDualCriterionMode('${scope}', '${item.key}', true)"
+                        class="py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center ${isMust ? 'bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white border-[#c96a7b] shadow-2xs' : 'bg-white border-pink-200 text-[#8f4452] hover:bg-rose-50'}">
+                        🔒 必須吻合
+                    </button>
+                    <button type="button" data-role="or-btn" onclick="setDualCriterionMode('${scope}', '${item.key}', false)"
+                        class="py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center ${!isMust ? 'bg-pink-100 text-[#8f4452] border-pink-300' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}">
+                        ✨ 任一符合
+                    </button>
+                </div>
             </div>
         `;
     }).join('');
 
-    document.getElementById('registerModal').classList.remove('hidden');
+    syncDualCriteriaUIState(scope);
+}
+
+function syncDualCriteriaUIState(scope) {
+    const cfg = getCriteriaDomPrefix(scope);
+    const checkedBoxes = Array.from(document.querySelectorAll(`input[name="${cfg.checkName}"]:checked`));
+    let mustCount = 0;
+    let orCount = 0;
+
+    checkedBoxes.forEach(cb => {
+        const key = cb.value;
+        const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
+        if (flagEl && flagEl.value === '1') {
+            if (mustCount < MAX_MUST_MATCH_COUNT) {
+                mustCount++;
+            } else {
+                flagEl.value = '0';
+                orCount++;
+            }
+        } else {
+            orCount++;
+        }
+    });
+
+    const isMustFull = mustCount >= MAX_MUST_MATCH_COUNT;
+
+    EXACT_MATCH_OPTIONS.forEach(item => {
+        const key = item.key;
+        const cb = document.querySelector(`input[name="${cfg.checkName}"][value="${key}"]`);
+        const sel = document.getElementById(`${cfg.selectPrefix}${key}`);
+        const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
+        const cardEl = document.getElementById(`${cfg.cardPrefix}${key}`);
+        const modeBox = document.getElementById(`${cfg.cardPrefix}mode_${key}`);
+        if (!cb || !sel || !flagEl || !cardEl || !modeBox) return;
+
+        const isChecked = cb.checked;
+        if (!isChecked) {
+            flagEl.value = '0';
+            sel.classList.add('hidden');
+            modeBox.className = 'hidden';
+            cardEl.className = 'p-2.5 rounded-xl border transition space-y-1.5 border-pink-100 bg-white';
+            return;
+        }
+
+        const isMust = flagEl.value === '1';
+        sel.classList.remove('hidden');
+        modeBox.className = 'grid grid-cols-2 gap-1 pt-0.5';
+        cardEl.className = isMust
+            ? 'p-2.5 rounded-xl border transition space-y-1.5 border-[#c96a7b] bg-rose-50/55 shadow-2xs'
+            : 'p-2.5 rounded-xl border transition space-y-1.5 border-pink-200 bg-pink-50/20';
+
+        const mustBtn = modeBox.querySelector('[data-role="must-btn"]');
+        const orBtn = modeBox.querySelector('[data-role="or-btn"]');
+        if (mustBtn) {
+            if (isMust) {
+                mustBtn.disabled = false;
+                mustBtn.className = 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white border-[#c96a7b] shadow-2xs';
+            } else if (isMustFull) {
+                mustBtn.disabled = true;
+                mustBtn.className = 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-gray-100 border-gray-200 text-gray-400 opacity-55 cursor-not-allowed';
+            } else {
+                mustBtn.disabled = false;
+                mustBtn.className = 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-white border-pink-200 text-[#8f4452] hover:bg-rose-50';
+            }
+        }
+        if (orBtn) {
+            orBtn.className = !isMust
+                ? 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-pink-100 text-[#8f4452] border-pink-300'
+                : 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-white border-gray-200 text-gray-500 hover:bg-gray-50';
+        }
+    });
+
+    const summaryEl = document.getElementById(cfg.summaryId);
+    if (summaryEl) {
+        summaryEl.innerHTML = `
+            <span class="px-2.5 py-0.5 rounded-full font-bold ${mustCount > 0 ? 'bg-rose-100 border border-rose-300 text-[#8f4452]' : 'bg-gray-100 text-gray-500'}">
+                🔒 必須吻合：${mustCount} / ${MAX_MUST_MATCH_COUNT} 項
+            </span>
+            <span class="px-2.5 py-0.5 rounded-full font-bold ${orCount > 0 ? 'bg-pink-100 border border-pink-300 text-[#c96a7b]' : 'bg-gray-100 text-gray-500'}">
+                ✨ 選填：${orCount} 項
+            </span>
+        `;
+    }
+}
+
+window.onDualCriterionCheckChange = function(scope, key) {
+    const cfg = getCriteriaDomPrefix(scope);
+    const cb = document.querySelector(`input[name="${cfg.checkName}"][value="${key}"]`);
+    const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
+    if (cb && flagEl && !cb.checked) {
+        flagEl.value = '0';
+    }
+    syncDualCriteriaUIState(scope);
+};
+
+window.setDualCriterionMode = function(scope, key, makeMust) {
+    const cfg = getCriteriaDomPrefix(scope);
+    const cb = document.querySelector(`input[name="${cfg.checkName}"][value="${key}"]`);
+    const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
+    if (!cb || !flagEl) return;
+    if (!cb.checked) cb.checked = true;
+
+    if (makeMust) {
+        const currentMustKeys = Array.from(document.querySelectorAll(`input[name="${cfg.checkName}"]:checked`))
+            .map(el => el.value)
+            .filter(k => k !== key && document.getElementById(`${cfg.mustInputPrefix}${k}`)?.value === '1');
+        if (currentMustKeys.length >= MAX_MUST_MATCH_COUNT) {
+            showMiniNotice('🔒 必須吻合已達上限（2 項）', '「必須吻合」條件最多只能選擇 2 項喔！請先將其中一項切換為「✨ 任一符合」後再設定。');
+            return;
+        }
+        flagEl.value = '1';
+    } else {
+        flagEl.value = '0';
+    }
+    syncDualCriteriaUIState(scope);
+};
+
+function collectDualCriteriaFromDom(scope) {
+    const cfg = getCriteriaDomPrefix(scope);
+    const criteria = {};
+    const mustMatchKeys = [];
+    document.querySelectorAll(`input[name="${cfg.checkName}"]:checked`).forEach(cb => {
+        const key = cb.value;
+        const sel = document.getElementById(`${cfg.selectPrefix}${key}`);
+        const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
+        if (sel && sel.value) {
+            criteria[key] = sel.value;
+            if (flagEl && flagEl.value === '1' && mustMatchKeys.length < MAX_MUST_MATCH_COUNT) {
+                mustMatchKeys.push(key);
+            }
+        }
+    });
+    return { criteria, mustMatchKeys };
 }
 
 window.onRegSessionCheckChange = function() {
@@ -375,26 +578,46 @@ window.onRegSessionCheckChange = function() {
 };
 
 window.toggleExactSelect = function(key) {
-    const cb = document.querySelector(`input[name="exactFieldCheck"][value="${key}"]`);
-    const sel = document.getElementById(`exact-select-${key}`);
-    if (cb && sel) {
-        sel.classList.toggle('hidden', !cb.checked);
-    }
+    onDualCriterionCheckChange('regular', key);
 };
 
 function closeRegisterModal() {
     document.getElementById('registerModal').classList.add('hidden');
 }
 
-function formatCriteriaDisplayList(criteria) {
+function formatSingleCriterionLabel(k, criteria) {
+    if (k === 'region') {
+        return `當前居住地區：${criteria.region}`;
+    }
+    const label = EXACT_MATCH_OPTIONS.find(o => o.key === k)?.label || k;
+    return `${label}：${criteria[k]}`;
+}
+
+function formatCriteriaDisplayList(criteria, mustMatchKeys = []) {
     const keys = Object.keys(criteria || {}).filter(k => k !== 'city');
-    return keys.map(k => {
-        if (k === 'region') {
-            return `當前居住地區：${criteria.region}`;
-        }
-        const label = EXACT_MATCH_OPTIONS.find(o => o.key === k)?.label || k;
-        return `${label}：${criteria[k]}`;
-    });
+    if (keys.length === 0) return [];
+    const mustSet = new Set(
+        (Array.isArray(mustMatchKeys) ? mustMatchKeys : [])
+            .map(String)
+            .filter(k => keys.includes(k))
+            .slice(0, MAX_MUST_MATCH_COUNT)
+    );
+    const mustLabels = keys.filter(k => mustSet.has(k)).map(k => formatSingleCriterionLabel(k, criteria));
+    const orLabels = keys.filter(k => !mustSet.has(k)).map(k => formatSingleCriterionLabel(k, criteria));
+
+    const parts = [];
+    if (mustLabels.length > 0) {
+        parts.push(`🔒 必須吻合：${mustLabels.join(' 且 ')}`);
+    }
+    if (orLabels.length > 0) {
+        parts.push(`✨ 任一符合：${orLabels.join(' 或 ')}`);
+    }
+    return parts;
+}
+
+function formatCriteriaSummaryText(criteria, mustMatchKeys = []) {
+    const parts = formatCriteriaDisplayList(criteria, mustMatchKeys);
+    return parts.length > 0 ? parts.join(' ＋ ') : '不限制（隨機配對）';
 }
 
 async function cancelRegularRegistration() {
@@ -405,6 +628,7 @@ async function cancelRegularRegistration() {
     delete appState.registeredSession;
     appState.registeredSessions = [];
     appState.exactMatchCriteria = {};
+    appState.mustMatchKeys = [];
     if (appState.playerId && typeof ActivityRegArchive !== 'undefined') {
         prevCancelledSessions.forEach(s => ActivityRegArchive.removeRegular(s, appState.playerId));
     }
@@ -428,21 +652,15 @@ async function confirmRegistration() {
     }
 
     const selectedSessions = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:checked')).map(cb => cb.value);
-
-    const criteria = {};
-    document.querySelectorAll('input[name="exactFieldCheck"]:checked').forEach(cb => {
-        const key = cb.value;
-        const sel = document.getElementById(`exact-select-${key}`);
-        if (sel && sel.value) {
-            criteria[key] = sel.value;
-        }
-    });
+    const { criteria, mustMatchKeys } = collectDualCriteriaFromDom('regular');
 
     const prevRegisteredList = Array.isArray(appState.registeredSessions) ? [...appState.registeredSessions] : [];
     const finalCriteria = selectedSessions.length === 0 ? {} : criteria;
+    const finalMustKeys = selectedSessions.length === 0 ? [] : mustMatchKeys;
     delete appState.registeredSession;
     appState.registeredSessions = selectedSessions;
     appState.exactMatchCriteria = finalCriteria;
+    appState.mustMatchKeys = finalMustKeys;
     if (appState.playerId && typeof ActivityRegArchive !== 'undefined') {
         prevRegisteredList.forEach(oldS => {
             const stillSelected = selectedSessions.some(ns => isSameSession(ns, oldS));
@@ -457,9 +675,9 @@ async function confirmRegistration() {
     await Store.save(appState, true);
     refreshAllUI();
 
-    const displayItems = formatCriteriaDisplayList(finalCriteria);
+    const displayItems = formatCriteriaDisplayList(finalCriteria, finalMustKeys);
     const desc = displayItems.length > 0
-        ? '已指定條件（其中一項符合即可配對）：\n' + displayItems.map(item => `・${item}`).join('\n')
+        ? '已指定配對條件：\n' + displayItems.map(item => `・${item}`).join('\n')
         : '未勾選額外條件（不限制，將進行隨機配對）';
 
     if (selectedSessions.length === 0) {
@@ -660,6 +878,7 @@ function openCustomActivityModal(activityId) {
     const regs = (appState.customActivityRegs && typeof appState.customActivityRegs === 'object') ? appState.customActivityRegs : {};
     const existingReg = regs[act.id] || null;
     const savedCriteria = (existingReg && existingReg.exactMatchCriteria) ? existingReg.exactMatchCriteria : {};
+    const savedMustKeys = (existingReg && Array.isArray(existingReg.mustMatchKeys)) ? existingReg.mustMatchKeys : [];
     const savedFortune = (existingReg && existingReg.fortuneNumber) ? String(existingReg.fortuneNumber) : '';
     const savedTwoChoice = (existingReg && existingReg.twoChoiceValue) ? String(existingReg.twoChoiceValue) : '';
 
@@ -734,30 +953,14 @@ function openCustomActivityModal(activityId) {
             confirmBtn.textContent = `✨ 確認報名【${act.name}】`;
         }
 
-        document.getElementById('customActExactOptionsList').innerHTML = EXACT_MATCH_OPTIONS.map(item => {
-            const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, item.key);
-            const selectedVal = savedCriteria[item.key] || item.choices[0];
-            return `
-                <div class="p-2 rounded-xl border border-pink-100 bg-white space-y-1.5">
-                    <label class="flex items-center gap-2 text-xs font-semibold text-[#5e464a] cursor-pointer">
-                        <input type="checkbox" name="customActExactCheck" value="${item.key}" ${isChecked ? 'checked' : ''} onchange="toggleCustomActExactSelect('${item.key}')" class="accent-[#c96a7b]">
-                        <span>${item.label}</span>
-                    </label>
-                    <select id="custom-exact-select-${item.key}" class="input-jp !py-1 !text-xs ${isChecked ? '' : 'hidden'}">
-                        ${item.choices.map(c => `<option value="${c}" ${selectedVal === c ? 'selected' : ''}>${c}</option>`).join('')}
-                    </select>
-                </div>
-            `;
-        }).join('');
+        renderDualCriteriaOptionsList('custom', savedCriteria, savedMustKeys);
     }
 
     document.getElementById('customActivityModal').classList.remove('hidden');
 }
 
 window.toggleCustomActExactSelect = function(key) {
-    const cb = document.querySelector(`input[name="customActExactCheck"][value="${key}"]`);
-    const sel = document.getElementById(`custom-exact-select-${key}`);
-    if (cb && sel) sel.classList.toggle('hidden', !cb.checked);
+    onDualCriterionCheckChange('custom', key);
 };
 
 function closeCustomActivityModal() {
@@ -857,12 +1060,7 @@ async function confirmCustomActivityRegistration() {
         return;
     }
 
-    const criteria = {};
-    document.querySelectorAll('input[name="customActExactCheck"]:checked').forEach(cb => {
-        const key = cb.value;
-        const sel = document.getElementById(`custom-exact-select-${key}`);
-        if (sel && sel.value) criteria[key] = sel.value;
-    });
+    const { criteria, mustMatchKeys } = collectDualCriteriaFromDom('custom');
 
     customActivitySyncSuppressUntil = Date.now() + 6000;
     appState.customActivityRegs[act.id] = {
@@ -870,7 +1068,8 @@ async function confirmCustomActivityRegistration() {
         activityName: act.name,
         activityType: 'classic',
         registeredAt: Date.now(),
-        exactMatchCriteria: criteria
+        exactMatchCriteria: criteria,
+        mustMatchKeys: mustMatchKeys
     };
 
     closeCustomActivityModal();
@@ -879,9 +1078,9 @@ async function confirmCustomActivityRegistration() {
     customActivitySyncSuppressUntil = Date.now() + 2500;
     refreshAllUI();
 
-    const displayItems = formatCriteriaDisplayList(criteria);
+    const displayItems = formatCriteriaDisplayList(criteria, mustMatchKeys);
     const desc = displayItems.length > 0
-        ? '此活動指定條件（其中一項符合即可配對）：\n' + displayItems.map(item => `・${item}`).join('\n')
+        ? '此活動指定條件：\n' + displayItems.map(item => `・${item}`).join('\n')
         : '未勾選額外條件（不限制，將進行隨機配對）';
 
     showMiniNotice('🎪 專屬活動報名成功', `已成功報名【${act.name}】！\n（此為獨立活動，不影響週三／週六場次）\n\n${desc}`);
@@ -999,10 +1198,7 @@ function refreshAllUI() {
             alertBox.innerHTML = `有報名選擇場次的玩家才會進入配對池，未報名不會配對！`;
         }
     } else if (currentBatchSessions.length > 0) {
-        const displayItems = formatCriteriaDisplayList(appState.exactMatchCriteria || {});
-        const criteriaSummary = displayItems.length > 0
-            ? displayItems.join(' 或 ')
-            : '不限制（隨機配對）';
+        const criteriaSummary = formatCriteriaSummaryText(appState.exactMatchCriteria || {}, appState.mustMatchKeys || []);
         badge.textContent = `⏳ 已報名 (${currentBatchSessions.length}場)`;
         applyBtn.disabled = false;
         applyBtn.textContent = `✅ 已報名【${currentBatchSessions.join('、')}】（點此修改）`;
@@ -1010,7 +1206,7 @@ function refreshAllUI() {
     } else {
         badge.textContent = `✨ ${sched.batchPrefix}開始報名中`;
         applyBtn.disabled = false;
-        applyBtn.textContent = `🌸 開始報名（${sched.wedLabel} / ${sched.satLabel}）`;
+        applyBtn.textContent = `🌸 開始報名（${sched.batchPrefix}）`;
         alertBox.innerHTML = `目前開放報名 <strong>${sched.wedLabel}</strong> 或 <strong>${sched.satLabel}</strong>（可複選），有報名才會參與配對！`;
     }
 
@@ -1146,8 +1342,7 @@ function refreshAllUI() {
                     if (actType === 'two_choice' && reg.twoChoiceValue) {
                         return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（默契大考驗二選一已選：<strong>「${reg.twoChoiceValue}」</strong>）${timeTag}`;
                     }
-                    const cList = formatCriteriaDisplayList(reg.exactMatchCriteria || {});
-                    const cSummary = cList.length > 0 ? cList.join(' 或 ') : '不限制（隨機配對）';
+                    const cSummary = formatCriteriaSummaryText(reg.exactMatchCriteria || {}, reg.mustMatchKeys || []);
                     return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（配對條件：<strong>${cSummary}</strong>）${timeTag}`;
                 }
                 const typeHint = actType === 'fortune_number'

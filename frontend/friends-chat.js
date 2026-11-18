@@ -341,6 +341,8 @@ document.getElementById('issueReportForm').addEventListener('submit', function(e
 
 // ==================== 好友名單未讀紅點狀態管理（純本地輕量紀錄） ====================
 const FRIEND_READ_RECEIPTS_PREFIX = 'yuelao_friend_read_receipts_';
+let cachedFriendReadReceiptsKey = '';
+let cachedFriendReadReceiptsObj = null;
 
 function getFriendReadReceiptsStorageKey() {
     const pid = (typeof appState !== 'undefined' && appState && appState.playerId)
@@ -350,17 +352,26 @@ function getFriendReadReceiptsStorageKey() {
 }
 
 function loadFriendReadReceiptsMap() {
+    const key = getFriendReadReceiptsStorageKey();
+    if (key === cachedFriendReadReceiptsKey && cachedFriendReadReceiptsObj) {
+        return cachedFriendReadReceiptsObj;
+    }
     try {
-        const raw = JSON.parse(localStorage.getItem(getFriendReadReceiptsStorageKey()) || '{}');
-        return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+        const raw = JSON.parse(localStorage.getItem(key) || '{}');
+        cachedFriendReadReceiptsKey = key;
+        cachedFriendReadReceiptsObj = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+        return cachedFriendReadReceiptsObj;
     } catch (e) {
         return {};
     }
 }
 
 function saveFriendReadReceiptsMap(mapObj) {
+    const key = getFriendReadReceiptsStorageKey();
+    cachedFriendReadReceiptsKey = key;
+    cachedFriendReadReceiptsObj = mapObj || {};
     try {
-        localStorage.setItem(getFriendReadReceiptsStorageKey(), JSON.stringify(mapObj || {}));
+        localStorage.setItem(key, JSON.stringify(cachedFriendReadReceiptsObj));
     } catch (e) {}
 }
 
@@ -590,30 +601,29 @@ function confirmManualUnfriend() {
         return;
     }
 
-    // 呼叫 API 將玩家手動解除配對的動作記錄到後台日誌中
-    if (typeof appendAdminLoginLog === 'function') {
-        const myName = String(appState.profile.nickname || appState.playerId);
-        const partnerName = String(friend.nickname || friend.id);
-        appendAdminLoginLog(
-            `[解除配對] ID:${appState.playerId}`,
-            myName,
-            `手動解除與 ID:${friend.id} (${partnerName}) 的配對`
-        );
+    // 將玩家手動解除配對的操作記錄寫入「玩家操作日誌」（保留最近 30 筆）
+    const myName = String(appState.profile.nickname || appState.playerId);
+    const partnerName = String(friend.nickname || friend.id);
+    const opDetailText = `手動解除與 ID:${friend.id} (${partnerName}) 的配對`;
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.recordPlayerOpLog === 'function') {
+        CloudSync.recordPlayerOpLog(appState.playerId, myName, '解除配對', opDetailText, Date.now());
     } else {
-        const rawLogs = localStorage.getItem('yuelao_admin_login_logs') || '[]';
+        const opKey = (typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs';
+        const rawLogs = localStorage.getItem(opKey) || '[]';
         let logs = [];
         try { logs = JSON.parse(rawLogs); } catch (e) { logs = []; }
+        const nowTs = Date.now();
         logs.unshift({
-            createdAt: new Date().toLocaleString('zh-TW', { hour12: false }),
-            accountTried: `[解除配對] ID:${appState.playerId}`,
-            ipAddress: String(appState.profile.nickname || appState.playerId),
-            userAgent: `手動解除與 ID:${friend.id} (${friend.nickname || friend.id}) 的配對`
+            id: 'PO_' + nowTs + '_' + Math.random().toString(36).slice(2, 6),
+            playerId: String(appState.playerId || '').trim(),
+            playerName: myName,
+            actionType: '解除配對',
+            detail: opDetailText,
+            ts: nowTs,
+            createdAt: new Date(nowTs).toLocaleString('zh-TW', { hour12: false })
         });
-        if (logs.length > 10) logs.length = 10;
-        localStorage.setItem('yuelao_admin_login_logs', JSON.stringify(logs));
-        if (typeof CloudSync !== 'undefined') {
-            CloudSync.putNode('yuelao_admin_login_logs', logs);
-        }
+        if (logs.length > 30) logs.length = 30;
+        localStorage.setItem(opKey, JSON.stringify(logs));
     }
 
     clearMutualFriendship(
@@ -683,11 +693,44 @@ let wasFriendsTabVisibleLastRender = false;
 let pendingPreserveScrollOnPrepend = false;
 let isAutoScrollingChatBottom = false;
 let lastChatPrependTriggerTs = 0;
+let lastRenderedChatMeta = {
+    friendKey: '',
+    totalCount: 0,
+    visibleCount: 0,
+    firstId: '',
+    lastId: '',
+    hasOlderBanner: false
+};
+
+function renderSingleChatBubbleHtml(m, friend) {
+    if (m.senderId === 'system' || m.sender === 'system') {
+        return `
+            <div class="text-center my-2">
+                <span class="inline-block px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-[#8f4452] leading-relaxed">
+                    ${m.text}
+                </span>
+            </div>
+        `;
+    }
+    const isMe = m.senderId
+        ? (String(m.senderId) === String(appState.playerId))
+        : (m.sender === 'me');
+    return `
+        <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'}">
+            ${!isMe ? `<span class="text-[10px] text-[#c96a7b] font-semibold mb-0.5 px-1">${friend.nickname}</span>` : ''}
+            <div class="max-w-[80%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-2xs ${isMe ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white rounded-br-xs' : 'bg-white border border-pink-100 text-gray-700 rounded-bl-xs'}">
+                ${m.text}
+            </div>
+            <span class="text-[10px] text-gray-400 mt-1 px-1">${m.time || ''}</span>
+        </div>
+    `;
+}
 
 function resetChatVisibleBatch(scrollBottom = true) {
     chatVisibleBatchLimit = CHAT_BATCH_STEP;
     pendingPreserveScrollOnPrepend = false;
     lastRenderedChatSignature = '';
+    lastRenderedChatMeta = { friendKey: '', totalCount: 0, visibleCount: 0, firstId: '', lastId: '', hasOlderBanner: false };
     if (scrollBottom) {
         shouldScrollChatToLatest = true;
     }
@@ -909,7 +952,10 @@ function renderActiveFriendWorkspace() {
 
     const lastMsgObj = visibleMessages[visibleMessages.length - 1];
     const firstMsgObj = visibleMessages[0];
-    const currentSignature = `${currentFriendKey}_${totalMsgCount}_${visibleMessages.length}_${firstMsgObj?.id || firstMsgObj?.ts || ''}_${lastMsgObj?.id || lastMsgObj?.text || ''}`;
+    const firstMsgKey = String(firstMsgObj?.id || firstMsgObj?.ts || '');
+    const lastMsgKey = String(lastMsgObj?.id || lastMsgObj?.text || '');
+    const hasOlderBanner = remainingOlderCount > 0 || totalMsgCount > CHAT_BATCH_STEP;
+    const currentSignature = `${currentFriendKey}_${totalMsgCount}_${visibleMessages.length}_${firstMsgKey}_${lastMsgKey}`;
 
     if (currentSignature !== lastRenderedChatSignature) {
         const prevScrollTop = chatBox.scrollTop;
@@ -917,53 +963,54 @@ function renderActiveFriendWorkspace() {
         const isPrependingOlder = pendingPreserveScrollOnPrepend;
         pendingPreserveScrollOnPrepend = false;
 
+        const canAppendSingleBubble = Boolean(
+            lastMsgObj &&
+            !isPrependingOlder &&
+            lastRenderedChatMeta.friendKey === currentFriendKey &&
+            lastRenderedChatMeta.totalCount > 0 &&
+            totalMsgCount === lastRenderedChatMeta.totalCount + 1 &&
+            visibleMessages.length === lastRenderedChatMeta.visibleCount + 1 &&
+            firstMsgKey === lastRenderedChatMeta.firstId &&
+            hasOlderBanner === lastRenderedChatMeta.hasOlderBanner &&
+            chatBox.children.length > 0
+        );
+
         lastRenderedChatSignature = currentSignature;
+        lastRenderedChatMeta = {
+            friendKey: currentFriendKey,
+            totalCount: totalMsgCount,
+            visibleCount: visibleMessages.length,
+            firstId: firstMsgKey,
+            lastId: lastMsgKey,
+            hasOlderBanner
+        };
 
-        let topStatusHtml = '';
-        if (remainingOlderCount > 0) {
-            const nextLoadCount = Math.min(CHAT_BATCH_STEP, remainingOlderCount);
-            topStatusHtml = `
-                <div class="text-center pb-1">
-                    <button type="button" onclick="loadMoreOlderChatMessages()" class="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-pink-200 text-[11px] text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-2xs">
-                        <span>⬆️ 往上滑動或點擊載入更早 ${nextLoadCount} 則（還有 ${remainingOlderCount} 則）</span>
-                    </button>
-                </div>
-            `;
-        } else if (totalMsgCount > CHAT_BATCH_STEP) {
-            topStatusHtml = `
-                <div class="text-center pb-1">
-                    <span class="inline-block px-3 py-0.5 rounded-full bg-pink-50/80 text-[10px] text-gray-400">
-                        🌸 已顯示全部 ${totalMsgCount} 則對話紀錄
-                    </span>
-                </div>
-            `;
-        }
-
-        const bubblesHtml = visibleMessages.map(m => {
-            if (m.senderId === 'system' || m.sender === 'system') {
-                return `
-                    <div class="text-center my-2">
-                        <span class="inline-block px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-[#8f4452] leading-relaxed">
-                            ${m.text}
+        if (canAppendSingleBubble) {
+            chatBox.insertAdjacentHTML('beforeend', renderSingleChatBubbleHtml(lastMsgObj, friend));
+        } else {
+            let topStatusHtml = '';
+            if (remainingOlderCount > 0) {
+                const nextLoadCount = Math.min(CHAT_BATCH_STEP, remainingOlderCount);
+                topStatusHtml = `
+                    <div class="text-center pb-1">
+                        <button type="button" onclick="loadMoreOlderChatMessages()" class="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-pink-200 text-[11px] text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-2xs">
+                            <span>⬆️ 往上滑動或點擊載入更早 ${nextLoadCount} 則（還有 ${remainingOlderCount} 則）</span>
+                        </button>
+                    </div>
+                `;
+            } else if (totalMsgCount > CHAT_BATCH_STEP) {
+                topStatusHtml = `
+                    <div class="text-center pb-1">
+                        <span class="inline-block px-3 py-0.5 rounded-full bg-pink-50/80 text-[10px] text-gray-400">
+                            🌸 已顯示全部 ${totalMsgCount} 則對話紀錄
                         </span>
                     </div>
                 `;
             }
-            const isMe = m.senderId
-                ? (String(m.senderId) === String(appState.playerId))
-                : (m.sender === 'me');
-            return `
-                <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'}">
-                    ${!isMe ? `<span class="text-[10px] text-[#c96a7b] font-semibold mb-0.5 px-1">${friend.nickname}</span>` : ''}
-                    <div class="max-w-[80%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-2xs ${isMe ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white rounded-br-xs' : 'bg-white border border-pink-100 text-gray-700 rounded-bl-xs'}">
-                        ${m.text}
-                    </div>
-                    <span class="text-[10px] text-gray-400 mt-1 px-1">${m.time || ''}</span>
-                </div>
-            `;
-        }).join('');
 
-        chatBox.innerHTML = topStatusHtml + bubblesHtml;
+            const bubblesHtml = visibleMessages.map(m => renderSingleChatBubbleHtml(m, friend)).join('');
+            chatBox.innerHTML = topStatusHtml + bubblesHtml;
+        }
 
         if (!shouldScrollChatToLatest) {
             if (isPrependingOlder) {

@@ -3,30 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>安全與登入日誌 🛡️ 月老神社後台</title>
+    <title>操作與防護日誌 🛡️ 月老神社後台</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261115">
+    <link rel="stylesheet" href="style.css?v=20261118b">
 </head>
 <body data-admin-page="logs">
     <div id="adminLayoutMount" class="space-y-6">
-        <!-- 新增：玩家配對成功日誌（保留最近 30 筆） -->
-        <div class="card-jp rounded-2xl overflow-hidden border-2 border-pink-200">
-            <div class="p-5 border-b border-pink-200 flex flex-wrap items-center justify-between bg-pink-50/50 gap-3">
+        <!-- ==================== 1. 🕹️ 玩家操作日誌（保留最近 30 筆・搜尋・每頁 5/10/30 筆） ==================== -->
+        <div class="card-jp rounded-2xl overflow-hidden border-2 border-emerald-200">
+            <div class="p-5 border-b border-emerald-200 flex flex-col xl:flex-row xl:items-center justify-between bg-emerald-50/45 gap-3">
                 <div>
                     <div class="flex flex-wrap items-center gap-2">
-                        <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">💘 玩家配對成功日誌</h2>
-                        <span id="matchLogsCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                        <h2 class="text-lg font-bold font-serif-jp text-emerald-900">🕹️ 玩家操作日誌</h2>
+                        <span id="playerOpLogsCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
                             近 0 / 30 筆
                         </span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-0.5">每次 A 與 B 配對成功後自動紀錄雙方玩家與配對時間，保留最近 30 筆紀錄</p>
+                    <p class="text-xs text-gray-500 mt-0.5">記錄前台玩家手動解除配對等操作紀錄，保留最近 30 筆紀錄（預設每頁顯示 5 筆）</p>
                 </div>
-                <div class="flex items-center gap-2">
-                    <button type="button" onclick="clearAdminMatchLogs()" class="text-xs px-3 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-bold hover:bg-pink-50 transition shadow-sm">
-                        🗑️ 清空配對日誌
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
+                        <span class="font-bold text-emerald-800 whitespace-nowrap">🔍 搜尋：</span>
+                        <input type="text" id="playerOpLogSearchInput" oninput="onPlayerOpLogSearchInput(this.value)" placeholder="搜尋玩家 ID、暱稱或操作內容..." class="h-7 w-44 sm:w-52 px-2 admin-input-box text-xs text-[#8f4452]">
+                        <button type="button" id="clearPlayerOpLogSearchBtn" onclick="clearPlayerOpLogSearch()" title="清除搜尋" class="hidden text-gray-400 hover:text-rose-600 font-bold px-1">✕</button>
+                    </div>
+                    <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
+                        <span class="font-bold text-emerald-800 whitespace-nowrap">每頁顯示：</span>
+                        <select id="playerOpLogPageSizeSelect" onchange="onPlayerOpLogPageSizeChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
+                            <option value="5" selected>5 筆（預設）</option>
+                            <option value="10">10 筆</option>
+                            <option value="30">30 筆</option>
+                        </select>
+                    </div>
+                    <button type="button" onclick="clearAdminPlayerOpLogs()" class="px-3 py-2 rounded-xl bg-white border border-emerald-300 text-emerald-800 font-bold hover:bg-emerald-50 transition shadow-sm">
+                        🗑️ 清空操作日誌
                     </button>
-                    <button type="button" onclick="renderAdminAll(true)" class="text-xs px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
+                    <button type="button" onclick="renderAdminAll(true)" class="px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
                         ↻ 重新整理
                     </button>
                 </div>
@@ -35,50 +48,20 @@
                 <table class="admin-grid-table text-left text-xs md:text-sm">
                     <thead>
                         <tr class="text-xs">
-                            <th class="p-3.5 w-44">配對時間</th>
-                            <th class="p-3.5">配對玩家 A</th>
-                            <th class="p-3.5">配對玩家 B</th>
-                            <th class="p-3.5">配對場次 / 來源</th>
+                            <th class="p-3.5 w-44">操作時間</th>
+                            <th class="p-3.5 w-36">操作類型</th>
+                            <th class="p-3.5 w-48">操作玩家</th>
+                            <th class="p-3.5">詳細操作內容</th>
                         </tr>
                     </thead>
-                    <tbody id="matchLogsTableBody"></tbody>
+                    <tbody id="playerOpLogsTableBody"></tbody>
                 </table>
             </div>
+            <div id="playerOpLogsPaginationBar" class="p-4 border-t border-emerald-200 bg-emerald-50/35 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
-        <!-- 登入失敗日誌清單 -->
-        <div class="card-jp rounded-2xl overflow-hidden border-2 border-rose-200">
-            <div class="p-5 border-b border-rose-200 flex flex-wrap items-center justify-between bg-rose-50/40 gap-3">
-                <div>
-                    <h2 class="text-lg font-bold font-serif-jp text-rose-800">🛡️ 後台防護與玩家操作日誌</h2>
-                    <p class="text-xs text-gray-500 mt-0.5">系統自動記錄登入失敗的來源 IP，以及前台玩家手動解除配對的操作紀錄（保留最近 10 筆）</p>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button onclick="clearAdminLoginLogs()" class="text-xs px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-50 transition shadow-sm">
-                        🗑️ 清空所有紀錄
-                    </button>
-                    <button onclick="renderAdminAll()" class="text-xs px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
-                        ↻ 重新整理
-                    </button>
-                </div>
-            </div>
-            <div class="overflow-x-auto p-3 bg-white">
-                <table class="admin-grid-table text-left text-xs md:text-sm">
-                    <thead>
-                        <tr class="text-xs">
-                            <th class="p-3.5">時間</th>
-                            <th class="p-3.5 w-48">操作類型 / 嘗試帳號</th>
-                            <th class="p-3.5 w-40">來源 IP / 玩家名稱</th>
-                            <th class="p-3.5">詳細內容 / 裝置資訊</th>
-                        </tr>
-                    </thead>
-                    <tbody id="loginLogsTableBody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- ==================== 2. 🏮 紅線祈願牆題目監控（分「開放中」與「已結束」二種狀態） ==================== -->
-        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-4 mt-6">
+        <!-- ==================== 2. 🏮 紅線祈願牆發布與回覆紀錄（分「開放中」與「已結束」二種狀態） ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
                     <h2 class="text-base font-bold font-serif-jp text-[#8f4452]">🏮 紅線祈願牆發布與回覆紀錄</h2>
@@ -101,17 +84,98 @@
             </div>
             <div id="adminWishWallList" class="space-y-4 pt-1"></div>
         </div>
+
+        <!-- ==================== 3. 💘 玩家配對成功日誌（保留最近 30 筆・每頁 5/10/30 筆） ==================== -->
+        <div class="card-jp rounded-2xl overflow-hidden border-2 border-pink-200">
+            <div class="p-5 border-b border-pink-200 flex flex-col xl:flex-row xl:items-center justify-between bg-pink-50/50 gap-3">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">💘 玩家配對成功日誌</h2>
+                        <span id="matchLogsCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                            近 0 / 30 筆
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-0.5">每次 A 與 B 配對成功後自動紀錄雙方玩家與配對時間，保留最近 30 筆紀錄（預設每頁顯示 5 筆）</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">每頁顯示：</span>
+                        <select id="matchLogsPageSizeSelect" onchange="onMatchLogsPageSizeChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
+                            <option value="5" selected>5 筆（預設）</option>
+                            <option value="10">10 筆</option>
+                            <option value="30">30 筆</option>
+                        </select>
+                    </div>
+                    <button type="button" onclick="clearAdminMatchLogs()" class="px-3 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-bold hover:bg-pink-50 transition shadow-sm">
+                        🗑️ 清空配對日誌
+                    </button>
+                    <button type="button" onclick="renderAdminAll(true)" class="px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
+                        ↻ 重新整理
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-x-auto p-3 bg-white">
+                <table class="admin-grid-table text-left text-xs md:text-sm">
+                    <thead>
+                        <tr class="text-xs">
+                            <th class="p-3.5 w-44">配對時間</th>
+                            <th class="p-3.5">配對玩家 A</th>
+                            <th class="p-3.5">配對玩家 B</th>
+                            <th class="p-3.5">配對場次 / 來源</th>
+                        </tr>
+                    </thead>
+                    <tbody id="matchLogsTableBody"></tbody>
+                </table>
+            </div>
+            <div id="matchLogsPaginationBar" class="p-4 border-t border-pink-200 bg-pink-50/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
+        </div>
+
+        <!-- ==================== 4. 🛡️ 後台防護日誌（保留最近 10 筆） ==================== -->
+        <div class="card-jp rounded-2xl overflow-hidden border-2 border-rose-200">
+            <div class="p-5 border-b border-rose-200 flex flex-wrap items-center justify-between bg-rose-50/40 gap-3">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="text-lg font-bold font-serif-jp text-rose-800">🛡️ 後台防護日誌</h2>
+                        <span id="loginLogsCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">
+                            近 0 / 10 筆
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-0.5">系統自動記錄後台登入失敗的來源 IP 與瀏覽器裝置資訊（保留最近 10 筆）</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="clearAdminLoginLogs()" class="text-xs px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-50 transition shadow-sm">
+                        🗑️ 清空防護日誌
+                    </button>
+                    <button type="button" onclick="renderAdminAll(true)" class="text-xs px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
+                        ↻ 重新整理
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-x-auto p-3 bg-white">
+                <table class="admin-grid-table text-left text-xs md:text-sm">
+                    <thead>
+                        <tr class="text-xs">
+                            <th class="p-3.5 w-44">時間</th>
+                            <th class="p-3.5 w-44">嘗試帳號</th>
+                            <th class="p-3.5 w-40">來源 IP</th>
+                            <th class="p-3.5">瀏覽器 / 裝置資訊</th>
+                        </tr>
+                    </thead>
+                    <tbody id="loginLogsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261117af"></script>
+    <script src="shared/schedule.js?v=20261118f"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261118a"></script>
+    <script src="shared/cloud-store.js?v=20261118f"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261118a"></script>
-    <script src="backend/matching.js?v=20261117aa"></script>
-    <script src="backend/logs.js?v=20261117s"></script>
+    <script src="backend/state.js?v=20261118g"></script>
+    <script src="backend/matching.js?v=20261118f"></script>
+    <script src="backend/logs.js?v=20261118g"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261117p"></script>
+    <script src="backend/layout.js?v=20261118e"></script>
 </body>
 </html>

@@ -61,10 +61,14 @@ const AdminMemoryCache = {
     chats: null,
     regHistoryRaw: null,
     regHistory: null,
+    wishWallRaw: null,
+    wishWall: null,
+    matchLogsRaw: null,
+    matchLogs: null,
     invalidate(key) {
         if (!key) {
-            this.usersRaw = this.reportsRaw = this.systemRaw = this.mailboxRaw = this.fateWallRaw = this.bannedRulesRaw = this.forceRulesRaw = this.chatsRaw = this.regHistoryRaw = null;
-            this.users = this.reports = this.system = this.mailbox = this.fateWall = this.bannedRules = this.forceRules = this.chats = this.regHistory = null;
+            this.usersRaw = this.reportsRaw = this.systemRaw = this.mailboxRaw = this.fateWallRaw = this.bannedRulesRaw = this.forceRulesRaw = this.chatsRaw = this.regHistoryRaw = this.wishWallRaw = this.matchLogsRaw = null;
+            this.users = this.reports = this.system = this.mailbox = this.fateWall = this.bannedRules = this.forceRules = this.chats = this.regHistory = this.wishWall = this.matchLogs = null;
             return;
         }
         this[key + 'Raw'] = null;
@@ -706,15 +710,23 @@ function deleteAdminFateWallEntry(postId) {
 
 function getAdminWishWallPosts() {
     const keyName = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
+    const raw = localStorage.getItem(keyName) || '[]';
+    if (raw === AdminMemoryCache.wishWallRaw && Array.isArray(AdminMemoryCache.wishWall)) {
+        return AdminMemoryCache.wishWall;
+    }
     try {
-        const arr = JSON.parse(localStorage.getItem(keyName) || '[]');
-        if (!Array.isArray(arr)) return [];
-        return arr
-            .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
-            .filter(Boolean)
-            .sort((a, b) => (typeof compareWishWallItems === 'function')
-                ? compareWishWallItems(a, b)
-                : (Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0)));
+        const arr = JSON.parse(raw);
+        const normalized = Array.isArray(arr)
+            ? arr
+                .map(w => (typeof normalizeWishWallItem === 'function' ? normalizeWishWallItem(w) : w))
+                .filter(Boolean)
+                .sort((a, b) => (typeof compareWishWallItems === 'function')
+                    ? compareWishWallItems(a, b)
+                    : (Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0)))
+            : [];
+        AdminMemoryCache.wishWallRaw = raw;
+        AdminMemoryCache.wishWall = normalized;
+        return normalized;
     } catch (e) {
         return [];
     }
@@ -953,19 +965,36 @@ function isAdminAuthenticated() {
 async function unlockAdminUI() {
     document.getElementById('adminLoginOverlay').classList.add('hidden');
     document.getElementById('adminMainContent').classList.remove('hidden');
-    // 多頁面架構已改由左側選單切換頁面
-    await CloudSync.init(() => {
-        renderAdminAll();
-    });
-    checkAutoSchedule2000();
-    if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
-        const purgedOnLoad = ChatStore.purgeInactiveRooms(Date.now());
-        if (purgedOnLoad.length > 0 && typeof AdminMemoryCache !== 'undefined') {
-            AdminMemoryCache.invalidate('chats');
-            AdminMemoryCache.invalidate('users');
-        }
+
+    // 1. 本地快取秒開：立即以本地最新快取渲染畫面，無需等待雲端全庫下載
+    const badge = document.getElementById('cloudStatusBadge');
+    if (badge) {
+        badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-800 font-semibold';
+        badge.textContent = '⚡ 已載入本地快取（雲端背景同步中...）';
     }
-    renderAdminAll();
+    checkAutoSchedule2000();
+    renderAdminAll(true);
+
+    // 2. 雲端背景靜默同步：下載完成後自動比對更新並開啟即時 SSE 推播
+    CloudSync.init(() => {
+        if (typeof AdminMemoryCache !== 'undefined') {
+            AdminMemoryCache.invalidate();
+        }
+        renderAdminAll(false);
+    }).then(() => {
+        if (typeof AdminMemoryCache !== 'undefined') {
+            AdminMemoryCache.invalidate();
+        }
+        checkAutoSchedule2000();
+        if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
+            const purgedOnLoad = ChatStore.purgeInactiveRooms(Date.now());
+            if (purgedOnLoad.length > 0 && typeof AdminMemoryCache !== 'undefined') {
+                AdminMemoryCache.invalidate('chats');
+                AdminMemoryCache.invalidate('users');
+            }
+        }
+        renderAdminAll(false);
+    }).catch(() => {});
 }
 
 async function handleAdminLogin(e) {
@@ -1050,12 +1079,14 @@ function pollSharedStorageChanges() {
     const curSys = localStorage.getItem(SYSTEM_STATE_KEY) || '';
     const curChats = localStorage.getItem(CHATS_KEY) || '';
     const curMatchLogs = localStorage.getItem(MATCH_LOGS_KEY) || '';
+    const pOpKey = (typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs';
+    const curPlayerOpLogs = localStorage.getItem(pOpKey) || '';
     const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
     const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
     const curFateWall = localStorage.getItem(fwKey) || '';
     const curWishWall = localStorage.getItem(wwKey) || '';
     const curBatch = getCurrentBatch();
-    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curMatchLogs !== lastMatchLogsAdminSnapshot || curFateWall !== lastFateWallAdminSnapshot || curWishWall !== lastWishWallAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
+    if (curUsers !== lastUsersSnapshot || curReports !== lastReportsSnapshot || curSys !== lastSystemSnapshot || curChats !== lastChatsAdminSnapshot || curMatchLogs !== lastMatchLogsAdminSnapshot || curPlayerOpLogs !== lastPlayerOpLogsAdminSnapshot || curFateWall !== lastFateWallAdminSnapshot || curWishWall !== lastWishWallAdminSnapshot || curBatch !== lastRenderedBatchNumber) {
         renderAdminAll(false);
     }
 }
@@ -1063,9 +1094,10 @@ function pollSharedStorageChanges() {
 window.addEventListener('storage', (e) => {
     if (!isAdminAuthenticated()) return;
     if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
+    const pOpKey = (typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs';
     const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
     const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
-    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, CHATS_KEY, REG_HISTORY_KEY, 'yuelao_admin_login_logs', MATCH_LOGS_KEY, fwKey, wwKey].includes(e.key)) {
+    if ([USERS_KEY, REPORTS_KEY, SYSTEM_STATE_KEY, MAILBOX_KEY, CUSTOM_ACTIVITIES_KEY, CHATS_KEY, REG_HISTORY_KEY, 'yuelao_admin_login_logs', MATCH_LOGS_KEY, pOpKey, fwKey, wwKey].includes(e.key)) {
         renderAdminAll(false);
     }
 });
@@ -1092,7 +1124,7 @@ setInterval(() => {
         }
     }
     pollSharedStorageChanges();
-}, 1000);
+}, 3000);
 
 // 由 backend/layout.js 渲染側邊欄骨架後自動檢查登入狀態
 
@@ -1103,6 +1135,7 @@ function renderAdminSharedOverview(forceUpdate = false) {
     lastSystemSnapshot = localStorage.getItem(SYSTEM_STATE_KEY) || '';
     lastChatsAdminSnapshot = localStorage.getItem(CHATS_KEY) || '';
     lastMatchLogsAdminSnapshot = localStorage.getItem(MATCH_LOGS_KEY) || '';
+    lastPlayerOpLogsAdminSnapshot = localStorage.getItem((typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs') || '';
     lastFateWallAdminSnapshot = localStorage.getItem((typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall') || '';
     lastWishWallAdminSnapshot = localStorage.getItem((typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall') || '';
 
@@ -1192,7 +1225,7 @@ function renderAdminAll(forceUpdate = false) {
         renderOpsPageSection(batch, currentSched, maxDisplayBatch);
     }
     if (typeof renderLogsPageSection === 'function') {
-        renderLogsPageSection();
+        renderLogsPageSection(forceUpdate);
     }
 }
 

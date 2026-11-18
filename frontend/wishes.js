@@ -3,6 +3,7 @@
 let wishDraftTitle = '';
 let wishDraftOpenDays = 3;
 let expandedPublicWishes = new Set();
+let expandedWishAnonLists = new Set();
 let expandedMyActiveWish = false;
 let isEditingMyActiveWish = false;
 let editMyWishId = '';
@@ -10,6 +11,7 @@ let editMyWishTitle = '';
 let editMyWishQuestions = [];
 let wishPublicListPage = 1;
 let wishPastHistoryPage = 1;
+let wishPublicGenderFilter = 'ALL';
 const WISH_PUBLIC_PER_PAGE = 5;
 const WISH_PAST_PER_PAGE = 5;
 const WISH_PAST_MAX_RECORDS = 10;
@@ -55,6 +57,18 @@ function togglePublicWishExpand(wishId) {
             }, 40);
         });
     }
+}
+
+function toggleWishAnonListExpand(wishId) {
+    const wid = String(wishId || '').trim();
+    if (!wid) return;
+    if (expandedWishAnonLists.has(wid)) {
+        expandedWishAnonLists.delete(wid);
+    } else {
+        expandedWishAnonLists.add(wid);
+    }
+    lastWishWallRenderSig = '';
+    renderWishWallTab(true);
 }
 
 function toggleMyActiveWishExpand() {
@@ -200,6 +214,14 @@ async function saveEditedMyActiveWish(e) {
     showMiniNotice('✅ 祈願題目已更新！', '你的祈願文字標題與二選一選項內容已同步更新。');
 }
 
+function onWishPublicGenderFilterChange(val) {
+    const cleanVal = ['ALL', '男', '女'].includes(String(val || '').trim()) ? String(val || '').trim() : 'ALL';
+    wishPublicGenderFilter = cleanVal;
+    wishPublicListPage = 1;
+    lastWishWallRenderSig = '';
+    renderWishWallTab(true);
+}
+
 function goToWishPublicPage(pageNum) {
     const p = parseInt(pageNum, 10);
     if (isNaN(p) || p < 1) return;
@@ -311,8 +333,8 @@ function handleHeaderAddWishClick() {
         if (maleQuota.isFull) {
             const resetTimeLabel = formatWishShortDateTime(maleQuota.resetAtTs);
             showMiniNotice(
-                '⏳ 今日男生新增名額已滿（3 / 3 位）',
-                `每天僅限 3 位男生新增祈願題目，今日名額已滿！\n將於 ${resetTimeLabel}（20:00）重置次數後才可再新增喔。`
+                `⏳ 今日新增名額已滿（${maleQuota.usedCount} / ${maleQuota.limit} 位）`,
+                `每天僅限 3 位新增祈願題目，今日名額已滿！\n將於 ${resetTimeLabel}（20:00）重置次數後才可再新增喔。`
             );
             return;
         }
@@ -460,9 +482,8 @@ async function submitCreateWishPost(e) {
         if (maleQuota.isFull) {
             const resetTimeLabel = formatWishShortDateTime(maleQuota.resetAtTs);
             showMiniNotice(
-                '⏳ 今日男生新增名額已滿（3 / 3 位）',
-                `每天僅限 3 位男生新增祈願題目，今日名額已滿！
-將於 ${resetTimeLabel}（20:00）重置次數後才可再新增喔。`
+                `⏳ 今日新增名額已滿（${maleQuota.usedCount} / ${maleQuota.limit} 位）`,
+                `每天僅限 3 位新增祈願題目，今日名額已滿！\n將於 ${resetTimeLabel}（20:00）重置次數後才可再新增喔。`
             );
             lastWishWallRenderSig = '';
             renderWishWallTab(true);
@@ -949,6 +970,16 @@ function renderWishWallTab(forceRender = false) {
         openBadge.textContent = `開放中 ${openWishes.length} 則`;
     }
 
+    const genderFilterGroup = document.getElementById('wishWallGenderFilterGroup');
+    if (genderFilterGroup) {
+        genderFilterGroup.querySelectorAll('button[data-wish-gender]').forEach(btn => {
+            const isSel = btn.dataset.wishGender === wishPublicGenderFilter;
+            btn.className = isSel
+                ? 'text-xs px-3 py-1.5 rounded-full bg-[#c96a7b] text-white border border-[#c96a7b] font-bold shadow-2xs transition'
+                : 'text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] font-bold hover:bg-pink-50 transition';
+        });
+    }
+
     const sysCfg = (typeof Store !== 'undefined' && typeof Store.getSystemConfig === 'function')
         ? Store.getSystemConfig()
         : { wishEarlyCloseCanMatch: true };
@@ -961,9 +992,11 @@ function renderWishWallTab(forceRender = false) {
         earlyCloseCanMatch,
         maleUsed: maleQuota.usedCount,
         maleReset: maleQuota.resetAtTs,
+        pubGenderFilter: wishPublicGenderFilter,
         pubPage: wishPublicListPage,
         pastPage: wishPastHistoryPage,
         expPub: Array.from(expandedPublicWishes),
+        expAnon: Array.from(expandedWishAnonLists),
         expMy: expandedMyActiveWish,
         editMy: isEditingMyActiveWish,
         editMyId: editMyWishId,
@@ -1213,35 +1246,14 @@ function renderWishWallTab(forceRender = false) {
                     </div>
                 </div>
             `;
-        } else if (myGender === '男' && maleQuota.isFull) {
-            const resetTimeStr = formatWishShortDateTime(maleQuota.resetAtTs);
-            creatorBox.innerHTML = `
-                <div class="space-y-4">
-                    ${pendingSelectionHtml}
-                    <div class="glass-card rounded-3xl p-5 md:p-6 border-2 border-amber-300 bg-gradient-to-r from-amber-50/85 via-white to-pink-50/60 space-y-2.5">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                            <span class="text-xs px-3 py-1 rounded-full bg-amber-100 border border-amber-300 text-amber-900 font-bold">
-                                ⏳ 今日男生新增祈願名額已滿（${maleQuota.usedCount} / ${maleQuota.limit} 位）
-                            </span>
-                            <span class="text-xs font-mono font-bold text-[#c96a7b]">
-                                將於 ${resetTimeStr}（20:00）重置次數
-                            </span>
-                        </div>
-                        <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🙋‍♂️ 男生每日限額 3 位新增祈願題目</h3>
-                        <p class="text-xs text-gray-600 leading-relaxed">
-                            今日已有 3 位男生新增了祈願題目，需等到 <strong>${resetTimeStr}（明日／今日 20:00）</strong> 重置次數後才可再新增喔！在此期間你仍可自由回答下方所有開放中的祈願題目。
-                        </p>
-                    </div>
-                </div>
-            `;
-        } else if (!isWishCreatorFormOpen) {
+        } else if ((myGender === '男' && maleQuota.isFull) || !isWishCreatorFormOpen) {
             creatorBox.innerHTML = pendingSelectionHtml ? `<div class="space-y-4">${pendingSelectionHtml}</div>` : '';
         } else {
             const expPreviewTs = calcWishExpiresAtTs(nowTs, wishDraftOpenDays);
             const resetTimeStr = formatWishShortDateTime(maleQuota.resetAtTs);
             const genderRuleBadgeHtml = myGender === '男'
-                ? `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-sky-100 border border-sky-200 text-sky-800 font-bold">🙋‍♂️ 男生今日新增名額：已用 ${maleQuota.usedCount} / ${maleQuota.limit} 位</span>`
-                : `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-pink-100 border border-pink-200 text-[#8f4452] font-bold">🌸 女生不限新增次數</span>`;
+                ? `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-sky-100 border border-sky-200 text-sky-800 font-bold">🙋‍♂️ 今日新增名額：已用 ${maleQuota.usedCount} / ${maleQuota.limit} 位</span>`
+                : '';
 
             const draftRowsHtml = wishDraftQuestions.map((q, idx) => `
                 <div class="p-3.5 rounded-2xl bg-pink-50/45 border border-pink-200 space-y-2.5">
@@ -1329,14 +1341,31 @@ function renderWishWallTab(forceRender = false) {
         }
     }
 
-    // 2. 渲染公開「開放回答中」的祈願牆列表（最多顯示 5 個，第 6 個顯示在第二頁；單列呈現標題與狀態）
+    // 2. 渲染公開「開放回答中」的祈願牆列表（支援全部/男/女篩選；最多顯示 5 個，第 6 個顯示在第二頁）
     const publicPaginationBar = document.getElementById('wishWallPublicPaginationBar');
-    if (openWishes.length === 0) {
+    const filteredOpenWishes = openWishes.filter(w => {
+        if (wishPublicGenderFilter === '男' || wishPublicGenderFilter === '女') {
+            if (wishPublicGenderFilter === '男' && Boolean(w.isPinned)) {
+                return true;
+            }
+            const g = String(w.authorGender || '').trim() === '男' ? '男' : '女';
+            return g === wishPublicGenderFilter;
+        }
+        return true;
+    });
+
+    if (filteredOpenWishes.length === 0) {
+        const emptyTitle = openWishes.length === 0
+            ? '目前祈願牆上尚無開放中的題目'
+            : `目前沒有「${wishPublicGenderFilter}」發起的開放中祈願題目`;
+        const emptySub = openWishes.length === 0
+            ? '點擊右上角「➕ 新增祈願題目」發布二選一祈願後，將即時顯示於此！'
+            : '可切換上方篩選為「全部」查看其他開放中的祈願題目！';
         publicListBox.innerHTML = `
             <div class="glass-card rounded-3xl p-8 text-center text-xs text-gray-400 border border-dashed border-pink-200 space-y-1.5">
                 <span class="text-3xl block">🎐</span>
-                <p class="font-semibold text-gray-500">目前祈願牆上尚無開放中的題目</p>
-                <p>點擊右上角「➕ 新增祈願題目」發布二選一祈願後，將即時顯示於此！</p>
+                <p class="font-semibold text-gray-500">${emptyTitle}</p>
+                <p>${emptySub}</p>
             </div>
         `;
         if (publicPaginationBar) {
@@ -1344,12 +1373,12 @@ function renderWishWallTab(forceRender = false) {
             publicPaginationBar.innerHTML = '';
         }
     } else {
-        const totalOpenCount = openWishes.length;
+        const totalOpenCount = filteredOpenWishes.length;
         const totalOpenPages = Math.max(1, Math.ceil(totalOpenCount / WISH_PUBLIC_PER_PAGE));
         if (wishPublicListPage > totalOpenPages) wishPublicListPage = totalOpenPages;
         if (wishPublicListPage < 1) wishPublicListPage = 1;
         const openStartIdx = (wishPublicListPage - 1) * WISH_PUBLIC_PER_PAGE;
-        const pageOpenWishes = openWishes.slice(openStartIdx, openStartIdx + WISH_PUBLIC_PER_PAGE);
+        const pageOpenWishes = filteredOpenWishes.slice(openStartIdx, openStartIdx + WISH_PUBLIC_PER_PAGE);
 
         publicListBox.innerHTML = pageOpenWishes.map(w => {
             const remDays = calcWishRemainingDays(w, nowTs);
@@ -1358,12 +1387,21 @@ function renderWishWallTab(forceRender = false) {
             const isMine = myPid && String(w.authorId) === myPid;
             const myResp = myPid ? resps.find(r => String(r.responderId) === myPid) : null;
 
+            const isAnonListExpanded = expandedWishAnonLists.has(String(w.id));
+            const visibleAnonResps = (resps.length > 3 && !isAnonListExpanded) ? resps.slice(0, 3) : resps;
+            const anonMoreToggleHtml = resps.length > 3
+                ? (isAnonListExpanded
+                    ? `<button type="button" onclick="toggleWishAnonListExpand('${escapeWishHtml(w.id)}')" title="收合匿名名單" class="px-2 py-0.5 rounded-full bg-gray-100 border border-gray-200 text-gray-500 hover:bg-gray-200 text-[11px] font-bold transition cursor-pointer">收合</button>`
+                    : `<button type="button" onclick="toggleWishAnonListExpand('${escapeWishHtml(w.id)}')" title="點擊展開全部 ${resps.length} 位匿名名單" class="px-2 py-0.5 rounded-full bg-pink-50 border border-pink-300 text-[#8f4452] hover:bg-pink-100 text-[11px] font-bold transition cursor-pointer">...</button>`)
+                : '';
+
             const anonSummaryHtml = resps.length === 0
                 ? `<span class="text-[11px] text-gray-400">💭 目前尚無玩家回答，快來搶當「匿名1號」吧！</span>`
                 : `
                     <div class="flex flex-wrap items-center gap-1.5 text-xs">
                         <span class="text-[#8f4452] font-bold">👥</span>
-                        ${resps.map(r => `<span class="px-2 py-0.5 rounded-full bg-rose-100/90 text-[#8f4452] text-[11px] font-bold">匿名${r.anonNumber}號</span>`).join('')}
+                        ${visibleAnonResps.map(r => `<span class="px-2 py-0.5 rounded-full bg-rose-100/90 text-[#8f4452] text-[11px] font-bold">匿名${r.anonNumber}號</span>`).join('')}
+                        ${anonMoreToggleHtml}
                         <span class="text-xs font-semibold text-gray-600">已回答問題（共 ${resps.length} 人）</span>
                     </div>
                 `;
@@ -1473,15 +1511,17 @@ function renderWishWallTab(forceRender = false) {
                             <span class="px-2 py-0.5 rounded-full ${authorBadgeStyle} text-[11px] font-bold shrink-0 whitespace-nowrap">
                                 ${authorIdentityLabel}
                             </span>
-                            <span class="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold shrink-0 whitespace-nowrap">
-                                ⏳ 剩餘 ${remDays} 天（${formatWishShortDateTime(w.expiresAtTs)} 截止）
-                            </span>
                         </div>
                         <span class="text-base text-[#c96a7b] shrink-0 transform transition-transform ${isPubExpanded ? 'rotate-180' : ''}">▾</span>
                     </div>
 
                     ${isPubExpanded ? `
                     <div class="pt-3 border-t border-pink-100 space-y-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">
+                                ⏳ 剩餘 ${remDays} 天（${formatWishShortDateTime(w.expiresAtTs)} 截止）
+                            </span>
+                        </div>
                         <div class="space-y-2.5">
                             ${questionsBlockHtml}
                         </div>
@@ -1609,7 +1649,9 @@ function renderWishWallTab(forceRender = false) {
 window.handleHeaderAddWishClick = handleHeaderAddWishClick;
 window.refreshWishWallManual = refreshWishWallManual;
 window.togglePublicWishExpand = togglePublicWishExpand;
+window.toggleWishAnonListExpand = toggleWishAnonListExpand;
 window.toggleMyActiveWishExpand = toggleMyActiveWishExpand;
+window.onWishPublicGenderFilterChange = onWishPublicGenderFilterChange;
 window.goToWishPublicPage = goToWishPublicPage;
 window.goToWishPastPage = goToWishPastPage;
 window.openEditMyActiveWish = openEditMyActiveWish;

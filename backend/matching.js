@@ -853,7 +853,7 @@ function unmatchPlayerPair(userId, specificPartnerId = null) {
     if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
         CloudSync.markPairUnmatched(userId, targetPartnerId, 600000);
     }
-    saveUsers(users, { isMatchMutation: true });
+    saveUsers(users, { isMatchMutation: true, targetIds: [String(userId), String(targetPartnerId)] });
     if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
         ChatStore.clearChat(userId, targetPartnerId);
     } else {
@@ -926,6 +926,10 @@ function checkSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
 
 function acceptsCandidate(seeker, candidate) {
     const criteria = seeker.exactMatchCriteria || {};
+    const mustKeys = Array.isArray(seeker.mustMatchKeys) ? seeker.mustMatchKeys : [];
+    if (typeof sharedEvaluateMatchCriteria === 'function') {
+        return sharedEvaluateMatchCriteria(seeker, candidate, criteria, mustKeys);
+    }
     if (typeof sharedMatchesGenderPreference === 'function') {
         if (!sharedMatchesGenderPreference(seeker, candidate, criteria)) return false;
     } else {
@@ -941,9 +945,16 @@ function acceptsCandidate(seeker, candidate) {
         if ((critG === '男生' || critG === '男') && cGender !== '男') return false;
         if ((critG === '女生' || critG === '女') && cGender !== '女') return false;
     }
-    const otherKeys = Object.keys(criteria).filter(k => k !== 'gender' && !(k === 'city' && criteria.region));
-    if (otherKeys.length === 0) return true;
-    return otherKeys.some(k => checkSingleCriterion(k, criteria[k], candidate, criteria));
+    const activeKeys = Object.keys(criteria).filter(k => k !== 'gender' && !(k === 'city' && criteria.region));
+    if (activeKeys.length === 0) return true;
+    const validMust = mustKeys.filter(k => k !== 'gender' && Object.prototype.hasOwnProperty.call(criteria, k)).slice(0, 2);
+    const mustSet = new Set(validMust);
+    const orKeys = activeKeys.filter(k => !mustSet.has(k));
+    for (const mk of validMust) {
+        if (!checkSingleCriterion(mk, criteria[mk], candidate, criteria)) return false;
+    }
+    if (orKeys.length === 0) return true;
+    return orKeys.some(k => checkSingleCriterion(k, criteria[k], candidate, criteria));
 }
 
 function canPair(A, B) {
@@ -1075,7 +1086,7 @@ function runSessionMatch(isAuto = false) {
     }).length;
 
     appendLog(`<span class="text-pink-300">[結算完成]</span> 本場次共配對成功 <strong>${pairCount} 對</strong>${bannedSkippedCount > 0 ? `（另有 ${bannedSkippedCount} 名已報名玩家因設定「禁止配對」而未配對）` : ''}。`);
-    saveUsers(users, { isMatchMutation: true });
+    saveUsers(users, { isMatchMutation: true, targetIds: Array.from(pairedThisSessionIds) });
 }
 
 function addSecretForceMatch() {
@@ -1321,7 +1332,7 @@ function executeInstantManualMatch(idA, idB) {
         AdminMemoryCache.invalidate('chats');
     }
 
-    saveUsers(users, { isMatchMutation: true });
+    saveUsers(users, { isMatchMutation: true, targetIds: [String(userA.id), String(userB.id)] });
     closeInstantMatchModal();
     appendLog(`<span class="text-emerald-300">[即時手動配對]</span> 管理員已手動將 <strong>${userA.nickname} (ID:${userA.id})</strong> ⇄ <strong>${userB.nickname} (ID:${userB.id})</strong> 配對為好友並開啟聊天室。`);
     alert(`✅ 成功！「${userA.nickname} (ID:${userA.id})」與「${userB.nickname} (ID:${userB.id})」已成為好友，並開啟專屬聊天室。`);

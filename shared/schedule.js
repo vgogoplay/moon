@@ -308,6 +308,49 @@ function sharedCheckSingleCriterion(key, desiredVal, candidate, seekerCriteria =
     return candidate[key] === desiredVal;
 }
 
+function normalizeMustMatchKeysList(rawKeys, criteriaObj = {}) {
+    const crit = (criteriaObj && typeof criteriaObj === 'object' && !Array.isArray(criteriaObj)) ? criteriaObj : {};
+    const arr = Array.isArray(rawKeys)
+        ? rawKeys
+        : (rawKeys && typeof rawKeys === 'object' ? Object.values(rawKeys) : []);
+    const result = [];
+    const seen = new Set();
+    arr.forEach(k => {
+        const keyStr = String(k || '').trim();
+        if (!keyStr || seen.has(keyStr)) return;
+        if (keyStr === 'city' && Object.prototype.hasOwnProperty.call(crit, 'region')) return;
+        if (!Object.prototype.hasOwnProperty.call(crit, keyStr)) return;
+        seen.add(keyStr);
+        if (result.length < 2) {
+            result.push(keyStr);
+        }
+    });
+    return result;
+}
+
+function sharedEvaluateMatchCriteria(seeker, candidate, criteria = {}, mustMatchKeys = []) {
+    const crit = (criteria && typeof criteria === 'object' && !Array.isArray(criteria)) ? criteria : {};
+    if (!sharedMatchesGenderPreference(seeker, candidate, crit)) return false;
+
+    const activeKeys = Object.keys(crit).filter(k => k !== 'gender' && !(k === 'city' && crit.region));
+    if (activeKeys.length === 0) return true;
+
+    const mustKeys = normalizeMustMatchKeysList(mustMatchKeys, crit).filter(k => k !== 'gender');
+    const mustSet = new Set(mustKeys);
+    const orKeys = activeKeys.filter(k => !mustSet.has(k));
+
+    // 1. 必須吻合條件（最多 2 項）：每一項皆須完全符合
+    for (const mk of mustKeys) {
+        if (!sharedCheckSingleCriterion(mk, crit[mk], candidate, crit)) {
+            return false;
+        }
+    }
+
+    // 2. 選填條件（OR）：其中一項符合即可配對
+    if (orKeys.length === 0) return true;
+    return orKeys.some(ok => sharedCheckSingleCriterion(ok, crit[ok], candidate, crit));
+}
+
 function sharedRecordCustomPairMatch(userA, userB, targetSession, nowTs, activityId, matchDetail = '') {
     if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
         CloudSync.clearPairUnmatched(userA.id, userB.id);
@@ -443,10 +486,8 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     const acceptsCustomFn = (seeker, candidate) => {
         const reg = seeker.customActivityRegs && seeker.customActivityRegs[act.id];
         const criteria = (reg && reg.exactMatchCriteria) ? reg.exactMatchCriteria : {};
-        if (!sharedMatchesGenderPreference(seeker, candidate, criteria)) return false;
-        const otherKeys = Object.keys(criteria).filter(k => k !== 'gender' && !(k === 'city' && criteria.region));
-        if (otherKeys.length === 0) return true;
-        return otherKeys.some(k => sharedCheckSingleCriterion(k, criteria[k], candidate, criteria));
+        const mustKeys = (reg && Array.isArray(reg.mustMatchKeys)) ? reg.mustMatchKeys : [];
+        return sharedEvaluateMatchCriteria(seeker, candidate, criteria, mustKeys);
     };
 
     const permanentMatchedSet = getCustomActivityMatchedUserIdSet(act, users);
