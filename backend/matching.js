@@ -431,7 +431,7 @@ function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
     return { uA, uB, pidA, pidB, clearUnmatchedPromise };
 }
 
-async function persistRepairedUsersToLocalAndCloud(users, affectedUserIds) {
+async function persistRepairedUsersToLocalAndCloud(users, affectedUserIds, expectedPartnerMap = null) {
     const targetUsers = [];
     affectedUserIds.forEach(uid => {
         const cleanUid = String(uid).trim();
@@ -459,7 +459,7 @@ async function persistRepairedUsersToLocalAndCloud(users, affectedUserIds) {
             targetUsers.map(uObj => CloudSync.upsertUser(uObj, true, { isMatchMutation: true, throwOnError: true }))
         );
 
-        // 寫入後向 Firebase RTDB 進行回讀驗證，確保雲端節點確實已寫入最新 matchedHistory 與 matchedWithId
+        // 寫入後向 Firebase RTDB 進行回讀驗證，精準確認每一位玩家的預期對象 ID 都已寫入雲端節點
         await Promise.all(
             targetUsers.map(async (uObj) => {
                 const pid = String(uObj.id).trim();
@@ -469,13 +469,25 @@ async function persistRepairedUsersToLocalAndCloud(users, affectedUserIds) {
                     throw new Error(`回讀驗證失敗 (ID:${pid}, HTTP ${verifyRes.status})`);
                 }
                 const remoteUser = await verifyRes.json();
-                const remoteHistLen = Array.isArray(remoteUser && remoteUser.matchedHistory)
-                    ? remoteUser.matchedHistory.length
+                const remoteHistArr = Array.isArray(remoteUser && remoteUser.matchedHistory)
+                    ? remoteUser.matchedHistory
                     : (remoteUser && remoteUser.matchedHistory && typeof remoteUser.matchedHistory === 'object'
-                        ? Object.keys(remoteUser.matchedHistory).length
-                        : 0);
-                if (!remoteUser || (remoteHistLen === 0 && !remoteUser.matchedWithId)) {
-                    throw new Error(`雲端寫入未生效 (ID:${pid})`);
+                        ? Object.values(remoteUser.matchedHistory)
+                        : []);
+                const remotePartnerSet = new Set(
+                    remoteHistArr.map(h => String((h && h.partnerId) || '').trim()).filter(Boolean)
+                );
+                if (remoteUser && remoteUser.matchedWithId) {
+                    remotePartnerSet.add(String(remoteUser.matchedWithId).trim());
+                }
+
+                const expectedPartners = expectedPartnerMap && expectedPartnerMap.get(pid)
+                    ? Array.from(expectedPartnerMap.get(pid))
+                    : [];
+                const missingPartner = expectedPartners.find(expId => !remotePartnerSet.has(String(expId).trim()));
+
+                if (!remoteUser || remotePartnerSet.size === 0 || missingPartner) {
+                    throw new Error(`雲端寫入驗證未通過 (ID:${pid}${missingPartner ? ` 缺少對象 ${missingPartner}` : ''})`);
                 }
                 if (CloudSync.tree && typeof CloudSync.tree === 'object') {
                     if (!CloudSync.tree[USERS_KEY] || typeof CloudSync.tree[USERS_KEY] !== 'object') {
@@ -526,7 +538,11 @@ async function manualResolveSyncPair(idA, idB, btnEl = null) {
         if (res && res.clearUnmatchedPromise) {
             await res.clearUnmatchedPromise;
         }
-        await persistRepairedUsersToLocalAndCloud(latestUsers, [pidA, pidB]);
+        const expMap = new Map([
+            [pidA, new Set([pidB])],
+            [pidB, new Set([pidA])]
+        ]);
+        await persistRepairedUsersToLocalAndCloud(latestUsers, [pidA, pidB], expMap);
 
         appendLog(`<span class="text-emerald-300">[資料維護補齊]</span> 管理員已補齊 <strong>${uA.nickname} (ID:${pidA})</strong> ⇄ <strong>${uB.nickname} (ID:${pidB})</strong> 的雙向配對與聊天室紀錄。`);
         runRepairMatchesFromChats(true);
@@ -551,12 +567,21 @@ async function manualBatchSyncAllDiscrepancies(btnEl = null) {
     const discrepancies = collectMatchAndChatDiscrepancies();
     const repairable = discrepancies.filter(item => item.userAExists && item.userBExists);
     if (repairable.length === 0) {
-        alert('目前沒有可雙向補齊的配對項目（若其中一方會員已刪除，請使用「解除配對」）。');
+        alert('✅ 目前所有聊天室與會員列表的雙向配對皆已一致，沒有需要補齊的遺漏配對！');
         return;
     }
 
-    if (!confirm(`確定要一鍵補齊全部 ${repairable.length} 組的雙方好友名單與聊天室紀錄嗎？
-補齊後雙方會員列表及前台好友名單將同步更新。`)) {
+    const previewLines = repairable.slice(0, 10).map((it, i) => `#${i + 1} ${it.nameA} (ID:${it.idA}) ⇄ ${it.nameB} (ID:${it.idB})`);
+    if (repairable.length > 10) {
+        previewLines.push(`...其餘 ${repairable.length - 10} 組`);
+    }
+
+    if (!confirm(`偵測到 ${repairable.length} 組可雙向補齊的配對：
+
+${previewLines.join('
+')}
+
+確定要一鍵補齊全部 ${repairable.length} 組的雙方好友名單並同步寫入雲端嗎？`)) {
         return;
     }
 
@@ -568,7 +593,7 @@ async function manualBatchSyncAllDiscrepancies(btnEl = null) {
     }
 
     try {
-        if (typeof CloudSync !== 'undefined' && !CloudSync.initialized && CloudSync.dbUrl && typeof CloudSync.fetchFullTree === 'function') {
+        if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl && typeof CloudSync.fetchFullTree === 'function') {
             await CloudSync.fetchFullTree();
         }
         if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
@@ -577,14 +602,22 @@ async function manualBatchSyncAllDiscrepancies(btnEl = null) {
         const users = getUsers();
         const nowTs = Date.now();
         const affectedIds = new Set();
+        const expectedPartnerMap = new Map();
         const clearPromises = [];
         let syncedCount = 0;
+
+        const addExpectedPartner = (uid, pid) => {
+            if (!expectedPartnerMap.has(uid)) expectedPartnerMap.set(uid, new Set());
+            expectedPartnerMap.get(uid).add(pid);
+        };
 
         repairable.forEach(item => {
             const res = syncSingleDiscrepancyPairToUsers(users, item.idA, item.idB, nowTs);
             if (res) {
                 affectedIds.add(res.pidA);
                 affectedIds.add(res.pidB);
+                addExpectedPartner(res.pidA, res.pidB);
+                addExpectedPartner(res.pidB, res.pidA);
                 if (res.clearUnmatchedPromise) clearPromises.push(res.clearUnmatchedPromise);
                 syncedCount++;
             }
@@ -593,7 +626,7 @@ async function manualBatchSyncAllDiscrepancies(btnEl = null) {
         if (clearPromises.length > 0) {
             await Promise.all(clearPromises);
         }
-        await persistRepairedUsersToLocalAndCloud(users, Array.from(affectedIds));
+        await persistRepairedUsersToLocalAndCloud(users, Array.from(affectedIds), expectedPartnerMap);
 
         appendLog(`<span class="text-emerald-300">[資料維護一鍵補齊]</span> 管理員已一鍵補齊全部 ${syncedCount} 組的雙方好友名單與聊天室紀錄。`);
         runRepairMatchesFromChats(true);

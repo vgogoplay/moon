@@ -335,6 +335,13 @@ const CloudSync = {
 
     isRogueCustomMatchEntry(histItem, customActsList = null) {
         if (!histItem || typeof histItem !== 'object') return false;
+        if (
+            histItem.isForceRepaired ||
+            String(histItem.session || '').includes('・強制補齊') ||
+            String(histItem.matchDetail || '').includes('強制補齊')
+        ) {
+            return false;
+        }
         const matchedAtTs = Number(histItem.matchedAt || 0);
         const floorTs = (typeof getCustomActivityAllowedMinTs === 'function')
             ? getCustomActivityAllowedMinTs(Date.now())

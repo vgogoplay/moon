@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>會員列表與系統設定 ⛩️ 月老神社後台</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
@@ -20,6 +23,9 @@
                     </button>
                     <button type="button" onclick="openInstantMatchModal()" class="h-[46px] px-4 rounded-2xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white font-bold hover:opacity-95 transition shadow-sm inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
                         <span>⚡</span><span>新增配對</span>
+                    </button>
+                    <button type="button" onclick="manualBatchSyncAllDiscrepancies(this)" title="掃描聊天紀錄與會員列表，一鍵補齊所有遺漏的雙向配對好友" class="h-[46px] px-4 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold transition shadow-sm inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
+                        <span>🔄</span><span>一鍵補齊遺漏配對</span>
                     </button>
                     <div class="admin-field-box h-[46px] !py-1.5 !px-3.5 inline-flex items-center gap-2 shrink-0">
                         <span class="font-bold text-[#8f4452] whitespace-nowrap">🔍 搜尋：</span>
@@ -308,12 +314,12 @@
     <!-- 前後台共用核心層 -->
     <script src="shared/schedule.js?v=20261118av"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261119b"></script>
+    <script src="shared/cloud-store.js?v=20261119c"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261118au"></script>
-    <script src="backend/matching.js?v=20261119b"></script>
+    <script src="backend/matching.js?v=20261119c"></script>
     <script src="backend/roster.js?v=20261118aw"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261118o"></script>
+    <script src="backend/layout.js?v=20261119c"></script>
 </body>
 </html>
