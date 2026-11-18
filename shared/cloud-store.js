@@ -571,7 +571,12 @@ const CloudSync = {
         const seenRegularSessionSet = new Set();
         const finalItems = [];
         dedupedList.forEach(entry => {
-            if (!entry.activityId && entry.session && !String(entry.session).includes('強制')) {
+            const isEntryForceProtected = Boolean(
+                entry.isForceRepaired ||
+                String(entry.session || '').includes('強制') ||
+                String(entry.matchDetail || '').includes('強制')
+            );
+            if (!entry.activityId && entry.session && !isEntryForceProtected) {
                 const normSess = (typeof normalizeSessionLabel === 'function')
                     ? normalizeSessionLabel(entry.session)
                     : String(entry.session).trim();
@@ -2063,7 +2068,7 @@ const Store = {
         if (Array.isArray(state.registeredSessions)) {
             state.registeredSessions = Array.from(new Set(state.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
         }
-        if (state.matchedSession) {
+        if (state.matchedSession && !String(state.matchedSession).includes('強制')) {
             state.matchedSession = normalizeSessionLabel(state.matchedSession);
         }
 

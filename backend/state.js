@@ -323,7 +323,9 @@ function getUsers() {
             userMigrated = true;
         }
         if (u.matchedSession) {
-            const normMatched = normalizeSessionLabel(u.matchedSession);
+            const normMatched = String(u.matchedSession).includes('強制')
+                ? String(u.matchedSession).trim()
+                : normalizeSessionLabel(u.matchedSession);
             if (normMatched !== u.matchedSession) {
                 u.matchedSession = normMatched;
                 userMigrated = true;
@@ -331,8 +333,20 @@ function getUsers() {
         }
         if (Array.isArray(u.matchedHistory)) {
             u.matchedHistory.forEach(h => {
+                if (!h || typeof h !== 'object') return;
+                const isForceProtected = Boolean(
+                    h.isForceRepaired ||
+                    String(h.session || '').includes('強制') ||
+                    String(h.matchDetail || '').includes('強制')
+                );
+                if (isForceProtected) {
+                    h.isForceRepaired = true;
+                    if (!h.matchDetail) h.matchDetail = '・強制補齊';
+                }
                 if (h.session) {
-                    const normHist = normalizeSessionLabel(h.session);
+                    const normHist = isForceProtected
+                        ? String(h.session).trim()
+                        : normalizeSessionLabel(h.session);
                     if (normHist !== h.session) {
                         h.session = normHist;
                         userMigrated = true;
