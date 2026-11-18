@@ -310,7 +310,7 @@ const CloudSync = {
 
     clearPairUnmatched(idA, idB) {
         const pk = this.makeUnmatchedPairKey(idA, idB);
-        if (!pk) return;
+        if (!pk) return Promise.resolve();
         const map = this.loadSharedUnmatchedPairs();
         if (Object.prototype.hasOwnProperty.call(map, pk)) {
             delete map[pk];
@@ -321,8 +321,9 @@ const CloudSync = {
             delete this.tree[UNMATCHED_PAIRS_CLOUD_NODE][pk];
         }
         if (this.initialized) {
-            this.deleteNode(`${UNMATCHED_PAIRS_CLOUD_NODE}/${pk}`);
+            return this.deleteNode(`${UNMATCHED_PAIRS_CLOUD_NODE}/${pk}`);
         }
+        return Promise.resolve();
     },
 
     isPairRecentlyUnmatched(idA, idB) {
@@ -1317,20 +1318,28 @@ const CloudSync = {
         return String(path || '').split('/').filter(Boolean).map(seg => encodeURIComponent(seg)).join('/');
     },
 
-    async putNode(path, value) {
+    async putNode(path, value, options = {}) {
         this.applyStreamPatch(path, value);
         this.inFlightWrites++;
         this.writeEpoch++;
         this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
-            await fetch(`${this.dbUrl}/${encoded}.json`, {
+            const res = await fetch(`${this.dbUrl}/${encoded}.json`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(value)
             });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+            return true;
         } catch (e) {
             console.warn('CloudSync putNode 同步失敗', path, e);
+            if (options && options.throwOnError) {
+                throw e;
+            }
+            return false;
         } finally {
             this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
             this.writeEpoch++;
@@ -1523,7 +1532,7 @@ const CloudSync = {
         this.lastPushedUsersJson[pid] = serialized;
         this.setSharedPendingUser(pid, cleanRecord, 25000);
 
-        await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord);
+        await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord, { throwOnError: Boolean(options && options.throwOnError) });
         const cleanupTasks = [];
         if (isMatchMutation) {
             if (!Array.isArray(cleanRecord.matchedHistory) || cleanRecord.matchedHistory.length === 0) {

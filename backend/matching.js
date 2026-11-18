@@ -195,7 +195,7 @@ function runRepairMatchesFromChats(silentWhenClean = false) {
                         💔 解除配對（同步移除）
                     </button>
                     ${canRepairBoth ? `
-                        <button type="button" onclick="manualResolveSyncPair('${escapeMaintenanceHtml(item.idA)}', '${escapeMaintenanceHtml(item.idB)}')"
+                        <button type="button" onclick="manualResolveSyncPair('${escapeMaintenanceHtml(item.idA)}', '${escapeMaintenanceHtml(item.idB)}', this)"
                             class="px-3 py-1.5 rounded-xl bg-white border border-amber-300 text-amber-900 hover:bg-amber-50 text-[11px] font-semibold transition">
                             🔄 補齊雙向配對與聊天室
                         </button>
@@ -214,7 +214,7 @@ function runRepairMatchesFromChats(silentWhenClean = false) {
                 </span>
                 <div class="flex flex-wrap items-center gap-2">
                     ${repairableDiscrepancies.length > 0 ? `
-                        <button type="button" onclick="manualBatchSyncAllDiscrepancies()"
+                        <button type="button" onclick="manualBatchSyncAllDiscrepancies(this)"
                             class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-2xs transition">
                             🔄 一鍵補齊 雙方好友名單 (${repairableDiscrepancies.length} 組)
                         </button>
@@ -334,6 +334,8 @@ function manualBatchUnmatchAllDiscrepancies() {
     runRepairMatchesFromChats(true);
 }
 
+let manualSyncDiscrepancyInFlight = false;
+
 function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
     const pidA = String(idA || '').trim();
     const pidB = String(idB || '').trim();
@@ -343,8 +345,9 @@ function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
     const uB = users.find(u => u && String(u.id).trim() === pidB);
     if (!uA || !uB) return null;
 
+    let clearUnmatchedPromise = Promise.resolve();
     if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
-        CloudSync.clearPairUnmatched(pidA, pidB);
+        clearUnmatchedPromise = CloudSync.clearPairUnmatched(pidA, pidB) || Promise.resolve();
     }
 
     uA.matchedHistory = Array.isArray(uA.matchedHistory)
@@ -408,6 +411,11 @@ function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
         uB.matchedAt = sharedMatchedAt;
     }
 
+    if (typeof generatePlayerBackupCode === 'function') {
+        uA.backupCode = generatePlayerBackupCode(uA, users);
+        uB.backupCode = generatePlayerBackupCode(uB, users);
+    }
+
     if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
         ChatStore.ensureThread(pidA, pidB, [{
             senderId: 'system',
@@ -416,10 +424,40 @@ function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
         }]);
     }
 
-    return { uA, uB, pidA, pidB };
+    return { uA, uB, pidA, pidB, clearUnmatchedPromise };
 }
 
-function manualResolveSyncPair(idA, idB) {
+async function persistRepairedUsersToLocalAndCloud(users, affectedUserIds) {
+    const nextRaw = JSON.stringify(users);
+    if (typeof AdminMemoryCache !== 'undefined') {
+        AdminMemoryCache.usersRaw = nextRaw;
+        AdminMemoryCache.users = users;
+        if (typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('chats');
+        }
+    }
+    localStorage.setItem(USERS_KEY, nextRaw);
+
+    const targetUsers = [];
+    affectedUserIds.forEach(uid => {
+        const uObj = users.find(u => u && String(u.id).trim() === String(uid).trim());
+        if (uObj) {
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.setSharedPendingUser === 'function') {
+                CloudSync.setSharedPendingUser(String(uObj.id).trim(), { ...uObj }, 30000);
+            }
+            targetUsers.push(uObj);
+        }
+    });
+
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized && targetUsers.length > 0) {
+        await Promise.all(
+            targetUsers.map(uObj => CloudSync.upsertUser(uObj, true, { isMatchMutation: true, throwOnError: true }))
+        );
+    }
+}
+
+async function manualResolveSyncPair(idA, idB, btnEl = null) {
+    if (manualSyncDiscrepancyInFlight) return;
     const pidA = String(idA || '').trim();
     const pidB = String(idB || '').trim();
     if (!pidA || !pidB) return;
@@ -436,18 +474,40 @@ function manualResolveSyncPair(idA, idB) {
         return;
     }
 
-    syncSingleDiscrepancyPairToUsers(users, pidA, pidB, Date.now());
-
-    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
-        AdminMemoryCache.invalidate('users');
-        AdminMemoryCache.invalidate('chats');
+    manualSyncDiscrepancyInFlight = true;
+    const origBtnText = btnEl ? btnEl.textContent : '';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = '⏳ 正在寫入雲端...';
     }
-    saveUsers(users, { isMatchMutation: true, targetIds: [pidA, pidB] });
-    appendLog(`<span class="text-emerald-300">[資料維護補齊]</span> 管理員已補齊 <strong>${uA.nickname} (ID:${pidA})</strong> ⇄ <strong>${uB.nickname} (ID:${pidB})</strong> 的雙向配對與聊天室紀錄。`);
-    runRepairMatchesFromChats(true);
+
+    try {
+        const res = syncSingleDiscrepancyPairToUsers(users, pidA, pidB, Date.now());
+        if (res && res.clearUnmatchedPromise) {
+            await res.clearUnmatchedPromise;
+        }
+        await persistRepairedUsersToLocalAndCloud(users, [pidA, pidB]);
+
+        appendLog(`<span class="text-emerald-300">[資料維護補齊]</span> 管理員已補齊 <strong>${uA.nickname} (ID:${pidA})</strong> ⇄ <strong>${uB.nickname} (ID:${pidB})</strong> 的雙向配對與聊天室紀錄。`);
+        runRepairMatchesFromChats(true);
+        if (typeof renderAdminAll === 'function') {
+            renderAdminAll(true);
+        }
+        alert(`✅ 已成功補齊「${uA.nickname} (ID:${pidA})」與「${uB.nickname} (ID:${pidB})」的雙方好友名單並同步寫入雲端！`);
+    } catch (err) {
+        console.error('單筆補齊寫入雲端失敗:', err);
+        alert(`⚠️ 補齊寫入雲端時發生網路異常（${err && err.message ? err.message : '連線逾時'}），請確認網路後再試一次！`);
+    } finally {
+        manualSyncDiscrepancyInFlight = false;
+        if (btnEl && document.body.contains(btnEl)) {
+            btnEl.disabled = false;
+            btnEl.textContent = origBtnText;
+        }
+    }
 }
 
-function manualBatchSyncAllDiscrepancies() {
+async function manualBatchSyncAllDiscrepancies(btnEl = null) {
+    if (manualSyncDiscrepancyInFlight) return;
     const discrepancies = collectMatchAndChatDiscrepancies();
     const repairable = discrepancies.filter(item => item.userAExists && item.userBExists);
     if (repairable.length === 0) {
@@ -460,28 +520,51 @@ function manualBatchSyncAllDiscrepancies() {
         return;
     }
 
-    const users = getUsers();
-    const nowTs = Date.now();
-    const affectedIds = new Set();
-    let syncedCount = 0;
-
-    repairable.forEach(item => {
-        const res = syncSingleDiscrepancyPairToUsers(users, item.idA, item.idB, nowTs);
-        if (res) {
-            affectedIds.add(res.pidA);
-            affectedIds.add(res.pidB);
-            syncedCount++;
-        }
-    });
-
-    if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
-        AdminMemoryCache.invalidate('users');
-        AdminMemoryCache.invalidate('chats');
+    manualSyncDiscrepancyInFlight = true;
+    const origBtnText = btnEl ? btnEl.textContent : '';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = '⏳ 正在寫入雲端補齊中...';
     }
-    saveUsers(users, { isMatchMutation: true, targetIds: Array.from(affectedIds) });
-    appendLog(`<span class="text-emerald-300">[資料維護一鍵補齊]</span> 管理員已一鍵補齊全部 ${syncedCount} 組的雙方好友名單與聊天室紀錄。`);
-    runRepairMatchesFromChats(true);
-    alert(`✅ 已成功一鍵補齊 ${syncedCount} 組的雙方好友名單與聊天室紀錄！`);
+
+    try {
+        const users = getUsers();
+        const nowTs = Date.now();
+        const affectedIds = new Set();
+        const clearPromises = [];
+        let syncedCount = 0;
+
+        repairable.forEach(item => {
+            const res = syncSingleDiscrepancyPairToUsers(users, item.idA, item.idB, nowTs);
+            if (res) {
+                affectedIds.add(res.pidA);
+                affectedIds.add(res.pidB);
+                if (res.clearUnmatchedPromise) clearPromises.push(res.clearUnmatchedPromise);
+                syncedCount++;
+            }
+        });
+
+        if (clearPromises.length > 0) {
+            await Promise.all(clearPromises);
+        }
+        await persistRepairedUsersToLocalAndCloud(users, Array.from(affectedIds));
+
+        appendLog(`<span class="text-emerald-300">[資料維護一鍵補齊]</span> 管理員已一鍵補齊全部 ${syncedCount} 組的雙方好友名單與聊天室紀錄。`);
+        runRepairMatchesFromChats(true);
+        if (typeof renderAdminAll === 'function') {
+            renderAdminAll(true);
+        }
+        alert(`✅ 已成功一鍵補齊 ${syncedCount} 組的雙方好友名單與聊天室紀錄，並確認寫入雲端！`);
+    } catch (err) {
+        console.error('一鍵補齊寫入雲端失敗:', err);
+        alert(`⚠️ 一鍵補齊寫入雲端時發生網路異常（${err && err.message ? err.message : '連線逾時'}），請確認網路後再點擊重試！`);
+    } finally {
+        manualSyncDiscrepancyInFlight = false;
+        if (btnEl && document.body.contains(btnEl)) {
+            btnEl.disabled = false;
+            btnEl.textContent = origBtnText;
+        }
+    }
 }
 
 function adminFillPlayerFullData() {
