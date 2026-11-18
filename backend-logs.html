@@ -10,7 +10,7 @@
 </head>
 <body data-admin-page="logs">
     <div id="adminLayoutMount" class="space-y-6">
-        <!-- ==================== 1. 🕹️ 玩家操作日誌（保留最近 30 筆・搜尋・每頁 5/10/30 筆） ==================== -->
+        <!-- ==================== 1. 🕹️ 玩家操作日誌（保留最近 30 筆・搜尋・預設每頁顯示 0 筆） ==================== -->
         <div class="card-jp rounded-2xl overflow-hidden border-2 border-emerald-200">
             <div class="p-5 border-b border-emerald-200 flex flex-col xl:flex-row xl:items-center justify-between bg-emerald-50/45 gap-3">
                 <div>
@@ -20,7 +20,7 @@
                             近 0 / 30 筆
                         </span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-0.5">記錄前台玩家手動解除配對等操作紀錄，保留最近 30 筆紀錄（預設每頁顯示 5 筆）</p>
+                    <p class="text-xs text-gray-500 mt-0.5">記錄前台玩家手動解除配對等操作紀錄，保留最近 30 筆紀錄（預設每頁顯示 0 筆，可切換 5 / 10 / 30 筆）</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 text-xs">
                     <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
@@ -31,7 +31,8 @@
                     <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
                         <span class="font-bold text-emerald-800 whitespace-nowrap">每頁顯示：</span>
                         <select id="playerOpLogPageSizeSelect" onchange="onPlayerOpLogPageSizeChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
-                            <option value="5" selected>5 筆（預設）</option>
+                            <option value="0" selected>0 筆（預設）</option>
+                            <option value="5">5 筆</option>
                             <option value="10">10 筆</option>
                             <option value="30">30 筆</option>
                         </select>
@@ -60,7 +61,7 @@
             <div id="playerOpLogsPaginationBar" class="p-4 border-t border-emerald-200 bg-emerald-50/35 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
-        <!-- ==================== 2. 🏮 紅線祈願牆發布與回覆紀錄（表格風格＋每頁 5/10/30 筆＋點擊展開明細） ==================== -->
+        <!-- ==================== 2. 🏮 紅線祈願牆發布與回覆紀錄（表格風格＋預設每頁顯示 0 筆＋點擊展開明細） ==================== -->
         <div class="card-jp rounded-2xl overflow-hidden border-2 border-rose-200">
             <div class="p-5 border-b border-rose-200 flex flex-col xl:flex-row xl:items-center justify-between bg-rose-50/45 gap-3">
                 <div>
@@ -70,7 +71,7 @@
                             開放中 0 則 ／ 已結束 0 則
                         </span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-0.5">顯示前台玩家發布的祈願題目與匿名回覆進度（點擊標題列可展開或收合明細，預設每頁顯示 5 筆）</p>
+                    <p class="text-xs text-gray-500 mt-0.5">顯示前台玩家發布的祈願題目與匿名回覆進度（點擊標題列可展開或收合明細，預設每頁顯示 0 筆）</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 text-xs">
                     <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
@@ -84,7 +85,8 @@
                     <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
                         <span class="font-bold text-[#8f4452] whitespace-nowrap">每頁顯示：</span>
                         <select id="wishWallPageSizeSelect" onchange="onAdminWishWallPageSizeChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
-                            <option value="5" selected>5 筆（預設）</option>
+                            <option value="0" selected>0 筆（預設）</option>
+                            <option value="5">5 筆</option>
                             <option value="10">10 筆</option>
                             <option value="30">30 筆</option>
                         </select>
@@ -113,7 +115,7 @@
             <div id="adminWishWallPaginationBar" class="p-4 border-t border-rose-200 bg-rose-50/35 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
-        <!-- ==================== 3. 💘 自定義專屬活動配對日誌（保留最近 30 筆・每頁 5/10/30 筆） ==================== -->
+        <!-- ==================== 3. 💘 自定義專屬活動配對日誌（保留最近 30 筆・預設每頁顯示 0 筆） ==================== -->
         <div class="card-jp rounded-2xl overflow-hidden border-2 border-pink-200">
             <div class="p-5 border-b border-pink-200 flex flex-col xl:flex-row xl:items-center justify-between bg-pink-50/50 gap-3">
                 <div>
@@ -129,7 +131,8 @@
                     <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
                         <span class="font-bold text-[#8f4452] whitespace-nowrap">每頁顯示：</span>
                         <select id="matchLogsPageSizeSelect" onchange="onMatchLogsPageSizeChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
-                            <option value="5" selected>5 筆（預設）</option>
+                            <option value="0" selected>0 筆（預設）</option>
+                            <option value="5">5 筆</option>
                             <option value="10">10 筆</option>
                             <option value="30">30 筆</option>
                         </select>
@@ -158,7 +161,7 @@
             <div id="matchLogsPaginationBar" class="p-4 border-t border-pink-200 bg-pink-50/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
-        <!-- ==================== 4. 🛡️ 後台防護日誌（保留最近 10 筆） ==================== -->
+        <!-- ==================== 4. 🛡️ 後台防護日誌（保留最近 10 筆・預設每頁顯示 0 筆） ==================== -->
         <div class="card-jp rounded-2xl overflow-hidden border-2 border-rose-200">
             <div class="p-5 border-b border-rose-200 flex flex-wrap items-center justify-between bg-rose-50/40 gap-3">
                 <div>
@@ -168,13 +171,21 @@
                             近 0 / 10 筆
                         </span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-0.5">系統自動記錄後台登入失敗的來源 IP 與瀏覽器裝置資訊（保留最近 10 筆）</p>
+                    <p class="text-xs text-gray-500 mt-0.5">系統自動記錄後台登入失敗的來源 IP 與瀏覽器裝置資訊（保留最近 10 筆，預設每頁顯示 0 筆）</p>
                 </div>
-                <div class="flex items-center gap-2">
-                    <button type="button" onclick="clearAdminLoginLogs()" class="text-xs px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-50 transition shadow-sm">
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="admin-field-box !py-1.5 !px-3 inline-flex items-center gap-1.5">
+                        <span class="font-bold text-rose-800 whitespace-nowrap">每頁顯示：</span>
+                        <select id="loginLogsPageSizeSelect" onchange="onLoginLogsPageSizeChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
+                            <option value="0" selected>0 筆（預設）</option>
+                            <option value="5">5 筆</option>
+                            <option value="10">10 筆</option>
+                        </select>
+                    </div>
+                    <button type="button" onclick="clearAdminLoginLogs()" class="px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-50 transition shadow-sm">
                         🗑️ 清空防護日誌
                     </button>
-                    <button type="button" onclick="renderAdminAll(true)" class="text-xs px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
+                    <button type="button" onclick="renderAdminAll(true)" class="px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-sm">
                         ↻ 重新整理
                     </button>
                 </div>
@@ -192,17 +203,18 @@
                     <tbody id="loginLogsTableBody"></tbody>
                 </table>
             </div>
+            <div id="loginLogsPaginationBar" class="p-4 border-t border-rose-200 bg-rose-50/35 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
     </div>
 
     <!-- 前後台共用核心層 -->
     <script src="shared/schedule.js?v=20261118ap"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261118ap"></script>
+    <script src="shared/cloud-store.js?v=20261118au"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261118ar"></script>
-    <script src="backend/matching.js?v=20261118ar"></script>
-    <script src="backend/logs.js?v=20261118ao"></script>
+    <script src="backend/state.js?v=20261118au"></script>
+    <script src="backend/matching.js?v=20261118ap"></script>
+    <script src="backend/logs.js?v=20261118at"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261118o"></script>
 </body>

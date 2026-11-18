@@ -1,9 +1,9 @@
-/* backend/chats.js - 後台玩家聊天紀錄查詢（每頁 10 間分頁 + 增量無閃爍渲染 + 近 30 則懶加載） */
+/* backend/chats.js - 後台玩家聊天紀錄查詢（房間索引快取 + 每頁 10/20/50 間分頁 + 增量無閃爍渲染 + 近 30 則懶加載） */
 
 let selectedAdminChatPairKey = '';
 let adminChatSearchKeyword = '';
 let adminChatRoomsPage = 1;
-const ADMIN_CHAT_ROOMS_PER_PAGE = 10;
+let adminChatRoomsPerPage = 10;
 
 const ADMIN_CHAT_BATCH_STEP = 30;
 let adminChatVisibleBatchLimit = ADMIN_CHAT_BATCH_STEP;
@@ -19,6 +19,12 @@ let lastAdminChatDetailSig = '';
 let renderedAdminChatRoomKey = '';
 let renderedAdminChatKeyword = '';
 let renderedAdminChatMsgKeys = new Set();
+
+// 快取已解析排序好的全站房間索引，避免大量聊天室時每次輪詢或換頁重複排序掃描
+let cachedAdminChatSourceRef = null;
+let cachedAdminChatUsersNameSig = '';
+let cachedAdminChatRoomEntries = [];
+let cachedAdminChatTotalMessages = 0;
 
 function escapeChatAdminHtml(str) {
     return String(str ?? '')
@@ -85,7 +91,7 @@ function onAdminChatSearchInput(val) {
     adminChatSearchDebounceTimer = setTimeout(() => {
         adminChatSearchDebounceTimer = null;
         renderAdminAll(true);
-    }, 180);
+    }, 150);
 }
 
 function clearAdminChatSearch() {
@@ -97,6 +103,14 @@ function clearAdminChatSearch() {
     if (clearBtn) clearBtn.classList.add('hidden');
     lastAdminChatRoomsSig = '';
     resetRenderedAdminChatDomState();
+    renderAdminAll(true);
+}
+
+function onAdminChatRoomsPerPageChange(val) {
+    const parsed = parseInt(val, 10);
+    adminChatRoomsPerPage = [10, 20, 50].includes(parsed) ? parsed : 10;
+    adminChatRoomsPage = 1;
+    lastAdminChatRoomsSig = '';
     renderAdminAll(true);
 }
 
@@ -163,13 +177,25 @@ function ensureAdminChatDetailScrollPagination(detailMsgsBox) {
     }, { passive: true });
 }
 
-function buildAdminChatRoomEntries(users, chatsMap) {
+function getIndexedAdminChatRooms(users, chatsMap) {
+    const validUsers = Array.isArray(users) ? users : [];
+    const usersNameSig = validUsers.map(u => (u && u.id) ? `${u.id}:${u.nickname || ''}:${u.gender || ''}` : '').join('|');
+
+    if (chatsMap === cachedAdminChatSourceRef && usersNameSig === cachedAdminChatUsersNameSig) {
+        return {
+            rooms: cachedAdminChatRoomEntries,
+            totalMessages: cachedAdminChatTotalMessages
+        };
+    }
+
     const userMap = new Map();
-    (Array.isArray(users) ? users : []).forEach(u => {
+    validUsers.forEach(u => {
         if (u && u.id) userMap.set(String(u.id), u);
     });
 
     const rooms = [];
+    let totalMessages = 0;
+
     Object.keys(chatsMap || {}).forEach(pairKey => {
         const rawThread = chatsMap[pairKey];
         const msgs = Array.isArray(rawThread)
@@ -179,6 +205,7 @@ function buildAdminChatRoomEntries(users, chatsMap) {
                 : []);
         if (msgs.length === 0) return;
         msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+        totalMessages += msgs.length;
 
         const parts = String(pairKey).split('__');
         const idA = parts[0] || '';
@@ -198,6 +225,8 @@ function buildAdminChatRoomEntries(users, chatsMap) {
 
         const lastMsg = msgs[msgs.length - 1] || {};
         const lastTs = Number(lastMsg.ts || 0);
+        const msgTextsJoined = msgs.map(m => String(m.text || '')).join('\n');
+        const searchBlob = `${idA} ${idB} ${nameA} ${nameB} ${msgTextsJoined}`.toLowerCase();
 
         rooms.push({
             pairKey,
@@ -209,12 +238,19 @@ function buildAdminChatRoomEntries(users, chatsMap) {
             genderB,
             messages: msgs,
             lastMsg,
-            lastTs
+            lastTs,
+            searchBlob
         });
     });
 
     rooms.sort((a, b) => Number(b.lastTs) - Number(a.lastTs));
-    return rooms;
+
+    cachedAdminChatSourceRef = chatsMap;
+    cachedAdminChatUsersNameSig = usersNameSig;
+    cachedAdminChatRoomEntries = rooms;
+    cachedAdminChatTotalMessages = totalMessages;
+
+    return { rooms, totalMessages };
 }
 
 function buildAdminChatTopBannerHtml(remainingOlderCount, totalRoomMsgs) {
@@ -283,12 +319,20 @@ function renderChatsPageSection(users, forceRender = false) {
 
     ensureAdminChatDetailScrollPagination(detailMsgsBox);
 
+    const perPageSel = document.getElementById('adminChatRoomsPerPageSelect');
+    if (perPageSel && String(perPageSel.value) !== String(adminChatRoomsPerPage)) {
+        perPageSel.value = String(adminChatRoomsPerPage);
+    }
+    const headerTitleEl = document.getElementById('adminChatRoomsListHeaderTitle');
+    if (headerTitleEl) {
+        headerTitleEl.textContent = `💞 配對聊天室列表（每頁 ${adminChatRoomsPerPage} 間）`;
+    }
+
     const chatsMap = typeof getAdminChatsMap === 'function'
         ? getAdminChatsMap()
         : JSON.parse(localStorage.getItem(typeof ADMIN_CHATS_KEY !== 'undefined' ? ADMIN_CHATS_KEY : CHATS_KEY) || '{}');
 
-    const allRooms = buildAdminChatRoomEntries(users, chatsMap);
-    const totalMessagesAll = allRooms.reduce((sum, r) => sum + r.messages.length, 0);
+    const { rooms: allRooms, totalMessages: totalMessagesAll } = getIndexedAdminChatRooms(users, chatsMap);
 
     const summaryBadge = document.getElementById('chatRoomsSummaryBadge');
     if (summaryBadge) {
@@ -297,20 +341,16 @@ function renderChatsPageSection(users, forceRender = false) {
 
     const kw = adminChatSearchKeyword.toLowerCase();
     const filteredRooms = kw
-        ? allRooms.filter(r => {
-            if (r.idA.toLowerCase().includes(kw) || r.idB.toLowerCase().includes(kw)) return true;
-            if (r.nameA.toLowerCase().includes(kw) || r.nameB.toLowerCase().includes(kw)) return true;
-            return r.messages.some(m => String(m.text || '').toLowerCase().includes(kw));
-        })
+        ? allRooms.filter(r => r.searchBlob.includes(kw))
         : allRooms;
 
     const totalFilteredRooms = filteredRooms.length;
-    const totalRoomPages = Math.max(1, Math.ceil(totalFilteredRooms / ADMIN_CHAT_ROOMS_PER_PAGE));
+    const totalRoomPages = Math.max(1, Math.ceil(totalFilteredRooms / adminChatRoomsPerPage));
     if (adminChatRoomsPage > totalRoomPages) adminChatRoomsPage = totalRoomPages;
     if (adminChatRoomsPage < 1) adminChatRoomsPage = 1;
 
-    const pageStartIdx = (adminChatRoomsPage - 1) * ADMIN_CHAT_ROOMS_PER_PAGE;
-    const pageRooms = filteredRooms.slice(pageStartIdx, pageStartIdx + ADMIN_CHAT_ROOMS_PER_PAGE);
+    const pageStartIdx = (adminChatRoomsPage - 1) * adminChatRoomsPerPage;
+    const pageRooms = filteredRooms.slice(pageStartIdx, pageStartIdx + adminChatRoomsPerPage);
 
     const countTextEl = document.getElementById('filteredChatRoomsCountText');
     if (countTextEl) {
@@ -322,8 +362,10 @@ function renderChatsPageSection(users, forceRender = false) {
     const roomsSig = JSON.stringify({
         selected: selectedAdminChatPairKey,
         kw,
+        perPage: adminChatRoomsPerPage,
         page: adminChatRoomsPage,
         totalPages: totalRoomPages,
+        totalFiltered: totalFilteredRooms,
         rooms: pageRooms.map(r => [r.pairKey, r.nameA, r.nameB, r.messages.length, r.lastTs, r.lastMsg.text])
     });
 
@@ -377,7 +419,7 @@ function renderChatsPageSection(users, forceRender = false) {
                 roomsPaginationBar.innerHTML = `<span class="text-gray-400">第 0 / 0 頁（共 0 間）</span>`;
             } else {
                 const showFrom = pageStartIdx + 1;
-                const showTo = Math.min(pageStartIdx + ADMIN_CHAT_ROOMS_PER_PAGE, totalFilteredRooms);
+                const showTo = Math.min(pageStartIdx + adminChatRoomsPerPage, totalFilteredRooms);
                 const pageBtns = [];
                 for (let p = 1; p <= totalRoomPages; p++) {
                     if (p === 1 || p === totalRoomPages || Math.abs(p - adminChatRoomsPage) <= 1) {
@@ -409,7 +451,7 @@ function renderChatsPageSection(users, forceRender = false) {
 
     const activeRoom = allRooms.find(r => r.pairKey === selectedAdminChatPairKey) || null;
     if (!activeRoom) {
-        const isCloudSyncing = (typeof CloudSync !== 'undefined' && !CloudSync.initialized);
+        const isCloudSyncing = (typeof CloudSync !== 'undefined' && (!CloudSync.initialized || !CloudSync.hasLoadedFullTree));
         if (selectedAdminChatPairKey && isCloudSyncing && detailMsgsBox.children.length > 0) {
             return;
         }
@@ -596,3 +638,5 @@ function renderChatsPageSection(users, forceRender = false) {
         }, 80);
     }
 }
+
+window.onAdminChatRoomsPerPageChange = onAdminChatRoomsPerPageChange;

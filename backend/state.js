@@ -71,10 +71,14 @@ const AdminMemoryCache = {
         if (!key) {
             this.usersRaw = this.reportsRaw = this.systemRaw = this.mailboxRaw = this.fateWallRaw = this.bannedRulesRaw = this.forceRulesRaw = this.chatsRaw = this.regHistoryRaw = this.wishWallRaw = this.matchLogsRaw = null;
             this.users = this.reports = this.system = this.mailbox = this.fateWall = this.bannedRules = this.forceRules = this.chats = this.regHistory = this.wishWall = this.matchLogs = null;
+            this.chatsTreeVersion = -1;
             return;
         }
         this[key + 'Raw'] = null;
         this[key] = null;
+        if (key === 'chats') {
+            this.chatsTreeVersion = -1;
+        }
     }
 };
 
@@ -318,7 +322,7 @@ function getUsers() {
             delete u.registeredSession;
             userMigrated = true;
         }
-        if (u.matchedSession && !String(u.matchedSession).includes('強制')) {
+        if (u.matchedSession) {
             const normMatched = normalizeSessionLabel(u.matchedSession);
             if (normMatched !== u.matchedSession) {
                 u.matchedSession = normMatched;
@@ -327,7 +331,7 @@ function getUsers() {
         }
         if (Array.isArray(u.matchedHistory)) {
             u.matchedHistory.forEach(h => {
-                if (h.session && !String(h.session).includes('強制')) {
+                if (h.session) {
                     const normHist = normalizeSessionLabel(h.session);
                     if (normHist !== h.session) {
                         h.session = normHist;
@@ -437,6 +441,26 @@ function getAdminChatsStorageKey() {
 }
 
 function getAdminChatsMap() {
+    if (
+        typeof CloudSync !== 'undefined' &&
+        CloudSync.initialized &&
+        CloudSync.hasLoadedFullTree &&
+        CloudSync.tree &&
+        CloudSync.tree[CHATS_KEY] &&
+        typeof CloudSync.tree[CHATS_KEY] === 'object'
+    ) {
+        const ver = Number(CloudSync.chatsTreeVersion || 0);
+        if (AdminMemoryCache.chatsTreeVersion === ver && AdminMemoryCache.chats && typeof AdminMemoryCache.chats === 'object') {
+            return AdminMemoryCache.chats;
+        }
+        const liveMap = (typeof CloudSync.chatsMapToLocal === 'function')
+            ? CloudSync.chatsMapToLocal(CloudSync.tree[CHATS_KEY])
+            : CloudSync.tree[CHATS_KEY];
+        AdminMemoryCache.chatsTreeVersion = ver;
+        AdminMemoryCache.chats = liveMap;
+        return liveMap;
+    }
+
     const adminKey = getAdminChatsStorageKey();
     let raw = localStorage.getItem(adminKey);
     if (raw === null) {
@@ -1346,7 +1370,7 @@ function pollSharedStorageChanges() {
     const curUsers = localStorage.getItem(USERS_KEY) || '';
     const curReports = localStorage.getItem(REPORTS_KEY) || '';
     const curSys = localStorage.getItem(SYSTEM_STATE_KEY) || '';
-    const curChats = localStorage.getItem(getAdminChatsStorageKey()) || '';
+    const curChats = `${typeof CloudSync !== 'undefined' ? Number(CloudSync.chatsTreeVersion || 0) : 0}|${localStorage.getItem(getAdminChatsStorageKey()) || ''}`;
     const curMatchLogs = localStorage.getItem(MATCH_LOGS_KEY) || '';
     const pOpKey = (typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs';
     const curPlayerOpLogs = localStorage.getItem(pOpKey) || '';
@@ -1386,7 +1410,7 @@ setInterval(() => {
     if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
     checkAutoSchedule2000();
     const nowTickTs = Date.now();
-    if (nowTickTs - lastDailyChatPurgeTickTs >= 60000) {
+    if (nowTickTs - lastDailyChatPurgeTickTs >= 15000) {
         lastDailyChatPurgeTickTs = nowTickTs;
         if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
             const purged = ChatStore.purgeInactiveRooms(nowTickTs);
@@ -1409,7 +1433,7 @@ function renderAdminSharedOverview(forceUpdate = false) {
     lastUsersSnapshot = localStorage.getItem(USERS_KEY) || '';
     lastReportsSnapshot = localStorage.getItem(REPORTS_KEY) || '';
     lastSystemSnapshot = localStorage.getItem(SYSTEM_STATE_KEY) || '';
-    lastChatsAdminSnapshot = localStorage.getItem(getAdminChatsStorageKey()) || '';
+    lastChatsAdminSnapshot = `${typeof CloudSync !== 'undefined' ? Number(CloudSync.chatsTreeVersion || 0) : 0}|${localStorage.getItem(getAdminChatsStorageKey()) || ''}`;
     lastMatchLogsAdminSnapshot = localStorage.getItem(MATCH_LOGS_KEY) || '';
     lastPlayerOpLogsAdminSnapshot = localStorage.getItem((typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs') || '';
     lastFateWallAdminSnapshot = localStorage.getItem((typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall') || '';
@@ -1508,7 +1532,7 @@ function renderAdminAll(forceUpdate = false) {
 }
 
 const expandedAdminWishWallCards = new Set();
-let wishWallPageSize = '5';
+let wishWallPageSize = '0';
 let currentWishWallPage = 1;
 
 function onAdminWishWallFilterChange() {
@@ -1517,7 +1541,7 @@ function onAdminWishWallFilterChange() {
 }
 
 function onAdminWishWallPageSizeChange(newSize) {
-    const val = ['5', '10', '30'].includes(String(newSize)) ? String(newSize) : '5';
+    const val = ['0', '5', '10', '30'].includes(String(newSize)) ? String(newSize) : '0';
     wishWallPageSize = val;
     currentWishWallPage = 1;
     renderAdminWishWallList();
@@ -1593,13 +1617,14 @@ function renderAdminWishWallList() {
         targetItems = [...openWishes, ...endedWishes];
     }
 
-    const perPage = parseInt(wishWallPageSize, 10) || 5;
+    const isZeroPerPage = (wishWallPageSize === '0');
+    const perPage = isZeroPerPage ? 0 : (parseInt(wishWallPageSize, 10) || 5);
     const totalItems = targetItems.length;
-    const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+    const totalPages = isZeroPerPage ? 1 : Math.max(1, Math.ceil(totalItems / perPage));
     if (currentWishWallPage > totalPages) currentWishWallPage = totalPages;
     if (currentWishWallPage < 1) currentWishWallPage = 1;
-    const startIdx = (currentWishWallPage - 1) * perPage;
-    const pagedItems = targetItems.slice(startIdx, startIdx + perPage);
+    const startIdx = isZeroPerPage ? 0 : (currentWishWallPage - 1) * perPage;
+    const pagedItems = isZeroPerPage ? [] : targetItems.slice(startIdx, startIdx + perPage);
 
     const escWw = (str) => String(str ?? '')
         .replace(/&/g, '&amp;')
@@ -1608,7 +1633,9 @@ function renderAdminWishWallList() {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 
-    if (pagedItems.length === 0) {
+    if (isZeroPerPage) {
+        tbody.innerHTML = `<tr><td colspan="4" class="p-5 text-center text-gray-400">目前每頁顯示設為 0 筆（共 ${totalItems} 筆紀錄，請切換每頁顯示筆數查看明細）</td></tr>`;
+    } else if (pagedItems.length === 0) {
         const emptyMsg = filterVal === 'OPEN'
             ? '目前沒有「🟢 開放中」的祈願紀錄。'
             : (filterVal === 'ENDED' ? '目前沒有「🏁 已結束」的祈願紀錄。' : '目前尚無任何紅線祈願牆發布與回覆紀錄。');

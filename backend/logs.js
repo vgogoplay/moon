@@ -1,12 +1,16 @@
-/* backend/logs.js - 後台玩家操作日誌（近 30 筆＋搜尋＋分頁）、紅線祈願牆紀錄、配對成功日誌（近 30 筆＋分頁）與後台防護日誌 */
+/* backend/logs.js - 後台玩家操作日誌（近 30 筆＋搜尋＋預設 0 筆）、紅線祈願牆紀錄、配對成功日誌（近 30 筆＋預設 0 筆）與後台防護日誌（預設 0 筆） */
 
 let playerOpLogSearchKeyword = '';
-let playerOpLogPageSize = '5';
+let playerOpLogPageSize = '0';
 let currentPlayerOpLogPage = 1;
 let playerOpLogSearchTimer = null;
 
-let matchLogsPageSize = '5';
+let matchLogsPageSize = '0';
 let currentMatchLogsPage = 1;
+
+let loginLogsPageSize = '0';
+let currentLoginLogsPage = 1;
+
 let lastLogsRenderSig = '';
 
 function onPlayerOpLogSearchInput(val) {
@@ -34,7 +38,7 @@ function clearPlayerOpLogSearch() {
 }
 
 function onPlayerOpLogPageSizeChange(newSize) {
-    const val = ['5', '10', '30'].includes(String(newSize)) ? String(newSize) : '5';
+    const val = ['0', '5', '10', '30'].includes(String(newSize)) ? String(newSize) : '0';
     playerOpLogPageSize = val;
     currentPlayerOpLogPage = 1;
     renderLogsPageSection(true);
@@ -48,7 +52,7 @@ function goToPlayerOpLogPage(pageNum) {
 }
 
 function onMatchLogsPageSizeChange(newSize) {
-    const val = ['5', '10', '30'].includes(String(newSize)) ? String(newSize) : '5';
+    const val = ['0', '5', '10', '30'].includes(String(newSize)) ? String(newSize) : '0';
     matchLogsPageSize = val;
     currentMatchLogsPage = 1;
     renderLogsPageSection(true);
@@ -58,6 +62,20 @@ function goToMatchLogsPage(pageNum) {
     const p = parseInt(pageNum, 10);
     if (isNaN(p) || p < 1) return;
     currentMatchLogsPage = p;
+    renderLogsPageSection(true);
+}
+
+function onLoginLogsPageSizeChange(newSize) {
+    const val = ['0', '5', '10'].includes(String(newSize)) ? String(newSize) : '0';
+    loginLogsPageSize = val;
+    currentLoginLogsPage = 1;
+    renderLogsPageSection(true);
+}
+
+function goToLoginLogsPage(pageNum) {
+    const p = parseInt(pageNum, 10);
+    if (isNaN(p) || p < 1) return;
+    currentLoginLogsPage = p;
     renderLogsPageSection(true);
 }
 
@@ -211,6 +229,7 @@ function clearAdminLoginLogs() {
         }
         CloudSync.deleteNode('yuelao_admin_login_logs');
     }
+    currentLoginLogsPage = 1;
     renderAdminAll(true);
 }
 
@@ -222,6 +241,7 @@ function buildLogsPaginationHtml(options) {
         totalPages,
         startIdx,
         perPage,
+        sizeOptions = ['0', '5', '10', '30'],
         onPageSizeFnName,
         onGoPageFnName,
         accentBgClass = 'bg-[#c96a7b]',
@@ -230,10 +250,20 @@ function buildLogsPaginationHtml(options) {
         accentTextClass = 'text-[#8f4452]'
     } = options;
 
-    const sizeBtnsHtml = ['5', '10', '30'].map(sz => {
-        const active = pageSizeStr === sz;
+    const sizeBtnsHtml = sizeOptions.map(sz => {
+        const active = String(pageSizeStr) === String(sz);
         return `<button type="button" onclick="${onPageSizeFnName}('${sz}')" class="px-2.5 h-7 rounded-lg font-bold transition ${active ? `${accentBgClass} text-white shadow-sm` : `bg-white border ${accentBorderClass} ${accentTextClass} ${accentHoverClass}`}">${sz} 筆</button>`;
     }).join('');
+
+    if (String(pageSizeStr) === '0' || perPage === 0) {
+        return `
+            <span class="text-gray-500 font-medium">目前顯示 <strong class="${accentTextClass}">0</strong> 筆，共 <strong class="${accentTextClass}">${totalItems}</strong> 筆紀錄</span>
+            <div class="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border ${accentBorderClass}">
+                <span class="text-gray-500 font-bold">每頁顯示：</span>
+                ${sizeBtnsHtml}
+            </div>
+        `;
+    }
 
     if (totalItems === 0) {
         return `
@@ -301,6 +331,8 @@ function renderLogsPageSection(forceUpdate = false) {
         mPageSize: matchLogsPageSize,
         mPage: currentMatchLogsPage,
         lLogs: loginLogs.map(l => `${l.id || l.createdAt}_${l.accountTried}`),
+        lPageSize: loginLogsPageSize,
+        lPage: currentLoginLogsPage,
         wWall: wishWallSig
     });
 
@@ -321,7 +353,7 @@ function renderLogsPageSection(forceUpdate = false) {
         return safe.replace(new RegExp(`(${escKw})`, 'gi'), '<mark class="bg-amber-200 text-[#8f4452] px-0.5 rounded">$1</mark>');
     };
 
-    // ==================== 1. 渲染「🕹️ 玩家操作日誌」（近 30 筆＋搜尋＋5/10/30 分頁） ====================
+    // ==================== 1. 渲染「🕹️ 玩家操作日誌」（近 30 筆＋搜尋＋預設 0 筆） ====================
     const pOpBadge = document.getElementById('playerOpLogsCountBadge');
     if (pOpBadge) {
         pOpBadge.textContent = `近 ${playerOpLogs.length} / 30 筆`;
@@ -340,16 +372,19 @@ function renderLogsPageSection(forceUpdate = false) {
         })
         : playerOpLogs;
 
-    const pOpPerPage = parseInt(playerOpLogPageSize, 10) || 5;
-    const totalPOpPages = Math.max(1, Math.ceil(filteredPlayerOpLogs.length / pOpPerPage));
+    const isPOpZero = (playerOpLogPageSize === '0');
+    const pOpPerPage = isPOpZero ? 0 : (parseInt(playerOpLogPageSize, 10) || 5);
+    const totalPOpPages = isPOpZero ? 1 : Math.max(1, Math.ceil(filteredPlayerOpLogs.length / pOpPerPage));
     if (currentPlayerOpLogPage > totalPOpPages) currentPlayerOpLogPage = totalPOpPages;
     if (currentPlayerOpLogPage < 1) currentPlayerOpLogPage = 1;
-    const pOpStartIdx = (currentPlayerOpLogPage - 1) * pOpPerPage;
-    const pagedPlayerOpLogs = filteredPlayerOpLogs.slice(pOpStartIdx, pOpStartIdx + pOpPerPage);
+    const pOpStartIdx = isPOpZero ? 0 : (currentPlayerOpLogPage - 1) * pOpPerPage;
+    const pagedPlayerOpLogs = isPOpZero ? [] : filteredPlayerOpLogs.slice(pOpStartIdx, pOpStartIdx + pOpPerPage);
 
     const pOpTbody = document.getElementById('playerOpLogsTableBody');
     if (pOpTbody) {
-        if (pagedPlayerOpLogs.length === 0) {
+        if (isPOpZero) {
+            pOpTbody.innerHTML = `<tr><td colspan="4" class="p-5 text-center text-gray-400">目前每頁顯示設為 0 筆（共 ${filteredPlayerOpLogs.length} 筆紀錄，請切換每頁顯示筆數查看明細）</td></tr>`;
+        } else if (pagedPlayerOpLogs.length === 0) {
             pOpTbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-gray-400">${kwLower ? '找不到符合搜尋條件的玩家操作紀錄。' : '目前尚無任何玩家操作日誌紀錄。'}</td></tr>`;
         } else {
             pOpTbody.innerHTML = pagedPlayerOpLogs.map(item => {
@@ -386,6 +421,7 @@ function renderLogsPageSection(forceUpdate = false) {
             totalPages: totalPOpPages,
             startIdx: pOpStartIdx,
             perPage: pOpPerPage,
+            sizeOptions: ['0', '5', '10', '30'],
             onPageSizeFnName: 'onPlayerOpLogPageSizeChange',
             onGoPageFnName: 'goToPlayerOpLogPage',
             accentBgClass: 'bg-emerald-600',
@@ -395,12 +431,12 @@ function renderLogsPageSection(forceUpdate = false) {
         });
     }
 
-    // ==================== 2. 渲染「🏮 紅線祈願牆發布與回覆紀錄」 ====================
+    // ==================== 2. 渲染「🏮 紅線祈願牆發布與回覆紀錄」（預設 0 筆） ====================
     if (typeof renderAdminWishWallList === 'function') {
         renderAdminWishWallList();
     }
 
-    // ==================== 3. 渲染「💘 玩家配對成功日誌」（近 30 筆＋5/10/30 分頁） ====================
+    // ==================== 3. 渲染「💘 自定義專屬活動配對日誌」（近 30 筆＋預設 0 筆） ====================
     const matchBadge = document.getElementById('matchLogsCountBadge');
     if (matchBadge) {
         matchBadge.textContent = `近 ${matchLogs.length} / 30 筆`;
@@ -410,16 +446,19 @@ function renderLogsPageSection(forceUpdate = false) {
         matchSizeSel.value = matchLogsPageSize;
     }
 
-    const matchPerPage = parseInt(matchLogsPageSize, 10) || 5;
-    const totalMatchPages = Math.max(1, Math.ceil(matchLogs.length / matchPerPage));
+    const isMatchZero = (matchLogsPageSize === '0');
+    const matchPerPage = isMatchZero ? 0 : (parseInt(matchLogsPageSize, 10) || 5);
+    const totalMatchPages = isMatchZero ? 1 : Math.max(1, Math.ceil(matchLogs.length / matchPerPage));
     if (currentMatchLogsPage > totalMatchPages) currentMatchLogsPage = totalMatchPages;
     if (currentMatchLogsPage < 1) currentMatchLogsPage = 1;
-    const matchStartIdx = (currentMatchLogsPage - 1) * matchPerPage;
-    const pagedMatchLogs = matchLogs.slice(matchStartIdx, matchStartIdx + matchPerPage);
+    const matchStartIdx = isMatchZero ? 0 : (currentMatchLogsPage - 1) * matchPerPage;
+    const pagedMatchLogs = isMatchZero ? [] : matchLogs.slice(matchStartIdx, matchStartIdx + matchPerPage);
 
     const matchTbody = document.getElementById('matchLogsTableBody');
     if (matchTbody) {
-        if (pagedMatchLogs.length === 0) {
+        if (isMatchZero) {
+            matchTbody.innerHTML = `<tr><td colspan="4" class="p-5 text-center text-gray-400">目前每頁顯示設為 0 筆（共 ${matchLogs.length} 筆紀錄，請切換每頁顯示筆數查看明細）</td></tr>`;
+        } else if (pagedMatchLogs.length === 0) {
             matchTbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-gray-400">目前尚無任何配對成功日誌紀錄。</td></tr>`;
         } else {
             matchTbody.innerHTML = pagedMatchLogs.map(item => {
@@ -458,6 +497,7 @@ function renderLogsPageSection(forceUpdate = false) {
             totalPages: totalMatchPages,
             startIdx: matchStartIdx,
             perPage: matchPerPage,
+            sizeOptions: ['0', '5', '10', '30'],
             onPageSizeFnName: 'onMatchLogsPageSizeChange',
             onGoPageFnName: 'goToMatchLogsPage',
             accentBgClass: 'bg-[#c96a7b]',
@@ -467,17 +507,32 @@ function renderLogsPageSection(forceUpdate = false) {
         });
     }
 
-    // ==================== 4. 渲染「🛡️ 後台防護日誌」（近 10 筆） ====================
+    // ==================== 4. 渲染「🛡️ 後台防護日誌」（近 10 筆＋預設 0 筆） ====================
     const loginLogsBadge = document.getElementById('loginLogsCountBadge');
     if (loginLogsBadge) {
         loginLogsBadge.textContent = `近 ${loginLogs.length} / 10 筆`;
     }
+    const loginSizeSel = document.getElementById('loginLogsPageSizeSelect');
+    if (loginSizeSel && loginSizeSel.value !== loginLogsPageSize) {
+        loginSizeSel.value = loginLogsPageSize;
+    }
+
+    const isLoginZero = (loginLogsPageSize === '0');
+    const loginPerPage = isLoginZero ? 0 : (parseInt(loginLogsPageSize, 10) || 5);
+    const totalLoginPages = isLoginZero ? 1 : Math.max(1, Math.ceil(loginLogs.length / loginPerPage));
+    if (currentLoginLogsPage > totalLoginPages) currentLoginLogsPage = totalLoginPages;
+    if (currentLoginLogsPage < 1) currentLoginLogsPage = 1;
+    const loginStartIdx = isLoginZero ? 0 : (currentLoginLogsPage - 1) * loginPerPage;
+    const pagedLoginLogs = isLoginZero ? [] : loginLogs.slice(loginStartIdx, loginStartIdx + loginPerPage);
+
     const tbody = document.getElementById('loginLogsTableBody');
     if (tbody) {
-        if (loginLogs.length === 0) {
+        if (isLoginZero) {
+            tbody.innerHTML = `<tr><td colspan="4" class="p-5 text-center text-gray-400">目前每頁顯示設為 0 筆（共 ${loginLogs.length} 筆紀錄，請切換每頁顯示筆數查看明細）</td></tr>`;
+        } else if (pagedLoginLogs.length === 0) {
             tbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-gray-400">目前尚無任何後台防護紀錄。</td></tr>`;
         } else {
-            tbody.innerHTML = loginLogs.map(log => {
+            tbody.innerHTML = pagedLoginLogs.map(log => {
                 const ipCell = `<a href="https://whatismyipaddress.com/ip/${escapeHtml(log.ipAddress)}" target="_blank" class="hover:underline text-rose-600" title="點擊查詢 IP 來源">${escapeHtml(log.ipAddress)}</a>`;
                 const accountCell = `<span class="text-[#8f4452] font-bold">${escapeHtml(log.accountTried)}</span>`;
                 return `
@@ -491,6 +546,25 @@ function renderLogsPageSection(forceUpdate = false) {
             }).join('');
         }
     }
+
+    const loginPaginationBar = document.getElementById('loginLogsPaginationBar');
+    if (loginPaginationBar) {
+        loginPaginationBar.innerHTML = buildLogsPaginationHtml({
+            totalItems: loginLogs.length,
+            pageSizeStr: loginLogsPageSize,
+            currentPage: currentLoginLogsPage,
+            totalPages: totalLoginPages,
+            startIdx: loginStartIdx,
+            perPage: loginPerPage,
+            sizeOptions: ['0', '5', '10'],
+            onPageSizeFnName: 'onLoginLogsPageSizeChange',
+            onGoPageFnName: 'goToLoginLogsPage',
+            accentBgClass: 'bg-rose-600',
+            accentBorderClass: 'border-rose-200',
+            accentHoverClass: 'hover:bg-rose-50',
+            accentTextClass: 'text-rose-800'
+        });
+    }
 }
 
 window.onPlayerOpLogSearchInput = onPlayerOpLogSearchInput;
@@ -500,3 +574,5 @@ window.goToPlayerOpLogPage = goToPlayerOpLogPage;
 window.clearAdminPlayerOpLogs = clearAdminPlayerOpLogs;
 window.onMatchLogsPageSizeChange = onMatchLogsPageSizeChange;
 window.goToMatchLogsPage = goToMatchLogsPage;
+window.onLoginLogsPageSizeChange = onLoginLogsPageSizeChange;
+window.goToLoginLogsPage = goToLoginLogsPage;

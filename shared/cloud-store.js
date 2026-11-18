@@ -70,6 +70,8 @@ const CloudSync = {
     dbUrl: FIREBASE_DB_URL.replace(/\/+$/, ''),
     tree: {},
     initialized: false,
+    hasLoadedFullTree: false,
+    chatsTreeVersion: 0,
     eventSource: null,
     pollTimer: null,
     onUpdateCallback: null,
@@ -764,9 +766,13 @@ const CloudSync = {
     },
 
     writeLocalIfChanged(key, nextStr) {
-        if (localStorage.getItem(key) !== nextStr) {
-            localStorage.setItem(key, nextStr);
-            LocalJsonCache.invalidate(key);
+        try {
+            if (localStorage.getItem(key) !== nextStr) {
+                localStorage.setItem(key, nextStr);
+                LocalJsonCache.invalidate(key);
+            }
+        } catch (e) {
+            console.warn('writeLocalIfChanged 寫入失敗（可能超過本地儲存容量）:', key, e);
         }
     },
 
@@ -879,11 +885,19 @@ const CloudSync = {
             LocalJsonCache.invalidate(SESSION_MATCH_RESULTS_KEY);
         }
 
-        // 2. 聊天紀錄（前後台分開儲存：後台寫入完整全站聊天快取 ADMIN_CHATS_KEY，避免同瀏覽器開啟前台分頁時覆蓋清空）
-        const scopedChatsJson = JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY]));
+        // 2. 聊天紀錄（前後台分開儲存：後台寫入完整全站聊天快取 ADMIN_CHATS_KEY，並防止未完成全庫載入的局部事件覆蓋既有房間快取）
         if (this.isBackendContext()) {
-            this.writeLocalIfChanged(ADMIN_CHATS_KEY, scopedChatsJson);
+            const hasCloudChatsObj = Boolean(t[CHATS_KEY] && typeof t[CHATS_KEY] === 'object');
+            if (this.hasLoadedFullTree && hasCloudChatsObj) {
+                const scopedChatsJson = JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY]));
+                this.chatsTreeVersion++;
+                this.writeLocalIfChanged(ADMIN_CHATS_KEY, scopedChatsJson);
+            } else if (this.hasLoadedFullTree && t[CHATS_KEY] === null) {
+                this.chatsTreeVersion++;
+                this.writeLocalIfChanged(ADMIN_CHATS_KEY, '{}');
+            }
         } else {
+            const scopedChatsJson = JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY]));
             this.writeLocalIfChanged(CHATS_KEY, scopedChatsJson);
         }
 
@@ -1022,9 +1036,14 @@ const CloudSync = {
         const cleanPath = String(path || '/').replace(/^\/+|\/+$/g, '');
         if (!cleanPath) {
             this.tree = (data && typeof data === 'object') ? data : {};
+            this.hasLoadedFullTree = true;
+            this.chatsTreeVersion++;
             return;
         }
         const parts = cleanPath.split('/');
+        if (parts[0] === CHATS_KEY) {
+            this.chatsTreeVersion++;
+        }
         let curr = this.tree;
         for (let i = 0; i < parts.length - 1; i++) {
             const seg = parts[i];
@@ -1067,7 +1086,7 @@ const CloudSync = {
         if (this.inFlightWrites > 0) return false;
         const epochBefore = this.writeEpoch;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 4500);
+        const timer = setTimeout(() => controller.abort(), 15000);
         try {
             const res = await fetch(`${this.dbUrl}/.json`, {
                 method: 'GET',
@@ -1081,6 +1100,8 @@ const CloudSync = {
                 return false;
             }
             this.tree = (data && typeof data === 'object') ? data : {};
+            this.hasLoadedFullTree = true;
+            this.chatsTreeVersion++;
             this.applyTreeToLocalStorage();
             this.updateCloudBadge(true);
             return true;
@@ -1102,6 +1123,7 @@ const CloudSync = {
         // 後台專用日誌與內部排程節點不影響前台畫面，略過重繪
         if (
             topNode === 'yuelao_admin_login_logs' ||
+            topNode === 'yuelao_inactive_chat_purge_logs' ||
             topNode === PLAYER_OP_LOGS_KEY ||
             topNode === MATCH_LOGS_KEY ||
             topNode === REG_HISTORY_KEY ||
@@ -1149,8 +1171,18 @@ const CloudSync = {
                 try {
                     const payload = JSON.parse(e.data);
                     if (!payload) return;
+                    const cleanPath = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
+                    // 若尚未取得完整資料庫快照，收到局部節點事件時改為補拉完整資料庫，避免局部資料覆蓋全站快取
+                    if (!this.hasLoadedFullTree && cleanPath !== '') {
+                        this.fetchFullTree().then(ok => {
+                            if (ok && typeof this.onUpdateCallback === 'function') {
+                                this.onUpdateCallback();
+                            }
+                        });
+                        return;
+                    }
                     if (e.type === 'patch' && payload.data && typeof payload.data === 'object') {
-                        const base = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
+                        const base = cleanPath;
                         Object.keys(payload.data).forEach(k => {
                             const subPath = base ? `${base}/${k}` : k;
                             this.applyStreamPatch(subPath, payload.data[k]);
@@ -1161,7 +1193,6 @@ const CloudSync = {
                     if (!this.isRelevantStreamEvent(e.type, payload)) {
                         return;
                     }
-                    const cleanPath = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
                     const isFastLane = cleanPath.startsWith(CHATS_KEY) || cleanPath.startsWith('yuelao_test_event');
                     this.scheduleStreamFlush(isFastLane ? 60 : 180);
                 } catch (err) {}
@@ -1180,7 +1211,11 @@ const CloudSync = {
 
     async init(onUpdate) {
         this.onUpdateCallback = onUpdate || null;
-        await this.fetchFullTree();
+        let loadedOk = await this.fetchFullTree();
+        if (!loadedOk) {
+            await new Promise(r => setTimeout(r, 400));
+            loadedOk = await this.fetchFullTree();
+        }
         this.initialized = true;
         this.startRealtimeStream();
 
@@ -2256,29 +2291,58 @@ const ChatStore = {
         if (changed) this.saveAll(all);
     },
 
-    // 超過 3 天（72 小時）無更新或無新訊息：每日自動檢查一次，刪除聊天紀錄（刪除不保存）並自動解除會員列表雙方好友配對
+    // 取得每日固定檢查時段鍵值（每日 07:00、15:00、22:00，各 15 分鐘執行視窗）
+    getInactiveChatPurgeSlotKey(nowTs = Date.now()) {
+        const d = new Date(Number(nowTs) || Date.now());
+        if (Number.isNaN(d.getTime())) return '';
+        const hr = d.getHours();
+        const min = d.getMinutes();
+        if (![7, 15, 22].includes(hr) || min > 15) return '';
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const hh = String(hr).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}_${hh}:00`;
+    },
+
+    // 超過 3 天（72 小時）無更新或無新訊息：每日 07:00、15:00、22:00 自動檢查，刪除聊天紀錄（刪除不保存）並自動解除會員列表雙方好友配對
     purgeInactiveRooms(nowTs = Date.now(), maxInactiveMs = 3 * 24 * 60 * 60 * 1000, options = {}) {
         const forceCheck = Boolean(options && options.force);
-        const dailyLockKey = 'yuelao_last_inactive_chat_purge_day';
-        const todayStr = new Date(nowTs).toDateString();
+        const slotLockKey = 'yuelao_last_inactive_chat_purge_slot';
+        const cloudPurgeLogNode = 'yuelao_inactive_chat_purge_logs';
+        const slotKey = this.getInactiveChatPurgeSlotKey(nowTs);
 
         if (!forceCheck) {
+            if (!slotKey) {
+                return [];
+            }
             try {
-                if (localStorage.getItem(dailyLockKey) === todayStr) {
+                if (localStorage.getItem(slotLockKey) === slotKey) {
                     return [];
                 }
             } catch (e) {}
+            if (
+                typeof CloudSync !== 'undefined' &&
+                CloudSync.tree &&
+                CloudSync.tree[cloudPurgeLogNode] &&
+                CloudSync.tree[cloudPurgeLogNode][slotKey]
+            ) {
+                try { localStorage.setItem(slotLockKey, slotKey); } catch (e) {}
+                return [];
+            }
         }
 
-        if (typeof CloudSync !== 'undefined' && (!CloudSync.initialized || CloudSync.inFlightWrites > 0)) {
+        if (typeof CloudSync !== 'undefined' && (!CloudSync.initialized || !CloudSync.hasLoadedFullTree || CloudSync.inFlightWrites > 0)) {
             return [];
         }
 
-        try {
-            localStorage.setItem(dailyLockKey, todayStr);
-        } catch (e) {}
+        if (slotKey) {
+            try {
+                localStorage.setItem(slotLockKey, slotKey);
+            } catch (e) {}
+        }
 
-        const allChats = this.getAll();
+        const allChats = (typeof getAdminChatsMap === 'function') ? getAdminChatsMap() : this.getAll();
         const expiredPairs = [];
 
         Object.keys(allChats || {}).forEach(pairKey => {
@@ -2308,6 +2372,14 @@ const ChatStore = {
                 }
             }
         });
+
+        if (slotKey && typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+            CloudSync.putNode(`${cloudPurgeLogNode}/${slotKey}`, {
+                slotKey,
+                executedAtTs: nowTs,
+                purgedCount: expiredPairs.length
+            });
+        }
 
         if (expiredPairs.length === 0) return [];
 

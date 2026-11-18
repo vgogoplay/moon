@@ -166,19 +166,13 @@
                     <div>
                         <div class="text-xs font-bold text-amber-900">🔍 會員配對與聊天紀錄雙向一致性檢查</div>
                         <p class="text-[11px] text-amber-800/80 mt-0.5">
-                            交叉比對「會員列表的配對名單」與「玩家聊天紀錄房間」；若發現兩邊數據不一致（例如已有聊天紀錄但會員列表配對消失、或僅單方有配對），可直接點擊「一鍵補齊 雙方好友名單」自動還原，或逐筆手動處理。
+                            交叉比對「會員列表的配對名單」與「玩家聊天紀錄房間」；若發現兩邊數據不一致（例如會員列表有配對但聊天紀錄無此房間，或僅單方有配對），將完整列出明細供管理員手動決定是否解除配對。
                         </p>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2 shrink-0">
-                        <button type="button" onclick="runRepairMatchesFromChats()"
-                            class="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-2xs transition">
-                            🔍 檢查配對與聊天紀錄
-                        </button>
-                        <button type="button" onclick="manualBatchSyncAllDiscrepancies()"
-                            class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] hover:opacity-95 text-white text-xs font-bold shadow-2xs transition">
-                            💞 一鍵補齊 雙方好友名單
-                        </button>
-                    </div>
+                    <button type="button" onclick="runRepairMatchesFromChats()"
+                        class="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-2xs transition shrink-0">
+                        🔍 檢查配對與聊天紀錄
+                    </button>
                 </div>
                 <div id="repairMatchesResult" class="hidden space-y-2.5"></div>
             </div>
@@ -406,10 +400,10 @@
     <!-- 前後台共用核心層 -->
     <script src="shared/schedule.js?v=20261118ap"></script>
     <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261118ap"></script>
+    <script src="shared/cloud-store.js?v=20261118au"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261118ar"></script>
-    <script src="backend/matching.js?v=20261118ar"></script>
+    <script src="backend/state.js?v=20261118au"></script>
+    <script src="backend/matching.js?v=20261118ap"></script>
     <script src="backend/ops.js?v=20261118v"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261118o"></script>
