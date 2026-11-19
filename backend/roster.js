@@ -1,5 +1,113 @@
 /* backend/roster.js - 後台玩家資料庫列表、分頁、禁用控制、編輯玩家資料與問題回報 */
 
+const rosterMultiFilterState = {
+    genders: new Set(),
+    regions: new Set()
+};
+
+function syncRosterMultiFilterUI() {
+    const menu = document.getElementById('rosterMultiFilterMenu');
+    if (menu) {
+        menu.querySelectorAll('input[type="checkbox"][data-roster-filter-type]').forEach(cb => {
+            const type = cb.dataset.rosterFilterType;
+            const val = cb.value;
+            if (type === 'gender') {
+                cb.checked = rosterMultiFilterState.genders.has(val);
+            } else if (type === 'region') {
+                cb.checked = rosterMultiFilterState.regions.has(val);
+            }
+        });
+    }
+
+    const summaryEl = document.getElementById('rosterMultiFilterSummary');
+    const clearBtn = document.getElementById('clearRosterMultiFilterBtn');
+    const genderLabels = { '男': '男生', '女': '女生' };
+    const chips = [];
+
+    ['男', '女'].forEach(g => {
+        if (rosterMultiFilterState.genders.has(g)) {
+            chips.push(`
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 border border-rose-300 text-[#8f4452] text-[11px] font-bold">
+                    ${genderLabels[g] || g}
+                    <span role="button" tabindex="0" onclick="event.stopPropagation(); removeRosterMultiFilter('gender', '${g}')" title="移除此條件" class="hover:text-rose-700 cursor-pointer ml-0.5">✕</span>
+                </span>
+            `);
+        }
+    });
+
+    ['北部', '中部', '南部', '東部'].forEach(r => {
+        if (rosterMultiFilterState.regions.has(r)) {
+            chips.push(`
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-[11px] font-bold">
+                    ${r}
+                    <span role="button" tabindex="0" onclick="event.stopPropagation(); removeRosterMultiFilter('region', '${r}')" title="移除此條件" class="hover:text-rose-700 cursor-pointer ml-0.5">✕</span>
+                </span>
+            `);
+        }
+    });
+
+    if (summaryEl) {
+        summaryEl.innerHTML = chips.length > 0
+            ? chips.join('')
+            : '<span class="text-gray-500">全部（可複選）</span>';
+    }
+    if (clearBtn) {
+        clearBtn.classList.toggle('hidden', chips.length === 0);
+    }
+}
+
+window.toggleRosterMultiFilterMenu = function(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('rosterMultiFilterMenu');
+    if (!menu) return;
+    syncRosterMultiFilterUI();
+    menu.classList.toggle('hidden');
+};
+
+window.closeRosterMultiFilterMenu = function() {
+    const menu = document.getElementById('rosterMultiFilterMenu');
+    if (menu) menu.classList.add('hidden');
+};
+
+window.onRosterMultiFilterCheckboxChange = function(cb) {
+    if (!cb) return;
+    const type = cb.dataset.rosterFilterType;
+    const val = cb.value;
+    const targetSet = type === 'gender' ? rosterMultiFilterState.genders : rosterMultiFilterState.regions;
+    if (cb.checked) targetSet.add(val);
+    else targetSet.delete(val);
+    syncRosterMultiFilterUI();
+    currentRosterPage = 1;
+    renderAdminAll();
+};
+
+window.removeRosterMultiFilter = function(type, val) {
+    const targetSet = type === 'gender' ? rosterMultiFilterState.genders : rosterMultiFilterState.regions;
+    targetSet.delete(val);
+    syncRosterMultiFilterUI();
+    currentRosterPage = 1;
+    renderAdminAll();
+};
+
+window.clearRosterMultiFilters = function() {
+    rosterMultiFilterState.genders.clear();
+    rosterMultiFilterState.regions.clear();
+    syncRosterMultiFilterUI();
+    currentRosterPage = 1;
+    renderAdminAll();
+};
+
+if (typeof document !== 'undefined' && !window._rosterMultiFilterOutsideBound) {
+    window._rosterMultiFilterOutsideBound = true;
+    document.addEventListener('click', (e) => {
+        const wrap = document.getElementById('rosterMultiFilterWrap');
+        const menu = document.getElementById('rosterMultiFilterMenu');
+        if (wrap && menu && !menu.classList.contains('hidden') && !wrap.contains(e.target)) {
+            menu.classList.add('hidden');
+        }
+    });
+}
+
 let rosterSearchDebounceTimer = null;
 window.onRosterSearchInput = function(val) {
     rosterSearchKeyword = String(val || '').trim();
@@ -655,11 +763,11 @@ function formatCriteriaHtml(criteria, mustMatchKeys = []) {
 let lastMemberRenderSig = '';
 
 function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayBatch, forceRender = false) {
-    const filterSelectPre = document.getElementById('filterBatchRoster');
     const pBodyPre = document.getElementById('playersTableBody');
-    if (!filterSelectPre || !pBodyPre) return;
+    if (!pBodyPre) return;
 
-    const currentFilterVal = filterSelectPre.value || '';
+    const selectedGendersList = Array.from(rosterMultiFilterState.genders).sort();
+    const selectedRegionsList = Array.from(rosterMultiFilterState.regions).sort();
     const forceRulesList = getForceRules();
     const memberSig = JSON.stringify({
         batchPrefix: currentSched.batchPrefix,
@@ -667,7 +775,8 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
         profLock: sysCfg.profileLocked,
         gLimEn: sysCfg.genderLimitEnabled,
         gLimMax: sysCfg.genderLimitMax,
-        filter: currentFilterVal,
+        filterGenders: selectedGendersList,
+        filterRegions: selectedRegionsList,
         search: rosterSearchKeyword,
         pageSize: rosterPageSize,
         page: currentRosterPage,
@@ -783,37 +892,19 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
         }
     }
 
-    const filterSelect = document.getElementById('filterBatchRoster');
     const pBody = document.getElementById('playersTableBody');
-    if (!filterSelect || !pBody) return;
+    if (!pBody) return;
 
-    const prevFilterVal = filterSelect.value;
-    const dynamicFilterOpts = [
-        { value: '', label: '請選擇' },
-        { value: 'all', label: '全部' },
-        { value: 'gender:男', label: '男生' },
-        { value: 'gender:女', label: '女生' },
-        { value: 'region:北部', label: '北部' },
-        { value: 'region:中部', label: '中部' },
-        { value: 'region:南部', label: '南部' },
-        { value: 'region:東部', label: '東部' }
-    ];
-    filterSelect.innerHTML = dynamicFilterOpts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
-    if (dynamicFilterOpts.some(o => o.value === prevFilterVal)) {
-        filterSelect.value = prevFilterVal;
-    } else {
-        filterSelect.value = '';
-    }
+    syncRosterMultiFilterUI();
 
-    const rosterFilter = filterSelect.value;
     const kw = (typeof rosterSearchKeyword === 'string' ? rosterSearchKeyword : '').trim().toLowerCase();
     const filteredUsers = users.filter(u => {
-        if (rosterFilter === 'gender:男' && u.gender !== '男') return false;
-        if (rosterFilter === 'gender:女' && u.gender !== '女') return false;
-        if (rosterFilter.startsWith('region:')) {
-            const targetRegion = rosterFilter.slice('region:'.length);
-            const userRegion = u.region || (typeof inferRegionByCity === 'function' ? inferRegionByCity(u.city) : '');
-            if (userRegion !== targetRegion) return false;
+        if (selectedGendersList.length > 0 && !selectedGendersList.includes(String(u.gender || '').trim())) {
+            return false;
+        }
+        if (selectedRegionsList.length > 0) {
+            const userRegion = String(u.region || (typeof inferRegionByCity === 'function' ? inferRegionByCity(u.city) : '') || '').trim();
+            if (!selectedRegionsList.includes(userRegion)) return false;
         }
         if (!kw) return true;
 
@@ -926,7 +1017,17 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
     });
 
     if (pageUsers.length === 0) {
-        pBody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-gray-400">尚無符合篩選條件的玩家資料。</td></tr>`;
+        const activeFilterNames = [
+            ...selectedGendersList.map(g => g === '男' ? '男生' : (g === '女' ? '女生' : g)),
+            ...selectedRegionsList
+        ];
+        const filterDesc = activeFilterNames.length > 0
+            ? `尚無同時符合「<strong class="text-[#8f4452]">${activeFilterNames.join(' ＋ ')}</strong>」篩選條件的玩家資料。`
+            : '尚無符合篩選條件的玩家資料。';
+        const clearLinkHtml = activeFilterNames.length > 0
+            ? `<button type="button" onclick="clearRosterMultiFilters()" class="ml-2 px-2.5 py-1 rounded-lg bg-pink-50 border border-pink-300 text-[#8f4452] font-bold hover:bg-pink-100 transition">清除篩選條件</button>`
+            : '';
+        pBody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-gray-400">${filterDesc}${clearLinkHtml}</td></tr>`;
     } else {
         pBody.innerHTML = pageUsers.map(u => {
             const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);

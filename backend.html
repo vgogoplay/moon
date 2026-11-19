@@ -14,8 +14,8 @@
 <body data-admin-page="member">
     <div id="adminLayoutMount" class="space-y-6">
         <!-- ==================== 各屆報名名單 & 禁止配對 / 禁止發話 / 解除配對 / 刪除資料 ==================== -->
-        <div class="card-jp rounded-2xl overflow-hidden border-2 border-pink-200">
-            <div class="p-5 border-b border-pink-200 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+        <div class="card-jp rounded-2xl border-2 border-pink-200">
+            <div class="p-5 rounded-t-2xl border-b border-pink-200 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
                 <h2 class="text-lg font-bold font-serif-jp text-[#8f4452] shrink-0 whitespace-nowrap">📋 玩家完整資料庫與管理操作</h2>
                 <div class="flex flex-wrap items-center gap-2.5 text-xs">
                     <button type="button" onclick="openAddNewPlayerModal()" class="h-[46px] px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold hover:opacity-95 transition shadow-sm inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
@@ -41,18 +41,72 @@
                             <option value="all">全部</option>
                         </select>
                     </div>
-                    <div class="admin-field-box h-[46px] !py-1.5 !px-3.5 inline-flex items-center gap-2 shrink-0">
+                    <div class="admin-field-box min-h-[46px] !py-1.5 !px-3.5 inline-flex flex-wrap items-center gap-2 shrink-0">
                         <span class="font-bold text-[#8f4452] whitespace-nowrap">篩選選項：</span>
-                        <select id="filterBatchRoster" onchange="onRosterFilterChange()" class="h-8 px-2.5 admin-input-box font-semibold text-[#8f4452]">
-                            <option value="" selected>請選擇</option>
-                            <option value="all">全部</option>
-                            <option value="gender:男">男生</option>
-                            <option value="gender:女">女生</option>
-                            <option value="region:北部">北部</option>
-                            <option value="region:中部">中部</option>
-                            <option value="region:南部">南部</option>
-                            <option value="region:東部">東部</option>
-                        </select>
+                        <div id="rosterMultiFilterWrap" class="relative inline-flex items-center gap-1.5">
+                            <button type="button" id="rosterMultiFilterBtn" onclick="toggleRosterMultiFilterMenu(event)" class="min-h-[32px] px-2.5 py-1 admin-input-box font-semibold text-[#8f4452] inline-flex flex-wrap items-center gap-1.5 text-left">
+                                <span id="rosterMultiFilterSummary" class="inline-flex flex-wrap items-center gap-1">
+                                    <span class="text-gray-500">全部（可複選）</span>
+                                </span>
+                                <span class="text-[10px] text-[#c96a7b] ml-0.5">▼</span>
+                            </button>
+                            <button type="button" id="clearRosterMultiFilterBtn" onclick="clearRosterMultiFilters()" title="清除所有篩選條件" class="hidden h-8 px-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 font-bold hover:bg-rose-100 transition whitespace-nowrap">
+                                清除
+                            </button>
+                            <div id="rosterMultiFilterMenu" class="hidden absolute right-0 sm:left-0 sm:right-auto top-[calc(100%+6px)] w-64 p-3.5 rounded-2xl bg-white border-2 border-pink-200 shadow-2xl z-50 space-y-3">
+                                <div class="space-y-1.5">
+                                    <div class="text-[11px] font-bold text-[#8f4452] flex items-center justify-between">
+                                        <span>👫 性別（可複選）</span>
+                                        <span class="text-[10px] text-gray-400 font-normal">同類聯集</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-1.5">
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="gender" value="男" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>男生</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="gender" value="女" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>女生</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="space-y-1.5 border-t border-pink-100 pt-2.5">
+                                    <div class="text-[11px] font-bold text-[#8f4452] flex items-center justify-between">
+                                        <span>📍 居住地區（可複選）</span>
+                                        <span class="text-[10px] text-gray-400 font-normal">跨類交集</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-1.5">
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="region" value="北部" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>北部</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="region" value="中部" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>中部</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="region" value="南部" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>南部</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="region" value="東部" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>東部</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="border-t border-pink-100 pt-2.5 space-y-2">
+                                    <p class="text-[10px] text-gray-500 leading-relaxed">💡 同時勾選性別與地區（例如：女生＋中部），將列出<strong>同時符合</strong>的玩家。</p>
+                                    <div class="flex items-center justify-between gap-2">
+                                        <button type="button" onclick="clearRosterMultiFilters()" class="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 text-[11px] font-semibold">
+                                            全部清除
+                                        </button>
+                                        <button type="button" onclick="closeRosterMultiFilterMenu()" class="px-3 py-1 rounded-lg bg-[#c96a7b] text-white text-[11px] font-bold hover:opacity-95">
+                                            完成
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         <button type="button" onclick="renderAdminAll(true)" class="h-8 px-3 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-100 transition whitespace-nowrap">
                             ↻ 立即刷新名單
                         </button>
@@ -75,7 +129,7 @@
                 </table>
             </div>
             <!-- 分頁控制列（每頁 5 人） -->
-            <div id="rosterPaginationBar" class="p-4 border-t border-pink-200 bg-pink-50/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
+            <div id="rosterPaginationBar" class="p-4 rounded-b-2xl border-t border-pink-200 bg-pink-50/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
         </div>
 
         <!-- ==================== 🎛️ 前台系統開關控制 ==================== -->
@@ -323,7 +377,7 @@
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261119o"></script>
     <script src="backend/matching.js?v=20261120a"></script>
-    <script src="backend/roster.js?v=20261120a"></script>
+    <script src="backend/roster.js?v=20261120e"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261120c"></script>
 </body>
