@@ -1961,13 +1961,12 @@ function previewSessionSupplementaryMatch(rawTargetSession) {
         if (rule.executed) return;
         const adminIdStr = String(rule.adminId || '').trim();
         const targetIdStr = String(rule.targetId || '').trim();
-        if (dryRunPairedIds.has(adminIdStr) || dryRunPairedIds.has(targetIdStr)) return;
+        if (dryRunPairedIds.has(targetIdStr)) return;
 
         const adminUser = allUnmatchedSessionUsers.find(u => String(u.id).trim() === adminIdStr) || users.find(u => String(u.id).trim() === adminIdStr);
         const targetUser = allUnmatchedSessionUsers.find(u => String(u.id).trim() === targetIdStr) || users.find(u => String(u.id).trim() === targetIdStr);
 
         if (adminUser && targetUser && !adminUser.isWarned && !adminUser.isMatchBanned && !targetUser.isWarned && !targetUser.isMatchBanned) {
-            dryRunPairedIds.add(adminIdStr);
             dryRunPairedIds.add(targetIdStr);
             plannedPairs.push({
                 idA: adminIdStr,
@@ -2141,14 +2140,17 @@ function runSessionMatch(isAuto = false, overrideSession = null, options = {}) {
             if (rule.executed) return;
             const adminIdStr = String(rule.adminId || '').trim();
             const targetIdStr = String(rule.targetId || '').trim();
-            if (pairedThisSessionIds.has(adminIdStr) || pairedThisSessionIds.has(targetIdStr)) return;
+            // 允許 adminId 重複配對 (1對多)，但 targetId (一般玩家) 只能配對一次
+            if (pairedThisSessionIds.has(targetIdStr)) return;
 
             const adminUser = users.find(u => String(u.id).trim() === adminIdStr);
             const targetUser = users.find(u => String(u.id).trim() === targetIdStr);
 
             if (adminUser && targetUser && !adminUser.isMatchBanned && !targetUser.isMatchBanned) {
-                if (recordPairMatch(adminUser, targetUser, targetSession, nowTs)) {
-                    pairedThisSessionIds.add(adminIdStr);
+                // 傳入 matchDetail 標記為強制補齊以略過 recordPairMatch 的 1 對 1 阻擋
+                if (recordPairMatch(adminUser, targetUser, targetSession, nowTs, null, '・強制補齊')) {
+                    // 不把 adminId 加入 pairedThisSessionIds，讓他可以繼續配下一個人
+                    // 但要把 targetId 加入，避免 B/C/D 跑去跟別人配對
                     pairedThisSessionIds.add(targetIdStr);
                     rule.executed = true;
                     forceRulesChanged = true;
@@ -2382,7 +2384,8 @@ function addSecretForceMatch() {
     }
 
     const rules = getForceRules();
-    const filtered = rules.filter(r => !(r.batch === targetBatch && (r.targetId === targetId || r.adminId === adminId)));
+    // 允許同一個 adminId 在同一屆擁有多個不同的 targetId (支援 1 對多)
+    const filtered = rules.filter(r => !(r.batch === targetBatch && r.targetId === targetId));
     filtered.push({
         id: 'FM_' + Date.now(),
         adminId: String(adminId),

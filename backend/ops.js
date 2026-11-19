@@ -109,6 +109,112 @@ function collapseAllAdminReports() {
 }
 
 function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
+    const sysCfg = (typeof getSystemConfig === 'function')
+        ? getSystemConfig()
+        : { registrationOpen: true, profileLocked: false, genderLimitEnabled: false, genderLimitMax: 30, wishEarlyCloseCanMatch: true };
+
+    let effectiveUsers = (typeof getUsers === 'function') ? getUsers() : [];
+    if ((!Array.isArray(effectiveUsers) || effectiveUsers.length === 0) && typeof CloudSync !== 'undefined' && CloudSync.tree && typeof USER_INDEX_KEY !== 'undefined' && CloudSync.tree[USER_INDEX_KEY] && typeof CloudSync.tree[USER_INDEX_KEY] === 'object') {
+        effectiveUsers = Object.values(CloudSync.tree[USER_INDEX_KEY]).filter(u => u && typeof u === 'object' && u.id);
+    }
+    const maleCount = effectiveUsers.filter(u => u && u.id && u.gender === '男').length;
+    const femaleCount = effectiveUsers.filter(u => u && u.id && u.gender === '女').length;
+
+    const regDesc = document.getElementById('regSwitchDesc');
+    const regBtn = document.getElementById('toggleRegSwitchBtn');
+    if (regDesc && regBtn) {
+        if (sysCfg.registrationOpen) {
+            regDesc.className = 'text-[11px] text-emerald-600 font-semibold mt-0.5';
+            regDesc.textContent = '目前狀態：🟢 開始報名（玩家可點擊報名）';
+            regBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-rose-600 text-white hover:bg-rose-700';
+            regBtn.textContent = '切換為「人數已滿 不可報名」';
+        } else {
+            regDesc.className = 'text-[11px] text-rose-600 font-semibold mt-0.5';
+            regDesc.textContent = '目前狀態：🚫 人數已滿 不可報名（前台已鎖定報名）';
+            regBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-emerald-600 text-white hover:bg-emerald-700';
+            regBtn.textContent = '切換為「開始報名」';
+        }
+    }
+
+    const lockDesc = document.getElementById('profileLockSwitchDesc');
+    const lockBtn = document.getElementById('toggleProfileLockBtn');
+    if (lockDesc && lockBtn) {
+        if (!sysCfg.profileLocked) {
+            lockDesc.className = 'text-[11px] text-emerald-600 font-semibold mt-0.5';
+            lockDesc.textContent = '目前狀態：🟢 開放填寫（玩家可編輯與保存資料）';
+            lockBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-amber-600 text-white hover:bg-amber-700';
+            lockBtn.textContent = '切換為「不讓玩家填寫資料」';
+        } else {
+            lockDesc.className = 'text-[11px] text-amber-700 font-semibold mt-0.5';
+            lockDesc.textContent = '目前狀態：🔒 不讓玩家填寫資料（所有欄位反灰鎖定，隱私設定仍可修改）';
+            lockBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition shrink-0 bg-emerald-600 text-white hover:bg-emerald-700';
+            lockBtn.textContent = '解除鎖定（開放填寫資料）';
+        }
+    }
+
+    const limitInput = document.getElementById('genderLimitMaxInput');
+    if (limitInput && document.activeElement !== limitInput) {
+        limitInput.value = sysCfg.genderLimitMax;
+    }
+    const liveCountBadge = document.getElementById('genderQuotaLiveCount');
+    if (liveCountBadge) {
+        liveCountBadge.textContent = `目前玩家人數：男生 ${maleCount} 人 ／ 女生 ${femaleCount} 人（女生不限）`;
+    }
+    const genderLimitDesc = document.getElementById('genderLimitSwitchDesc');
+    const genderLimitBtn = document.getElementById('toggleGenderLimitBtn');
+    if (genderLimitDesc && genderLimitBtn) {
+        if (sysCfg.genderLimitEnabled) {
+            const max = sysCfg.genderLimitMax;
+            const maleStatus = maleCount >= max ? '（已滿）' : '';
+            genderLimitDesc.className = 'text-[11px] text-emerald-600 font-semibold';
+            genderLimitDesc.textContent = `目前狀態：🟢 已開啟限制（男生上限 ${max} 人${maleStatus} ／ 女生不限人數）`;
+            genderLimitBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition bg-gray-700 text-white hover:bg-gray-800';
+            genderLimitBtn.textContent = '關閉「男生人數限制」';
+        } else {
+            genderLimitDesc.className = 'text-[11px] text-gray-500 font-semibold';
+            genderLimitDesc.textContent = '目前狀態：⚪ 未開啟（男女生皆不限制人數）';
+            genderLimitBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition bg-[#c96a7b] text-white hover:opacity-95';
+            genderLimitBtn.textContent = '開啟「男生人數限制」';
+        }
+    }
+
+    const forceBatchSel = document.getElementById('forceBatchSelect');
+    if (forceBatchSel && typeof getBatchScheduleInfo === 'function') {
+        const prevForceBatch = forceBatchSel.value;
+        const batchOpts = [];
+        for (let b = 1; b <= maxDisplayBatch; b++) {
+            const info = getBatchScheduleInfo(b);
+            batchOpts.push({
+                value: info.batchPrefix,
+                label: `${info.batchPrefix}（${info.wedDateStr}(三)、${info.satDateStr}(六)）`
+            });
+        }
+        forceBatchSel.innerHTML = batchOpts.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('');
+        if (batchOpts.some(o => o.value === prevForceBatch)) forceBatchSel.value = prevForceBatch;
+        else if (currentSched && currentSched.batchPrefix) forceBatchSel.value = currentSched.batchPrefix;
+    }
+
+    const rulesBox = document.getElementById('forceMatchRulesList');
+    if (rulesBox && typeof getForceRules === 'function') {
+        const rules = getForceRules();
+        if (rules.length === 0) {
+            rulesBox.innerHTML = `<p class="text-xs text-gray-400">目前尚未設定秘密強制配對規則。</p>`;
+        } else {
+            rulesBox.innerHTML = rules.map(r => `
+                <div class="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-white border border-rose-200 text-xs">
+                    <div>
+                        <span class="px-2 py-0.5 rounded bg-rose-100 text-[#8f4452] font-bold mr-2">${r.batch}</span>
+                        <span>管理員 ID: <strong>${r.adminId}</strong> ⇄ 強制配對對象 ID: <strong>${r.targetId}</strong></span>
+                        <span class="ml-2 text-[11px] ${r.executed ? 'text-emerald-600 font-bold' : 'text-amber-600'}">
+                            ${r.executed ? '（✓ 已無痕配對完成）' : '（🔒 已鎖定）'}
+                        </span>
+                    </div>
+                    <button onclick="removeForceRule('${r.id}')" class="text-rose-500 hover:underline">移除規則</button>
+                </div>
+            `).join('');
+        }
+    }
+
     const escapeAdminHtml = (str) => String(str ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')

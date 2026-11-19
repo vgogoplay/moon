@@ -1655,7 +1655,7 @@ const CloudSync = {
             return [CHATS_KEY, USER_INDEX_KEY];
         }
         if (key === 'ops') {
-            return [MAILBOX_KEY, REPORTS_KEY, FATE_WALL_KEY, BANNED_RULES_KEY, SYSTEM_STATE_KEY, USER_INDEX_KEY];
+            return [MAILBOX_KEY, REPORTS_KEY, FATE_WALL_KEY, BANNED_RULES_KEY, SYSTEM_STATE_KEY, USER_INDEX_KEY, FORCE_KEY];
         }
         if (key === 'logs') {
             return [PLAYER_OP_LOGS_KEY, WISH_WALL_KEY, MATCH_LOGS_KEY, 'yuelao_admin_login_logs'];
