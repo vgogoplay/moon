@@ -1,6 +1,21 @@
-// 本機會員快取鍵：後台沿用 yuelao_users；前台使用獨立鍵，避免精簡索引覆寫後台資料
-const USERS_LOCAL_KEY = (typeof document !== 'undefined' && document.body && document.body.dataset && document.body.dataset.adminPage)
-    ? 'yuelao_users' : 'yuelao_player_users_cache';
+// 本地測試環境偵測（file:// 或 localhost / 127.0.0.1 自動啟用純本地沙盒模式，絕不讀寫正式 Firebase；加 ?mode=live 可強制連正式庫）
+function isLocalSandboxEnv() {
+    if (typeof window === 'undefined' || !window.location) return false;
+    try {
+        const qMode = new URLSearchParams(window.location.search).get('mode');
+        if (qMode === 'live') return false;
+        if (qMode === 'local') return true;
+    } catch (e) {}
+    const proto = String(window.location.protocol || '').toLowerCase();
+    const host = String(window.location.hostname || '').toLowerCase();
+    return proto === 'file:' || host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+// 本機會員快取鍵：後台或本地沙盒模式沿用 yuelao_users；正式前台使用獨立鍵，避免精簡索引覆寫後台資料
+const USERS_LOCAL_KEY = (
+    (typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv()) ||
+    (typeof document !== 'undefined' && document.body && document.body.dataset && document.body.dataset.adminPage)
+) ? 'yuelao_users' : 'yuelao_player_users_cache';
 /* shared/schema.js - 前後台共用：表單欄位結構、地區/MBTI對照表、戀愛語錄與 5 碼通行碼演算法 */
 
 const SCHEMA_VERSION = 31;
@@ -42,6 +57,32 @@ function inferMbtiGroup(mbtiVal) {
     if (MBTI_GROUPS['I人'].includes(code) || code.startsWith('I')) return 'I人';
     if (MBTI_GROUPS['E人'].includes(code) || code.startsWith('E')) return 'E人';
     return '';
+}
+
+// 寵物類型對照表（先選 有養寵物 或 沒有養寵物，再選寵物類型）
+const PET_TYPE_OPTIONS = ['狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物'];
+
+function inferPetStatus(hasPetVal) {
+    const val = String(hasPetVal || '').trim();
+    if (!val) return '';
+    if (val === '沒有養寵物') return '沒有養寵物';
+    return '有養寵物';
+}
+
+function parsePetCriterionValue(rawVal) {
+    const val = String(rawVal || '').trim();
+    if (!val) return { status: '有養寵物', petType: '不限' };
+    if (val === '沒有養寵物') return { status: '沒有養寵物', petType: '沒有養寵物' };
+    if (val === '有養寵物' || val === '不限') return { status: '有養寵物', petType: '不限' };
+    const m = val.match(/^有養寵物[（(](.+)[）)]$/);
+    if (m) {
+        const inner = String(m[1] || '').trim();
+        return {
+            status: '有養寵物',
+            petType: (!inner || inner.startsWith('不限')) ? '不限' : inner
+        };
+    }
+    return { status: '有養寵物', petType: val };
 }
 
 // 1. 戀愛點滴時刻隨機庫
@@ -101,7 +142,13 @@ const EXACT_MATCH_OPTIONS = [
         choices: REGION_OPTIONS
     },
     { key: 'height', label: '你的身高(對方)', choices: ['150cm以上', '155cm以上', '160cm以上', '165cm以上', '170cm以上', '175cm以上', '180cm以上'] },
-    { key: 'hasPet', label: '是否有養動物 / 寵物', choices: ['沒有養寵物', '狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物'] },
+    {
+        key: 'hasPet',
+        label: '是否有養動物 / 寵物',
+        type: 'petTwoStep',
+        statusChoices: ['有養寵物', '沒有養寵物'],
+        petChoices: ['不限', ...PET_TYPE_OPTIONS]
+    },
     { key: 'smoking', label: '抽煙', choices: ['不會', '偶爾', '會'] },
     { key: 'drinking', label: '喝酒', choices: ['不喝', '社交場合', '常喝'] },
     { key: 'lookingFor', label: '想找關係', choices: ['認真交往', '先當朋友', '看感覺', '純找朋友'] }
@@ -137,7 +184,7 @@ const FIELD_SECTIONS = [
             },
             {
                 key: 'city',
-                label: '當前居住縣市（請先選地區，再選縣市）',
+                label: '當前居住縣市',
                 type: 'regionCity',
                 required: true
             },
@@ -167,16 +214,9 @@ const FIELD_SECTIONS = [
             {
                 key: 'hasPet',
                 label: '是否有養動物 / 寵物',
-                type: 'select',
+                type: 'petTwoStep',
                 required: true,
-                options: ['沒有養寵物', '狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物']
-            },
-            {
-                key: 'likesPets',
-                label: '是否喜歡動物 / 寵物',
-                type: 'select',
-                required: true,
-                options: ['是', '否']
+                options: ['沒有養寵物', ...PET_TYPE_OPTIONS]
             },
             { key: 'smoking', label: '你抽菸嗎？', type: 'select', required: true, options: ['會', '偶爾', '不會'] },
             { key: 'acceptSmoking', label: '可接受對方抽菸嗎？', type: 'select', required: true, options: ['可以', '偶爾可以', '不行'] },
@@ -296,7 +336,7 @@ const FIELD_SECTIONS = [
             },
             {
                 key: 'mbti',
-                label: '你的 MBTI（請先選 I人 或 E人，再選具體人格）',
+                label: '你的 MBTI',
                 type: 'mbtiTwoStep',
                 required: true,
                 options: ['INTJ', 'INTP', 'ENTJ', 'ENTP', 'INFJ', 'INFP', 'ENFJ', 'ENFP', 'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ', 'ISTP', 'ISFP', 'ESTP', 'ESFP', '不知道 / 沒測過']
@@ -438,7 +478,8 @@ const PRIVACY_GATED_INDEX = { region: 'city', mbti: 'mbti' };
 const USER_SECRET_FIELDS = [
     'backupCode', 'ig', 'matchedHistory', 'matchedSession', 'matchedWithId', 'matchedWithName', 'matchedAt',
     'exactMatchCriteria', 'mustMatchKeys', 'readMailIds', 'isChatBanned', 'isMatchBanned', 'isWarned',
-    'warningReason', 'updatedAt', 'registeredSession', 'registeredSessions', 'customActivityRegs'
+    'warningReason', 'updatedAt', 'registeredSession', 'registeredSessions', 'customActivityRegs',
+    'lastSaveIp', 'lastSaveIpAt'
 ];
 // 配對卡片快照中一律保留的識別欄位（其餘欄位需本人隱私設定為 open）
 const PAIR_PROFILE_ALWAYS_FIELDS = ['id', 'nickname', 'privacy'];

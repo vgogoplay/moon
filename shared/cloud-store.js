@@ -100,6 +100,10 @@ const CloudSync = {
     unmatchedPairs: {},
     streamFlushTimer: null,
 
+    isLocalSandboxMode() {
+        return typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv();
+    },
+
     isBackendContext() {
         if (typeof document === 'undefined' || !document.body) return false;
         return Boolean(document.body.dataset && document.body.dataset.adminPage);
@@ -262,7 +266,10 @@ const CloudSync = {
         if (this.tree && this.tree[UNMATCHED_PAIRS_CLOUD_NODE] && typeof this.tree[UNMATCHED_PAIRS_CLOUD_NODE] === 'object') {
             Object.keys(this.tree[UNMATCHED_PAIRS_CLOUD_NODE]).forEach(pk => {
                 const val = this.tree[UNMATCHED_PAIRS_CLOUD_NODE][pk];
-                const exp = (val && typeof val === 'object') ? Number(val.graceUntil || 0) : Number(val || 0);
+                const isPerm = Boolean(val && typeof val === 'object' && val.permanent);
+                const exp = isPerm
+                    ? (now + 315360000000)
+                    : ((val && typeof val === 'object') ? Number(val.graceUntil || 0) : Number(val || 0));
                 if (now <= exp) {
                     merged[pk] = Math.max(Number(merged[pk] || 0), exp);
                 }
@@ -282,7 +289,7 @@ const CloudSync = {
         return merged;
     },
 
-    markPairUnmatched(idA, idB, ttlMs = 600000) {
+    markPairUnmatched(idA, idB, ttlMs = 315360000000) {
         const pk = this.makeUnmatchedPairKey(idA, idB);
         if (!pk) return Promise.resolve();
         const graceUntil = Date.now() + ttlMs;
@@ -291,7 +298,11 @@ const CloudSync = {
         this.unmatchedPairs = map;
         try { localStorage.setItem(UNMATCHED_PAIRS_SYNC_KEY, JSON.stringify(map)); } catch (e) {}
         if (this.initialized) {
-            return this.putNode(`${UNMATCHED_PAIRS_CLOUD_NODE}/${pk}`, { unmatchedAt: Date.now(), graceUntil });
+            return this.putNode(`${UNMATCHED_PAIRS_CLOUD_NODE}/${pk}`, {
+                unmatchedAt: Date.now(),
+                graceUntil,
+                permanent: true
+            });
         }
         return Promise.resolve();
     },
@@ -301,22 +312,49 @@ const CloudSync = {
         const pidB = String(idB || '').trim();
         if (!pidA || !pidB) return;
 
-        // 1. 先將解除配對墓碑寫入本地與 Firebase，確保任何先抵達後台的 SSE 事件都不會誤判為單邊遺漏而復活配對
-        await this.markPairUnmatched(pidA, pidB, 600000);
+        // 1. 先將永久解除配對墓碑寫入本地與 Firebase，確保任何同步事件都不會誤判為單邊遺漏而復活配對
+        await this.markPairUnmatched(pidA, pidB, 315360000000);
 
-        // 2. 同步強制寫入雙方最新配對紀錄（isMatchMutation: true）
+        // 2. 從雲端讀取雙方最新完整節點，避免前台精簡索引缺少對方 matchedHistory / matchedWithId 導致清不乾淨
+        const [remoteA, remoteB] = await Promise.all([
+            this.getNodeOnce(`${USERS_KEY}/${pidA}`),
+            this.getNodeOnce(`${USERS_KEY}/${pidB}`)
+        ]);
+
+        const buildCleanedUser = (baseRemote, fallbackLocal, selfId, removePartnerId) => {
+            const src = (baseRemote && typeof baseRemote === 'object')
+                ? { ...baseRemote, id: selfId }
+                : (fallbackLocal && typeof fallbackLocal === 'object' ? { ...fallbackLocal, id: selfId } : null);
+            if (!src) return null;
+            const normHist = this.normalizeMatchedHistoryList(src.matchedHistory)
+                .filter(h => String(h.partnerId).trim() !== removePartnerId && !this.isPairRecentlyUnmatched(selfId, h.partnerId));
+            src.matchedHistory = normHist;
+            const fallbackLast = normHist.length > 0 ? normHist[normHist.length - 1] : null;
+            if (!src.matchedWithId || String(src.matchedWithId).trim() === removePartnerId || this.isPairRecentlyUnmatched(selfId, src.matchedWithId)) {
+                src.matchedSession = fallbackLast ? (fallbackLast.session || null) : null;
+                src.matchedWithId = fallbackLast ? (fallbackLast.partnerId || null) : null;
+                src.matchedWithName = fallbackLast ? (fallbackLast.partnerName || null) : null;
+                src.matchedAt = fallbackLast ? (fallbackLast.matchedAt || null) : null;
+            }
+            return src;
+        };
+
+        const cleanedA = buildCleanedUser(remoteA, userA, pidA, pidB);
+        const cleanedB = buildCleanedUser(remoteB, userB, pidB, pidA);
+
         const tasks = [];
-        if (userA && userA.id) {
-            tasks.push(this.upsertUser(userA, true, { isMatchMutation: true }));
-        }
-        if (userB && userB.id) {
-            tasks.push(this.upsertUser(userB, true, { isMatchMutation: true }));
-        }
+        if (cleanedA) tasks.push(this.upsertUser(cleanedA, true, { isMatchMutation: true }));
+        if (cleanedB) tasks.push(this.upsertUser(cleanedB, true, { isMatchMutation: true }));
         if (tasks.length > 0) {
             await Promise.all(tasks);
         }
 
-        // 3. 清除雙方聊天紀錄節點
+        // 3. 清除配對快照與雙方聊天紀錄節點
+        const pk = this.pairKeyOf(pidA, pidB);
+        await Promise.all([
+            this.deleteNode(`${PAIR_PROFILES_KEY}/${pk}`),
+            this.deleteNode(`${PAIR_IG_KEY}/${pk}`)
+        ]);
         if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
             ChatStore.clearChat(pidA, pidB);
         }
@@ -610,6 +648,7 @@ const CloudSync = {
     reconcileSymmetricMatches(usersArr, autoPersistRepaired = false, options = {}) {
         if (!Array.isArray(usersArr) || usersArr.length === 0) return false;
         const includeChatsRepair = Boolean(options && options.includeChatsRepair);
+        if (!this.isBackendContext() && !includeChatsRepair) return false;
         
         let chatsMap = {};
         if (includeChatsRepair) {
@@ -739,6 +778,14 @@ const CloudSync = {
                 const existingMirror = partnerHist.find(ph => String(ph.partnerId) === uid);
 
                 if (!existingMirror) {
+                    const alreadyForceRepairedOnce = Boolean(
+                        h.isForceRepaired ||
+                        String(h.session || '').includes('・強制補齊') ||
+                        String(h.matchDetail || '').includes('強制補齊')
+                    );
+                    if (alreadyForceRepairedOnce && !includeChatsRepair) {
+                        return;
+                    }
                     const rawBaseSession = String(h.session || u.matchedSession || '').trim() || '系統補回配對';
                     const protectedSession = rawBaseSession.includes('・強制補齊')
                         ? rawBaseSession
@@ -883,7 +930,12 @@ const CloudSync = {
             ? this.mapToArray(t[CUSTOM_ACTIVITIES_KEY])
             : null;
 
-        // 1. 玩家名單（Firebase RTDB 會自動省略空陣列 [] 與空物件 {}，還原時需明確補回 [] / {} 以確保取消勾選場次能雙向連動）
+        // 1. 玩家名單（僅在已載入或快取有 yuelao_users 時才覆寫本地清單，避免未抓全庫的後台分頁把名單清空）
+        const hasUsersNodeData = Boolean(
+            (this.fetchedTopNodes && this.fetchedTopNodes.has(USERS_KEY)) ||
+            (t[USERS_KEY] && typeof t[USERS_KEY] === 'object' && Object.keys(t[USERS_KEY]).length > 0) ||
+            !this.isBackendContext()
+        );
         const usersArr = this.mapToArray(t[USERS_KEY]).map(u => {
             if (!u || typeof u !== 'object') return u;
             const cleanUser = { ...u };
@@ -958,9 +1010,20 @@ const CloudSync = {
                 });
             }
         }
-        const canPersistSymmetricRepair = Boolean(this.initialized && this.isBackendContext() && this.inFlightWrites === 0);
-        this.reconcileSymmetricMatches(usersArr, canPersistSymmetricRepair);
-        this.writeLocalIfChanged(USERS_LOCAL_KEY, JSON.stringify(usersArr));
+        if (hasUsersNodeData) {
+            const canPersistSymmetricRepair = Boolean(this.initialized && this.isBackendContext() && this.inFlightWrites === 0);
+            this.reconcileSymmetricMatches(usersArr, canPersistSymmetricRepair);
+            const usersForLocalCache = this.isBackendContext()
+                ? usersArr
+                : usersArr.map(u => {
+                    if (!u || typeof u !== 'object') return u;
+                    const sanitized = { ...u };
+                    delete sanitized.lastSaveIp;
+                    delete sanitized.lastSaveIpAt;
+                    return sanitized;
+                });
+            this.writeLocalIfChanged(USERS_LOCAL_KEY, JSON.stringify(usersForLocalCache));
+        }
         usersArr.forEach(u => {
             if (u && u.id) {
                 this.lastPushedUsersJson[String(u.id)] = JSON.stringify(u);
@@ -999,7 +1062,7 @@ const CloudSync = {
         // 3. 系統開關與期數設定
         if (t[SYSTEM_STATE_KEY] && typeof t[SYSTEM_STATE_KEY] === 'object') {
             this.writeLocalIfChanged(SYSTEM_STATE_KEY, JSON.stringify(t[SYSTEM_STATE_KEY]));
-        } else if (localStorage.getItem(SYSTEM_STATE_KEY) !== null) {
+        } else if (t[SYSTEM_STATE_KEY] === null && localStorage.getItem(SYSTEM_STATE_KEY) !== null) {
             localStorage.removeItem(SYSTEM_STATE_KEY);
         }
 
@@ -1075,7 +1138,7 @@ const CloudSync = {
             });
             actsArr.sort((a, b) => Number(a.createdAtTs || 0) - Number(b.createdAtTs || 0));
             this.writeLocalIfChanged(CUSTOM_ACTIVITIES_KEY, JSON.stringify(actsArr));
-        } else {
+        } else if (t[CUSTOM_ACTIVITIES_KEY] === null) {
             this.writeLocalIfChanged(CUSTOM_ACTIVITIES_KEY, '[]');
         }
 
@@ -1108,7 +1171,7 @@ const CloudSync = {
             const fateWallArr = this.mapToArray(t[FATE_WALL_KEY]).filter(item => item && typeof item === 'object' && item.content);
             fateWallArr.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
             this.writeLocalIfChanged(FATE_WALL_KEY, JSON.stringify(fateWallArr));
-        } else {
+        } else if (t[FATE_WALL_KEY] === null) {
             this.writeLocalIfChanged(FATE_WALL_KEY, '[]');
         }
 
@@ -1122,7 +1185,7 @@ const CloudSync = {
                 ? compareWishWallItems(a, b)
                 : (Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0)));
             this.writeLocalIfChanged(WISH_WALL_KEY, JSON.stringify(normWishes));
-        } else {
+        } else if (t[WISH_WALL_KEY] === null) {
             this.writeLocalIfChanged(WISH_WALL_KEY, '[]');
         }
     },
@@ -1158,6 +1221,11 @@ const CloudSync = {
     refreshCloudBadge() {
         const badge = document.getElementById('cloudStatusBadge');
         if (!badge) return;
+        if (this.isLocalSandboxMode()) {
+            badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-teal-50 border border-teal-300 text-teal-800 font-bold';
+            badge.textContent = '🧪 本地測試模式（純本地儲存・不影響正式環境）';
+            return;
+        }
         if (this.inFlightWrites > 0) {
             badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-800 font-semibold animate-pulse';
             badge.textContent = `⏳ 正在同步至雲端（${this.inFlightWrites} 筆寫入中）...`;
@@ -1178,6 +1246,10 @@ const CloudSync = {
     },
 
     async fetchFullTree(options = {}) {
+        if (this.isLocalSandboxMode()) {
+            this.hasLoadedFullTree = true;
+            return true;
+        }
         if (this.inFlightWrites > 0) return false;
         const force = Boolean(options && options.force);
         // 免費方案流量保護：本次工作階段已完整下載過，且 SSE 仍保持資料新鮮時，不重複下載整個資料庫
@@ -1351,16 +1423,272 @@ const CloudSync = {
         });
     },
 
-    // ===================== 方案 C：玩家端混合同步（功能開關，預設關閉） =====================
+    // ===================== 方案 C：前後台省流混合同步（閒置降頻 + 跨頁 ETag 快取 + 後台按頁讀取） =====================
     PLAYER_SYNC_ENABLED: true,
     PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch'],
-    PLAYER_COLD_NODES: ['yuelao_custom_activities', 'yuelao_banned_rules', 'yuelao_force_matches', 'yuelao_unmatched_pairs', 'yuelao_activity_reg_history'],
-    PLAYER_HOT_INTERVAL_MS: 30000,
-    PLAYER_COLD_INTERVAL_MS: 60000,
+    PLAYER_COLD_NODES: ['yuelao_custom_activities', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
+    PLAYER_HOT_INTERVAL_MS: 50000,   // 熱門節點每 50 秒檢查一次（45~60 秒區間）
+    PLAYER_COLD_INTERVAL_MS: 240000, // 冷門節點每 4 分鐘檢查一次（3~5 分鐘區間）
+    PLAYER_IDLE_TIMEOUT_MS: 180000,  // 超過 3 分鐘無滑動／點擊／輸入即自動暫停輪詢
+    BACKEND_POLL_INTERVAL_MS: 30000, // 後台僅輪詢當前頁面所需節點，每 30 秒檢查一次
+    BACKEND_IDLE_TIMEOUT_MS: 300000, // 後台超過 5 分鐘無操作自動暫停輪詢
+    ETAG_STORAGE_KEY: 'yuelao_cloud_etags_v1',
     etagCache: null,
+    fetchedTopNodes: null,
     activeRoomPath: '',
+    _pausedRoomPath: '',
     activeRoomEs: null,
     playerTimersStarted: false,
+    lastUserActivityAt: Date.now(),
+    isPlayerIdlePaused: false,
+    activityWatchersBound: false,
+
+    bindActivityWatchers() {
+        if (this.activityWatchersBound || typeof window === 'undefined') return;
+        this.activityWatchersBound = true;
+        this.lastUserActivityAt = Date.now();
+        let lastScrollMark = 0;
+
+        const onUserActivity = (evt) => {
+            const now = Date.now();
+            if (evt && evt.type === 'scroll' && (now - lastScrollMark) < 1000) {
+                return;
+            }
+            if (evt && evt.type === 'scroll') lastScrollMark = now;
+            this.lastUserActivityAt = now;
+
+            if (this.isPlayerIdlePaused) {
+                this.isPlayerIdlePaused = false;
+                if (this.isBackendContext()) {
+                    this.pollBackendLight();
+                } else if (this.isPlayerSyncMode()) {
+                    this.pollPlayerHot();
+                    if (this._pausedRoomPath) {
+                        const resumeRoom = this._pausedRoomPath;
+                        this._pausedRoomPath = '';
+                        this.setActiveChatRoom(resumeRoom);
+                    }
+                }
+            }
+        };
+
+        ['scroll', 'click', 'touchstart', 'pointerdown', 'keydown'].forEach(evtName => {
+            window.addEventListener(evtName, onUserActivity, { passive: true, capture: true });
+        });
+    },
+
+    isUserIdleNow(timeoutMs) {
+        const limit = Number(timeoutMs) || this.PLAYER_IDLE_TIMEOUT_MS;
+        return (Date.now() - Number(this.lastUserActivityAt || 0)) >= limit;
+    },
+
+    loadPersistedEtags() {
+        if (this.etagCache && typeof this.etagCache === 'object') return this.etagCache;
+        try {
+            const raw = localStorage.getItem(this.ETAG_STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : {};
+            this.etagCache = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (e) {
+            this.etagCache = {};
+        }
+        return this.etagCache;
+    },
+
+    savePersistedEtags() {
+        if (!this.etagCache) return;
+        try {
+            localStorage.setItem(this.ETAG_STORAGE_KEY, JSON.stringify(this.etagCache));
+        } catch (e) {}
+    },
+
+    invalidatePersistedEtag(path) {
+        const clean = String(path || '').replace(/^\/+|\/+$/g, '');
+        if (!clean) return;
+        const topNode = clean.split('/')[0];
+        const cache = this.loadPersistedEtags();
+        let changed = false;
+        Object.keys(cache).forEach(k => {
+            if (k === clean || k === topNode || k.startsWith(clean + '/') || clean.startsWith(k + '/')) {
+                delete cache[k];
+                changed = true;
+            }
+        });
+        if (changed) this.savePersistedEtags();
+    },
+
+    hydrateTreeFromLocalStorage() {
+        if (!this.tree || typeof this.tree !== 'object') this.tree = {};
+        if (!this.fetchedTopNodes) this.fetchedTopNodes = new Set();
+
+        const hydrateArrayById = (lsKey, treeKey, idField = 'id') => {
+            try {
+                const raw = localStorage.getItem(lsKey);
+                if (raw === null) return false;
+                const arr = JSON.parse(raw);
+                if (!Array.isArray(arr)) return false;
+                const mapObj = {};
+                arr.forEach((item, idx) => {
+                    if (item && typeof item === 'object') {
+                        const k = String(item[idField] || `IDX_${idx}`);
+                        mapObj[k] = item;
+                    }
+                });
+                this.tree[treeKey] = mapObj;
+                return true;
+            } catch (e) {
+                return false;
+            }
+        };
+
+        const hydrateObjectDirect = (lsKey, treeKey) => {
+            try {
+                const raw = localStorage.getItem(lsKey);
+                if (raw === null) return false;
+                const obj = JSON.parse(raw);
+                if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+                this.tree[treeKey] = obj;
+                return true;
+            } catch (e) {
+                return false;
+            }
+        };
+
+        if (hydrateArrayById(USERS_LOCAL_KEY, USERS_KEY)) {
+            this.fetchedTopNodes.add(USERS_KEY);
+        }
+        const chatsStorageKey = this.isBackendContext() ? ADMIN_CHATS_KEY : CHATS_KEY;
+        if (hydrateObjectDirect(chatsStorageKey, CHATS_KEY)) {
+            this.fetchedTopNodes.add(CHATS_KEY);
+        }
+        if (hydrateObjectDirect(SYSTEM_STATE_KEY, SYSTEM_STATE_KEY)) {
+            this.fetchedTopNodes.add(SYSTEM_STATE_KEY);
+        }
+        if (hydrateArrayById(MAILBOX_KEY, MAILBOX_KEY)) {
+            this.fetchedTopNodes.add(MAILBOX_KEY);
+        }
+        if (hydrateArrayById(REPORTS_KEY, REPORTS_KEY)) {
+            this.fetchedTopNodes.add(REPORTS_KEY);
+        }
+        if (hydrateArrayById(BANNED_RULES_KEY, BANNED_RULES_KEY)) {
+            this.fetchedTopNodes.add(BANNED_RULES_KEY);
+        }
+        if (hydrateArrayById(FORCE_KEY, FORCE_KEY)) {
+            this.fetchedTopNodes.add(FORCE_KEY);
+        }
+        if (hydrateObjectDirect(AUTO_RUN_LOG_KEY, AUTO_RUN_LOG_KEY)) {
+            this.fetchedTopNodes.add(AUTO_RUN_LOG_KEY);
+        }
+        if (hydrateArrayById(MATCH_LOGS_KEY, MATCH_LOGS_KEY)) {
+            this.fetchedTopNodes.add(MATCH_LOGS_KEY);
+        }
+        if (hydrateArrayById(PLAYER_OP_LOGS_KEY, PLAYER_OP_LOGS_KEY)) {
+            this.fetchedTopNodes.add(PLAYER_OP_LOGS_KEY);
+        }
+        if (hydrateObjectDirect(ID_COUNTER_KEY, ID_COUNTER_KEY)) {
+            this.fetchedTopNodes.add(ID_COUNTER_KEY);
+        }
+        if (hydrateArrayById(CUSTOM_ACTIVITIES_KEY, CUSTOM_ACTIVITIES_KEY)) {
+            this.fetchedTopNodes.add(CUSTOM_ACTIVITIES_KEY);
+        }
+        if (hydrateObjectDirect(REG_HISTORY_KEY, REG_HISTORY_KEY)) {
+            this.fetchedTopNodes.add(REG_HISTORY_KEY);
+        }
+        if (hydrateObjectDirect(SESSION_MATCH_RESULTS_KEY, SESSION_MATCH_RESULTS_KEY)) {
+            this.fetchedTopNodes.add(SESSION_MATCH_RESULTS_KEY);
+        }
+        if (hydrateArrayById(FATE_WALL_KEY, FATE_WALL_KEY)) {
+            this.fetchedTopNodes.add(FATE_WALL_KEY);
+        }
+        if (hydrateArrayById(WISH_WALL_KEY, WISH_WALL_KEY)) {
+            this.fetchedTopNodes.add(WISH_WALL_KEY);
+        }
+        if (hydrateArrayById('yuelao_admin_login_logs', 'yuelao_admin_login_logs')) {
+            this.fetchedTopNodes.add('yuelao_admin_login_logs');
+        }
+        if (hydrateObjectDirect(UNMATCHED_PAIRS_SYNC_KEY, UNMATCHED_PAIRS_CLOUD_NODE)) {
+            this.fetchedTopNodes.add(UNMATCHED_PAIRS_CLOUD_NODE);
+        }
+    },
+
+    hasLocalCacheForPath(path) {
+        const clean = String(path || '').replace(/^\/+|\/+$/g, '');
+        if (!clean) return false;
+        const parts = clean.split('/');
+        const top = parts[0];
+        if (!this.tree || this.tree[top] === undefined) return false;
+        if (parts.length === 1) return true;
+        let curr = this.tree[top];
+        for (let i = 1; i < parts.length; i++) {
+            if (!curr || typeof curr !== 'object' || curr[parts[i]] === undefined) return false;
+            curr = curr[parts[i]];
+        }
+        return true;
+    },
+
+    getBackendPageKey() {
+        if (typeof document !== 'undefined' && document.body && document.body.dataset && document.body.dataset.adminPage) {
+            return String(document.body.dataset.adminPage).trim();
+        }
+        if (typeof window !== 'undefined' && window.location) {
+            const p = String(window.location.pathname || '').toLowerCase();
+            if (p.includes('backend-home')) return 'home';
+            if (p.includes('backend-activities')) return 'activities';
+            if (p.includes('backend-chats')) return 'chats';
+            if (p.includes('backend-ops')) return 'ops';
+            if (p.includes('backend-logs')) return 'logs';
+        }
+        return 'member';
+    },
+
+    getBackendPageNodes(pageKey = null) {
+        const key = pageKey || this.getBackendPageKey();
+        if (key === 'home') {
+            return []; // 純文字首頁：0 資料庫讀取，完全不下載會員或聊天資料
+        }
+        if (key === 'member') {
+            return [USERS_KEY, SYSTEM_STATE_KEY, FORCE_KEY, UNMATCHED_PAIRS_CLOUD_NODE, ID_COUNTER_KEY, CUSTOM_ACTIVITIES_KEY];
+        }
+        if (key === 'activities') {
+            return [USERS_KEY, CUSTOM_ACTIVITIES_KEY, REG_HISTORY_KEY, SESSION_MATCH_RESULTS_KEY, SYSTEM_STATE_KEY, FORCE_KEY, UNMATCHED_PAIRS_CLOUD_NODE];
+        }
+        if (key === 'chats') {
+            return [CHATS_KEY, USER_INDEX_KEY];
+        }
+        if (key === 'ops') {
+            return [MAILBOX_KEY, REPORTS_KEY, FATE_WALL_KEY, BANNED_RULES_KEY, SYSTEM_STATE_KEY, USER_INDEX_KEY];
+        }
+        if (key === 'logs') {
+            return [PLAYER_OP_LOGS_KEY, WISH_WALL_KEY, MATCH_LOGS_KEY, 'yuelao_admin_login_logs'];
+        }
+        return [USERS_KEY, SYSTEM_STATE_KEY];
+    },
+
+    async ensureBackendNodes(paths = []) {
+        if (this.isLocalSandboxMode()) return true;
+        const unique = Array.from(new Set((paths || []).filter(Boolean)));
+        if (unique.length === 0) return true;
+        if (!this.fetchedTopNodes) this.fetchedTopNodes = new Set();
+        const results = await Promise.all(unique.map(p => this.conditionalGetNode(p).then(r => ({ p, r }))));
+        let changed = false;
+        results.forEach(({ p, r }) => {
+            const top = String(p).split('/')[0];
+            if (r.status === 'changed') {
+                this.applyStreamPatch(p, r.data);
+                this.fetchedTopNodes.add(top);
+                changed = true;
+            } else if (r.status === 'unchanged') {
+                this.fetchedTopNodes.add(top);
+            }
+        });
+        if (unique.includes(CHATS_KEY)) {
+            this.hasLoadedFullTree = true;
+        }
+        if (changed) {
+            this.applyTreeToLocalStorage();
+            if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+        }
+        return true;
+    },
 
     isPlayerSyncMode() {
         if (this.isBackendContext()) return false;
@@ -1389,11 +1717,14 @@ const CloudSync = {
     },
 
     async conditionalGetNode(path) {
-        // 以 ETag 條件式讀取：資料未變動時 Firebase 回 304 且無內容，幾乎不耗下載流量
-        if (!this.etagCache) this.etagCache = {};
+        if (this.isLocalSandboxMode()) return { status: 'unchanged' };
+        // 以跨頁持久化 ETag 條件式讀取：資料未變動時 Firebase 回 304 且無內容，0 位元組下載流量
+        const cache = this.loadPersistedEtags();
         const epochBefore = this.writeEpoch;
         const headers = { 'X-Firebase-ETag': 'true' };
-        if (this.etagCache[path]) headers['If-None-Match'] = this.etagCache[path];
+        if (cache[path] && this.hasLocalCacheForPath(path)) {
+            headers['If-None-Match'] = cache[path];
+        }
         try {
             const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json${this.authQuery()}`, {
                 method: 'GET',
@@ -1415,7 +1746,12 @@ const CloudSync = {
             this.syncStats.bodies++;
             this.syncStats.bodyBytes += text.length;
             const data = text ? JSON.parse(text) : null;
-            if (etag) this.etagCache[path] = etag; else delete this.etagCache[path];
+            if (etag) {
+                cache[path] = etag;
+            } else {
+                delete cache[path];
+            }
+            this.savePersistedEtags();
             return { status: 'changed', data };
         } catch (e) {
             this.syncStats.errors++;
@@ -1484,6 +1820,14 @@ const CloudSync = {
     async pollPlayerNodes(paths) {
         if (typeof document !== 'undefined' && document.hidden) return;
         if (this.inFlightWrites > 0) return;
+        if (this.isUserIdleNow(this.PLAYER_IDLE_TIMEOUT_MS)) {
+            this.isPlayerIdlePaused = true;
+            if (this.activeRoomEs && this.activeRoomPath) {
+                this._pausedRoomPath = this.activeRoomPath;
+                this.closeActiveChatRoom();
+            }
+            return;
+        }
         const unique = Array.from(new Set(paths.filter(Boolean)));
         const results = await Promise.all(unique.map(p => this.conditionalGetNode(p).then(r => ({ p, r }))));
         let changed = false;
@@ -1524,14 +1868,20 @@ const CloudSync = {
     startPlayerTimers() {
         if (this.playerTimersStarted) return;
         this.playerTimersStarted = true;
+        this.bindActivityWatchers();
         setInterval(() => this.logSyncStats(), 60000);
         setInterval(() => this.pollPlayerHot(), this.PLAYER_HOT_INTERVAL_MS);
         setInterval(() => this.pollPlayerCold(), this.PLAYER_COLD_INTERVAL_MS);
     },
 
     setActiveChatRoom(roomPath) {
+        if (this.isLocalSandboxMode()) return;
         // 只對「目前開啟的單一聊天室」建立 SSE；切換聊天室或分頁隱藏時關閉
         if (!this.isPlayerSyncMode()) return;
+        if (this.isPlayerIdlePaused) {
+            this._pausedRoomPath = roomPath || '';
+            return;
+        }
         if (roomPath === this.activeRoomPath && this.activeRoomEs) return;
         this.closeActiveChatRoom();
         if (!roomPath || typeof EventSource === 'undefined') return;
@@ -1579,6 +1929,8 @@ const CloudSync = {
 
     async initPlayerScopedSync() {
         this.tree = this.tree && typeof this.tree === 'object' ? this.tree : {};
+        this.hydrateTreeFromLocalStorage();
+        this.loadPersistedEtags();
         const me = this.playerSelfId();
         // 第一階段：索引、冷門節點、本人私有記錄（好友清單需要本人記錄）
         const earlyNodes = [USER_INDEX_KEY, 'yuelao_system_batch', WISH_WALL_KEY];
@@ -1606,8 +1958,9 @@ const CloudSync = {
                 if (document.hidden) {
                     this.closeActiveChatRoom();
                 } else {
+                    this.lastUserActivityAt = Date.now();
+                    this.isPlayerIdlePaused = false;
                     this.pollPlayerHot();
-                    this.pollPlayerCold();
                 }
             });
         }
@@ -1615,34 +1968,36 @@ const CloudSync = {
         return true;
     },
 
-    startRealtimeStream() {
-        // 流量修復：不再開啟 /.json 全庫 SSE；後台改為每 15 秒輕量輪詢（索引＋熱門節點，ETag 命中時不下載）
-        if (this.backendPollTimer) return;
-        this.backendPollTimer = setInterval(() => this.pollBackendLight(), 15000);
-    },
+    async initBackendScopedSync() {
+        this.tree = this.tree && typeof this.tree === 'object' ? this.tree : {};
+        this.hydrateTreeFromLocalStorage();
+        this.loadPersistedEtags();
+        this.bindActivityWatchers();
 
-    async init(onUpdate) {
-        this.onUpdateCallback = onUpdate || null;
-        if (typeof yuelaoAuth !== 'undefined' && yuelaoAuth && typeof yuelaoAuth.init === 'function') {
-            await yuelaoAuth.init();
+        const pageKey = this.getBackendPageKey();
+        const pageNodes = this.getBackendPageNodes(pageKey);
+        if (!this.fetchedTopNodes) this.fetchedTopNodes = new Set();
+
+        if (pageNodes.length > 0) {
+            const results = await Promise.all(pageNodes.map(p => this.conditionalGetNode(p).then(r => ({ p, r }))));
+            results.forEach(({ p, r }) => {
+                const top = String(p).split('/')[0];
+                if (r.status === 'changed') {
+                    this.applyStreamPatch(p, r.data);
+                    this.fetchedTopNodes.add(top);
+                } else if (r.status === 'unchanged') {
+                    this.fetchedTopNodes.add(top);
+                }
+            });
+            if (pageNodes.includes(CHATS_KEY)) {
+                this.hasLoadedFullTree = true;
+            }
+            this.applyTreeToLocalStorage();
         }
-        if (this.isPlayerSyncMode()) return this.initPlayerScopedSync();
-        let loadedOk = await this.fetchFullTree();
-        if (!loadedOk) {
-            await new Promise(r => setTimeout(r, 400));
-            loadedOk = await this.fetchFullTree();
-        }
+
         this.initialized = true;
+        this.updateCloudBadge(true);
         this.startRealtimeStream();
-        if (this.isBackendContext()) {
-            this.backfillDerivedNodes().catch(() => {});
-        }
-
-        // 已關閉多餘的 3.5 秒全庫輪詢，完全改由 EventSource 即時推播與分頁聚焦同步
-        if (this.pollTimer) {
-            clearInterval(this.pollTimer);
-            this.pollTimer = null;
-        }
 
         if (!this.beforeUnloadBound && typeof window !== 'undefined') {
             this.beforeUnloadBound = true;
@@ -1656,9 +2011,48 @@ const CloudSync = {
 
         document.addEventListener('visibilitychange', async () => {
             if (!document.hidden && this.inFlightWrites === 0) {
+                this.lastUserActivityAt = Date.now();
+                this.isPlayerIdlePaused = false;
                 await this.pollBackendLight();
             }
         });
+
+        if (typeof this.onUpdateCallback === 'function') {
+            this.onUpdateCallback();
+        }
+        return true;
+    },
+
+    startRealtimeStream() {
+        if (this.isLocalSandboxMode()) return;
+        // 流量修復：後台僅針對當前頁面所需節點做輕量 ETag 輪詢（純文字首頁 0 請求，其餘頁面每 30 秒檢查）
+        if (this.backendPollTimer) return;
+        this.backendPollTimer = setInterval(() => this.pollBackendLight(), this.BACKEND_POLL_INTERVAL_MS);
+    },
+
+    async init(onUpdate) {
+        this.onUpdateCallback = onUpdate || null;
+        if (typeof yuelaoAuth !== 'undefined' && yuelaoAuth && typeof yuelaoAuth.init === 'function') {
+            await yuelaoAuth.init();
+        }
+        if (this.isLocalSandboxMode()) {
+            this.initialized = true;
+            this.hasLoadedFullTree = true;
+            this.refreshCloudBadge();
+            if (typeof this.onUpdateCallback === 'function') {
+                this.onUpdateCallback();
+            }
+            return true;
+        }
+        if (this.isPlayerSyncMode()) return this.initPlayerScopedSync();
+        if (this.isBackendContext()) return this.initBackendScopedSync();
+        let loadedOk = await this.fetchFullTree();
+        if (!loadedOk) {
+            await new Promise(r => setTimeout(r, 400));
+            loadedOk = await this.fetchFullTree();
+        }
+        this.initialized = true;
+        this.startRealtimeStream();
     },
 
     // 階段 C：有登入權杖時附加到請求網址（未啟用匿名登入時為空字串，行為與之前相同）
@@ -1674,6 +2068,20 @@ const CloudSync = {
 
     // ===== 流量修復：精準單節點讀取（嚴禁前台請求根節點 /.json）=====
     async getNodeOnce(path) {
+        if (this.isLocalSandboxMode()) {
+            const clean = String(path || '').replace(/^\/+|\/+$/g, '');
+            const parts = clean.split('/');
+            if (parts[0] === USERS_KEY && parts[1]) {
+                try {
+                    const arr = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
+                    const found = Array.isArray(arr) ? arr.find(u => u && String(u.id).trim() === parts[1]) : null;
+                    return found ? { ...found } : null;
+                } catch (e) {
+                    return null;
+                }
+            }
+            return null;
+        }
         // 回傳節點值；節點不存在為 null；網路錯誤為 undefined（呼叫端不可把 undefined 當作「不存在」）
         try {
             const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json${this.authQuery()}`, { cache: 'no-store' });
@@ -1685,6 +2093,7 @@ const CloudSync = {
     },
 
     async refreshPlayerFresh() {
+        if (this.isLocalSandboxMode()) return true;
         const me = this.playerSelfId();
         const paths = [USER_INDEX_KEY, ...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES, ...(me ? [`${USERS_KEY}/${me}`] : []), ...this.playerDynamicPaths()];
         await this.fetchPlayerPaths(paths);
@@ -1699,6 +2108,15 @@ const CloudSync = {
     async findUserByBackupCode(code) {
         const c = String(code || '').trim().toUpperCase();
         if (!c) return null;
+        if (this.isLocalSandboxMode()) {
+            try {
+                const arr = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
+                const found = Array.isArray(arr) ? arr.find(u => u && u.id && (String(u.backupCode || '').trim().toUpperCase() === c || (typeof deriveFixedBackupCode === 'function' && deriveFixedBackupCode(u.id) === c))) : null;
+                return found ? { ...found } : null;
+            } catch (e) {
+                return null;
+            }
+        }
         const q = `orderBy=${encodeURIComponent('"backupCode"')}&equalTo=${encodeURIComponent('"' + c + '"')}&limitToFirst=1`;
         const auth = this.authQuery();
         const url = `${this.dbUrl}/${USERS_KEY}.json?${q}${auth ? '&' + auth.slice(1) : ''}`;
@@ -1740,17 +2158,34 @@ const CloudSync = {
         return fetch(buildUrl(), buildInit());
     },
 
-    // ===== 流量修復：後台輕量輪詢（取代 /.json 全庫 SSE）=====
+    // ===== 流量修復：後台按頁輕量輪詢（純文字首頁 0 請求，其餘頁面僅檢查本頁節點且支援 5 分鐘閒置暫停）=====
     async pollBackendLight() {
+        if (this.isLocalSandboxMode()) return;
         if (typeof document !== 'undefined' && document.hidden) return;
         if (this.inFlightWrites > 0) return;
-        const paths = Array.from(new Set([USER_INDEX_KEY, ...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES]));
+        const pageKey = this.getBackendPageKey();
+        if (pageKey === 'home') return;
+        if (this.isUserIdleNow(this.BACKEND_IDLE_TIMEOUT_MS)) {
+            this.isPlayerIdlePaused = true;
+            return;
+        }
+        const paths = this.getBackendPageNodes(pageKey);
+        if (!paths || paths.length === 0) return;
         const results = await Promise.all(paths.map(p => this.conditionalGetNode(p).then(r => ({ p, r }))));
         let changed = false;
         results.forEach(({ p, r }) => {
-            if (r.status === 'changed') { this.applyStreamPatch(p, r.data); changed = true; }
+            const top = String(p).split('/')[0];
+            if (r.status === 'changed') {
+                this.applyStreamPatch(p, r.data);
+                if (this.fetchedTopNodes) this.fetchedTopNodes.add(top);
+                changed = true;
+            }
         });
-        if (changed && typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+        if (changed) {
+            if (paths.includes(CHATS_KEY)) this.hasLoadedFullTree = true;
+            this.applyTreeToLocalStorage();
+            if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+        }
     },
 
     // ===== 單節點讀取：同路徑併發合併（in-flight）＋ 30 秒 TTL；逾時以 ETag 條件式重新驗證（未變動回 304，不下載內容）=====
@@ -1759,6 +2194,10 @@ const CloudSync = {
     nodeReadInflight: null,
 
     async readNodeCached(path, options = {}) {
+        if (this.isLocalSandboxMode()) {
+            const val = await this.getNodeOnce(path);
+            return { status: 'cache', data: val };
+        }
         if (!this.nodeReadCache) this.nodeReadCache = new Map();
         if (!this.nodeReadInflight) this.nodeReadInflight = new Map();
         const key = String(path || '').replace(/^\/+|\/+$/g, '');
@@ -1810,7 +2249,9 @@ const CloudSync = {
 
     async putNode(path, value, options = {}) {
         this.invalidateNodeReadCache(path);
+        this.invalidatePersistedEtag(path);
         this.applyStreamPatch(path, value);
+        if (this.isLocalSandboxMode()) return true;
         this.inFlightWrites++;
         this.writeEpoch++;
         this.refreshCloudBadge();
@@ -1839,12 +2280,14 @@ const CloudSync = {
 
     async patchNode(path, patchObj, options = {}) {
         this.invalidateNodeReadCache(path);
+        this.invalidatePersistedEtag(path);
         if (!patchObj || typeof patchObj !== 'object') return;
         const cleanBase = String(path || '').replace(/^\/+|\/+$/g, '');
         Object.entries(patchObj).forEach(([k, v]) => {
             const subPath = cleanBase ? `${cleanBase}/${k}` : k;
             this.applyStreamPatch(subPath, v);
         });
+        if (this.isLocalSandboxMode()) return true;
         this.inFlightWrites++;
         this.writeEpoch++;
         this.refreshCloudBadge();
@@ -2000,12 +2443,14 @@ const CloudSync = {
 
     async deleteNode(path) {
         this.invalidateNodeReadCache(path);
+        this.invalidatePersistedEtag(path);
         this.applyStreamPatch(path, null);
         const pathParts = String(path || '').replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
         if (pathParts.length === 2 && pathParts[0] === USERS_KEY) {
             const pid = pathParts[1];
             if (pid) this.markSharedDeletedUser(pid, 20000);
         }
+        if (this.isLocalSandboxMode()) return true;
         this.inFlightWrites++;
         this.writeEpoch++;
         this.refreshCloudBadge();
@@ -2062,17 +2507,7 @@ const CloudSync = {
         ));
         cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory)
             .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId) && !this.isRogueCustomMatchEntry(h));
-        if (isMatchMutation && existingTreeUser && existingTreeUser.matchedHistory) {
-            const existingProtectedEntries = this.normalizeMatchedHistoryList(existingTreeUser.matchedHistory)
-                .filter(h =>
-                    (h.isForceRepaired || String(h.session || '').includes('・強制補齊') || String(h.matchDetail || '').includes('強制補齊')) &&
-                    !this.isPairRecentlyUnmatched(pid, h.partnerId) &&
-                    !this.isRogueCustomMatchEntry(h)
-                );
-            if (existingProtectedEntries.length > 0) {
-                cleanRecord.matchedHistory = this.normalizeMatchedHistoryList([...cleanRecord.matchedHistory, ...existingProtectedEntries]);
-            }
-        }
+
         if (!isMatchMutation) {
             // 非配對／解除配對異動時，同時合併雲端樹、本地快取與傳入紀錄的配對歷史（排除近期已解除配對與異常誤配對），絕不以舊快照覆蓋減少已配對好友
             let localCachedUser = null;
@@ -2448,6 +2883,8 @@ const Store = {
                 city: '',
                 mbtiGroup: '',
                 mbti: '',
+                hasPetStatus: '',
+                hasPet: '',
                 hobbies: [],
                 hobbiesOther: ''
             },
@@ -2493,6 +2930,9 @@ const Store = {
         }
         if (!mergedProfile.mbtiGroup && mergedProfile.mbti) {
             mergedProfile.mbtiGroup = inferMbtiGroup(mergedProfile.mbti);
+        }
+        if (!mergedProfile.hasPetStatus && mergedProfile.hasPet && typeof inferPetStatus === 'function') {
+            mergedProfile.hasPetStatus = inferPetStatus(mergedProfile.hasPet);
         }
         if (mergedProfile.gender && mergedProfile.gender !== '男' && mergedProfile.gender !== '女') {
             if (!parsed.playerId) mergedProfile.gender = '';
@@ -2551,7 +2991,8 @@ const Store = {
                                 'id', 'privacy', 'backupCode', 'isWarned', 'warningReason',
                                 'isMatchBanned', 'isChatBanned', 'registeredSessions', 'registeredSession',
                                 'exactMatchCriteria', 'customActivityRegs', 'matchedHistory', 'matchedSession',
-                                'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt'
+                                'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt',
+                                'lastSaveIp', 'lastSaveIpAt'
                             ]);
                             Object.entries(userRec).forEach(([k, v]) => {
                                 if (!skipKeys.has(k) && v !== undefined && v !== null) {
@@ -2584,7 +3025,12 @@ const Store = {
                     isWarnedAccount: Boolean(userRec.isWarned),
                     warningReason: userRec.warningReason || '',
                     isChatBanned: Boolean(userRec.isChatBanned),
-                    profile: { ...userRec },
+                    profile: (() => {
+                        const cleanProf = { ...userRec };
+                        delete cleanProf.lastSaveIp;
+                        delete cleanProf.lastSaveIpAt;
+                        return cleanProf;
+                    })(),
                     privacy: userRec.privacy || {},
                     registeredSessions: Array.isArray(userRec.registeredSessions) ? Array.from(new Set(userRec.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean))) : [],
                     exactMatchCriteria: userRec.exactMatchCriteria || {},
@@ -2629,6 +3075,17 @@ const Store = {
         }
     },
 
+    _transientClientMeta: null,
+
+    setTransientClientMeta(meta) {
+        if (meta && typeof meta === 'object' && meta.ip) {
+            this._transientClientMeta = {
+                ip: String(meta.ip || '').trim(),
+                updatedAt: String(meta.updatedAt || new Date().toLocaleString('zh-TW')).trim()
+            };
+        }
+    },
+
     save(state, forceCloudPush = false, skipCloudPush = false) {
         state.version = SCHEMA_VERSION;
         FIELD_SECTIONS.forEach(sec => {
@@ -2639,10 +3096,17 @@ const Store = {
         state.privacy.ig = 'closed';
 
         if (state.profile) {
+            delete state.profile.lastSaveIp;
+            delete state.profile.lastSaveIpAt;
             state.profile.city = String(state.profile.city || '').trim();
             state.profile.region = String(state.profile.region || inferRegionByCity(state.profile.city) || '').trim();
             state.profile.mbti = String(state.profile.mbti || '').trim();
             state.profile.mbtiGroup = String(state.profile.mbtiGroup || inferMbtiGroup(state.profile.mbti) || '').trim();
+            state.profile.hasPet = String(state.profile.hasPet || '').trim();
+            state.profile.hasPetStatus = String(state.profile.hasPetStatus || (typeof inferPetStatus === 'function' ? inferPetStatus(state.profile.hasPet) : '') || '').trim();
+            if (state.profile.hasPetStatus === '沒有養寵物') {
+                state.profile.hasPet = '沒有養寵物';
+            }
         }
 
         if (Array.isArray(state.registeredSessions)) {
@@ -2733,9 +3197,25 @@ const Store = {
                     : (preservedMatchedHistory[preservedMatchedHistory.length - 1]?.partnerName || null),
                 updatedAt: nowUpdatedStr
             };
+            const transientMeta = this._transientClientMeta;
+            const resolvedSaveIp = (transientMeta && transientMeta.ip) || String(existingRecord.lastSaveIp || '').trim();
+            const resolvedSaveIpAt = (transientMeta && transientMeta.ip)
+                ? (transientMeta.updatedAt || nowUpdatedStr)
+                : String(existingRecord.lastSaveIpAt || '').trim();
+            if (resolvedSaveIp) record.lastSaveIp = resolvedSaveIp;
+            if (resolvedSaveIpAt) record.lastSaveIpAt = resolvedSaveIpAt;
+
             delete record.registeredSession;
-            if (idx >= 0) users[idx] = record;
-            else users.push(record);
+            const usersCacheCopy = (typeof CloudSync !== 'undefined' && typeof CloudSync.isBackendContext === 'function' && !CloudSync.isBackendContext())
+                ? (() => {
+                    const stripped = { ...record };
+                    delete stripped.lastSaveIp;
+                    delete stripped.lastSaveIpAt;
+                    return stripped;
+                })()
+                : record;
+            if (idx >= 0) users[idx] = usersCacheCopy;
+            else users.push(usersCacheCopy);
             localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
             if (!skipCloudPush && typeof CloudSync !== 'undefined') {
                 const pushPromise = CloudSync.upsertUser(record, forceCloudPush);
@@ -2821,6 +3301,9 @@ const ChatStore = {
     },
 
     getStorageKeyForContext() {
+        if (typeof CloudSync !== 'undefined' && typeof CloudSync.isLocalSandboxMode === 'function' && CloudSync.isLocalSandboxMode()) {
+            return CHATS_KEY;
+        }
         if (typeof CloudSync !== 'undefined' && typeof CloudSync.isBackendContext === 'function' && CloudSync.isBackendContext()) {
             return ADMIN_CHATS_KEY;
         }

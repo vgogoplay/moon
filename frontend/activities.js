@@ -450,10 +450,46 @@ function renderDualCriteriaOptionsList(scope, savedCriteria = {}, savedMustKeys 
     listEl.innerHTML = EXACT_MATCH_OPTIONS.map(item => {
         const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, item.key);
         const isMust = isChecked && validMustSet.has(item.key);
-        const selectedVal = savedCriteria[item.key] || item.choices[0];
+        const isPetTwoStep = item.type === 'petTwoStep';
+        const spanClass = isPetTwoStep ? 'sm:col-span-2 ' : '';
+
+        let selectorHtml = '';
+        if (isPetTwoStep) {
+            const parsedPet = (typeof parsePetCriterionValue === 'function')
+                ? parsePetCriterionValue(savedCriteria[item.key])
+                : { status: '有養寵物', petType: '不限' };
+            const isNoPetCrit = parsedPet.status === '沒有養寵物';
+            const petOptionsList = typeof PET_TYPE_OPTIONS !== 'undefined'
+                ? PET_TYPE_OPTIONS
+                : ['狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物'];
+            selectorHtml = `
+                <div id="${cfg.cardPrefix}pet_wrap_${item.key}" class="${isChecked ? 'grid grid-cols-1 sm:grid-cols-2 gap-1.5' : 'hidden'}">
+                    <select id="${cfg.selectPrefix}${item.key}_status" onchange="onDualCriterionPetStatusChange('${scope}', '${item.key}')" class="input-jp !py-1 !text-xs">
+                        <option value="有養寵物" ${!isNoPetCrit ? 'selected' : ''}>有養寵物</option>
+                        <option value="沒有養寵物" ${isNoPetCrit ? 'selected' : ''}>沒有養寵物</option>
+                    </select>
+                    <select id="${cfg.selectPrefix}${item.key}_type" ${isNoPetCrit ? 'disabled' : ''} class="input-jp !py-1 !text-xs">
+                        ${isNoPetCrit
+                            ? '<option value="沒有養寵物" selected>沒有養寵物</option>'
+                            : `
+                                <option value="不限" ${parsedPet.petType === '不限' ? 'selected' : ''}>不限（有養任何寵物皆可）</option>
+                                ${petOptionsList.map(pt => `<option value="${pt}" ${parsedPet.petType === pt ? 'selected' : ''}>${pt}</option>`).join('')}
+                            `
+                        }
+                    </select>
+                </div>
+            `;
+        } else {
+            const selectedVal = savedCriteria[item.key] || item.choices[0];
+            selectorHtml = `
+                <select id="${cfg.selectPrefix}${item.key}" class="input-jp !py-1 !text-xs ${isChecked ? '' : 'hidden'}">
+                    ${item.choices.map(c => `<option value="${c}" ${selectedVal === c ? 'selected' : ''}>${c}</option>`).join('')}
+                </select>
+            `;
+        }
 
         return `
-            <div id="${cfg.cardPrefix}${item.key}" class="p-2.5 rounded-xl border transition space-y-1.5 ${isChecked ? (isMust ? 'border-[#c96a7b] bg-rose-50/55 shadow-2xs' : 'border-pink-200 bg-pink-50/20') : 'border-pink-100 bg-white'}">
+            <div id="${cfg.cardPrefix}${item.key}" class="${spanClass}p-2.5 rounded-xl border transition space-y-1.5 ${isChecked ? (isMust ? 'border-[#c96a7b] bg-rose-50/55 shadow-2xs' : 'border-pink-200 bg-pink-50/20') : 'border-pink-100 bg-white'}">
                 <div class="flex items-center justify-between gap-1.5">
                     <label class="flex items-center gap-2 text-xs font-semibold text-[#5e464a] cursor-pointer min-w-0">
                         <input type="checkbox" name="${cfg.checkName}" value="${item.key}" ${isChecked ? 'checked' : ''} onchange="onDualCriterionCheckChange('${scope}', '${item.key}')" class="accent-[#c96a7b] shrink-0">
@@ -461,9 +497,7 @@ function renderDualCriteriaOptionsList(scope, savedCriteria = {}, savedMustKeys 
                     </label>
                     <input type="hidden" id="${cfg.mustInputPrefix}${item.key}" value="${isMust ? '1' : '0'}">
                 </div>
-                <select id="${cfg.selectPrefix}${item.key}" class="input-jp !py-1 !text-xs ${isChecked ? '' : 'hidden'}">
-                    ${item.choices.map(c => `<option value="${c}" ${selectedVal === c ? 'selected' : ''}>${c}</option>`).join('')}
-                </select>
+                ${selectorHtml}
                 <div id="${cfg.cardPrefix}mode_${item.key}" class="${isChecked ? 'grid grid-cols-2 gap-1 pt-0.5' : 'hidden'}">
                     <button type="button" data-role="must-btn" onclick="setDualCriterionMode('${scope}', '${item.key}', true)"
                         class="py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center ${isMust ? 'bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white border-[#c96a7b] shadow-2xs' : 'bg-white border-pink-200 text-[#8f4452] hover:bg-rose-50'}">
@@ -506,8 +540,12 @@ function syncDualCriteriaUIState(scope) {
 
     EXACT_MATCH_OPTIONS.forEach(item => {
         const key = item.key;
+        const isPetTwoStep = item.type === 'petTwoStep';
+        const spanClass = isPetTwoStep ? 'sm:col-span-2 ' : '';
         const cb = document.querySelector(`input[name="${cfg.checkName}"][value="${key}"]`);
-        const sel = document.getElementById(`${cfg.selectPrefix}${key}`);
+        const sel = isPetTwoStep
+            ? document.getElementById(`${cfg.cardPrefix}pet_wrap_${key}`)
+            : document.getElementById(`${cfg.selectPrefix}${key}`);
         const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
         const cardEl = document.getElementById(`${cfg.cardPrefix}${key}`);
         const modeBox = document.getElementById(`${cfg.cardPrefix}mode_${key}`);
@@ -516,18 +554,26 @@ function syncDualCriteriaUIState(scope) {
         const isChecked = cb.checked;
         if (!isChecked) {
             flagEl.value = '0';
-            sel.classList.add('hidden');
+            if (isPetTwoStep) {
+                sel.className = 'hidden';
+            } else {
+                sel.classList.add('hidden');
+            }
             modeBox.className = 'hidden';
-            cardEl.className = 'p-2.5 rounded-xl border transition space-y-1.5 border-pink-100 bg-white';
+            cardEl.className = `${spanClass}p-2.5 rounded-xl border transition space-y-1.5 border-pink-100 bg-white`;
             return;
         }
 
         const isMust = flagEl.value === '1';
-        sel.classList.remove('hidden');
+        if (isPetTwoStep) {
+            sel.className = 'grid grid-cols-1 sm:grid-cols-2 gap-1.5';
+        } else {
+            sel.classList.remove('hidden');
+        }
         modeBox.className = 'grid grid-cols-2 gap-1 pt-0.5';
         cardEl.className = isMust
-            ? 'p-2.5 rounded-xl border transition space-y-1.5 border-[#c96a7b] bg-rose-50/55 shadow-2xs'
-            : 'p-2.5 rounded-xl border transition space-y-1.5 border-pink-200 bg-pink-50/20';
+            ? `${spanClass}p-2.5 rounded-xl border transition space-y-1.5 border-[#c96a7b] bg-rose-50/55 shadow-2xs`
+            : `${spanClass}p-2.5 rounded-xl border transition space-y-1.5 border-pink-200 bg-pink-50/20`;
 
         const mustBtn = modeBox.querySelector('[data-role="must-btn"]');
         const orBtn = modeBox.querySelector('[data-role="or-btn"]');
@@ -595,14 +641,52 @@ window.setDualCriterionMode = function(scope, key, makeMust) {
     syncDualCriteriaUIState(scope);
 };
 
+window.onDualCriterionPetStatusChange = function(scope, key) {
+    const cfg = getCriteriaDomPrefix(scope);
+    const statusSel = document.getElementById(`${cfg.selectPrefix}${key}_status`);
+    const typeSel = document.getElementById(`${cfg.selectPrefix}${key}_type`);
+    if (!statusSel || !typeSel) return;
+
+    if (statusSel.value === '沒有養寵物') {
+        typeSel.disabled = true;
+        typeSel.innerHTML = '<option value="沒有養寵物" selected>沒有養寵物</option>';
+    } else {
+        const petOptionsList = typeof PET_TYPE_OPTIONS !== 'undefined'
+            ? PET_TYPE_OPTIONS
+            : ['狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物'];
+        typeSel.disabled = false;
+        typeSel.innerHTML = '<option value="不限" selected>不限（有養任何寵物皆可）</option>' +
+            petOptionsList.map(pt => `<option value="${pt}">${pt}</option>`).join('');
+    }
+};
+
 function collectDualCriteriaFromDom(scope) {
     const cfg = getCriteriaDomPrefix(scope);
     const criteria = {};
     const mustMatchKeys = [];
     document.querySelectorAll(`input[name="${cfg.checkName}"]:checked`).forEach(cb => {
         const key = cb.value;
-        const sel = document.getElementById(`${cfg.selectPrefix}${key}`);
+        const optMeta = EXACT_MATCH_OPTIONS.find(o => o.key === key);
         const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
+
+        if (optMeta && optMeta.type === 'petTwoStep') {
+            const statusSel = document.getElementById(`${cfg.selectPrefix}${key}_status`);
+            const typeSel = document.getElementById(`${cfg.selectPrefix}${key}_type`);
+            if (statusSel) {
+                if (statusSel.value === '沒有養寵物') {
+                    criteria[key] = '沒有養寵物';
+                } else {
+                    const chosenType = (typeSel && !typeSel.disabled && typeSel.value) ? typeSel.value : '不限';
+                    criteria[key] = `有養寵物（${chosenType}）`;
+                }
+                if (flagEl && flagEl.value === '1' && mustMatchKeys.length < MAX_MUST_MATCH_COUNT) {
+                    mustMatchKeys.push(key);
+                }
+            }
+            return;
+        }
+
+        const sel = document.getElementById(`${cfg.selectPrefix}${key}`);
         if (sel && sel.value) {
             criteria[key] = sel.value;
             if (flagEl && flagEl.value === '1' && mustMatchKeys.length < MAX_MUST_MATCH_COUNT) {

@@ -35,6 +35,7 @@ function getCurrentAdminPageKey() {
     const pageAttr = document.body ? document.body.dataset.adminPage : '';
     if (pageAttr) return pageAttr;
     const path = (window.location.pathname || '').toLowerCase();
+    if (path.includes('backend-home')) return 'home';
     if (path.includes('backend-activities')) return 'activities';
     if (path.includes('backend-chats')) return 'chats';
     if (path.includes('backend-ops')) return 'ops';
@@ -50,6 +51,13 @@ function renderAdminSharedShell() {
 
     const existingPageContent = mountEl.innerHTML;
     const navItems = [
+        {
+            key: 'home',
+            href: 'backend-home.html',
+            icon: '🏠',
+            label: '後台純文字首頁',
+            sub: '文字導覽首頁・零流量待機'
+        },
         {
             key: 'member',
             href: 'backend.html',
@@ -144,7 +152,7 @@ function renderAdminSharedShell() {
                     </div>
                     <p class="text-[11px] tracking-[0.22em] text-[#c96a7b] font-serif-jp pt-1">YUELAO ADMIN ACCESS</p>
                     <h2 class="text-xl font-bold font-serif-jp text-[#8f4452]">月老牽線計畫・後台驗證</h2>
-                    <p class="text-xs text-gray-500">請輸入管理員 Email 與密碼以進入後台管理中心</p>
+                    <p class="text-xs text-gray-500">${(typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv()) ? '🧪 本地測試模式：輸入任意 Email 與密碼即可登入測試（不影響正式庫）' : '請輸入管理員 Email 與密碼以進入後台管理中心'}</p>
                 </div>
 
                 <form id="adminLoginForm" onsubmit="handleAdminLogin(event)" class="space-y-3.5">

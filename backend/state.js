@@ -291,14 +291,18 @@ async function copyPlayerBackupCode(playerId) {
 }
 
 function getUsers() {
-    const raw = localStorage.getItem(USERS_KEY) || '[]';
-    if (raw === AdminMemoryCache.usersRaw && Array.isArray(AdminMemoryCache.users)) {
+    const raw = localStorage.getItem(USERS_KEY);
+    if (!raw && typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USER_INDEX_KEY] && typeof CloudSync.tree[USER_INDEX_KEY] === 'object') {
+        return Object.values(CloudSync.tree[USER_INDEX_KEY]).filter(u => u && typeof u === 'object' && u.id);
+    }
+    const safeRaw = raw || '[]';
+    if (safeRaw === AdminMemoryCache.usersRaw && Array.isArray(AdminMemoryCache.users)) {
         return AdminMemoryCache.users;
     }
 
     let users;
     try {
-        users = JSON.parse(raw);
+        users = JSON.parse(safeRaw);
         if (!Array.isArray(users)) users = [];
     } catch (e) {
         users = [];
@@ -379,7 +383,7 @@ function getUsers() {
             });
         }
     } else {
-        AdminMemoryCache.usersRaw = raw;
+        AdminMemoryCache.usersRaw = safeRaw;
         AdminMemoryCache.users = users;
     }
     if (typeof CloudSync !== 'undefined' && typeof CloudSync.reconcileSymmetricMatches === 'function') {
@@ -697,7 +701,7 @@ async function checkSinglePlayerMailReadStatusDaily(options = {}) {
         } catch (e) {}
     }
 
-    if (!skipRemoteFetch && typeof CloudSync !== 'undefined' && CloudSync.dbUrl && CloudSync.inFlightWrites === 0) {
+    if (!skipRemoteFetch && typeof CloudSync !== 'undefined' && !CloudSync.isLocalSandboxMode() && CloudSync.dbUrl && CloudSync.inFlightWrites === 0) {
         try {
             const encodedMailPath = CloudSync.encodePath(MAILBOX_KEY);
             const res = await fetch(`${CloudSync.dbUrl}/${encodedMailPath}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' });
@@ -1274,30 +1278,45 @@ async function unlockAdminUI() {
     document.getElementById('adminLoginOverlay').classList.add('hidden');
     document.getElementById('adminMainContent').classList.remove('hidden');
 
-    // 1. 本地快取秒開：立即以本地最新快取渲染畫面，無需等待雲端全庫下載
+    const pageKey = (typeof getCurrentAdminPageKey === 'function') ? getCurrentAdminPageKey() : 'member';
+    if (pageKey === 'home') {
+        const welcomeEl = document.getElementById('adminHomeWelcomeText');
+        const adminEmail = (typeof yuelaoAuth !== 'undefined' && yuelaoAuth && yuelaoAuth.adminSession && yuelaoAuth.adminSession.email)
+            ? yuelaoAuth.adminSession.email
+            : '';
+        if (welcomeEl && adminEmail) {
+            welcomeEl.textContent = `目前登入帳號：${adminEmail}。本純文字首頁不會自動下載會員名單、聊天紀錄或統計資料；請由左側選單或下方文字列表點選需要操作的功能頁面。`;
+        }
+        CloudSync.init(() => {}).catch(() => {});
+        return;
+    }
+
+    // 1. 本地快取秒開：立即以本地最新快取渲染當前頁面，無需等待雲端下載
     const badge = document.getElementById('cloudStatusBadge');
     if (badge) {
         badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-800 font-semibold';
-        badge.textContent = '⚡ 已載入本地快取（雲端背景同步中...）';
+        badge.textContent = '⚡ 已載入快取（背景比對本頁資料中...）';
     }
     renderAdminAll(true);
 
-    // 2. 雲端背景靜默同步：下載完成後自動比對更新並開啟即時 SSE 推播
+    // 2. 雲端按頁靜默同步：僅比對並下載當前頁面所需節點
     CloudSync.init(() => {
         renderAdminAll(false);
     }).then(() => {
-        checkAutoSchedule2000();
-        if (typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
+        if (typeof checkAutoSchedule2000 === 'function') {
+            checkAutoSchedule2000();
+        }
+        if (pageKey === 'chats' && typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
             const purgedOnLoad = ChatStore.purgeInactiveRooms(Date.now());
             if (purgedOnLoad.length > 0 && typeof AdminMemoryCache !== 'undefined') {
                 AdminMemoryCache.invalidate('chats');
                 AdminMemoryCache.invalidate('users');
             }
         }
-        if (typeof enforceClosedCustomActivityCloudLocks === 'function') {
+        if (pageKey === 'activities' && typeof enforceClosedCustomActivityCloudLocks === 'function') {
             enforceClosedCustomActivityCloudLocks();
         }
-        if (typeof checkSinglePlayerMailReadStatusDaily === 'function') {
+        if (pageKey === 'ops' && typeof checkSinglePlayerMailReadStatusDaily === 'function') {
             checkSinglePlayerMailReadStatusDaily({ force: false, skipRemoteFetch: true });
         }
         renderAdminAll(false);
@@ -1330,6 +1349,7 @@ async function recordAdminLoginSuccess(email) {
         localStorage.setItem('yuelao_admin_login_logs', JSON.stringify(logs.slice(0, 10)));
 
         // 雲端：以剛取得的管理員權杖寫入（不依賴 CloudSync 是否已初始化）
+        if (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode()) return;
         const token = yuelaoAuth.getIdTokenSync();
         const dbUrl = yuelaoAuth.dbUrl();
         if (!token || !dbUrl) return;
@@ -1372,6 +1392,11 @@ async function handleAdminLogin(e) {
     pwdEl.value = '';
     if (btn) btn.disabled = false;
     recordAdminLoginSuccess(email);
+    const curPageAfterLogin = (typeof getCurrentAdminPageKey === 'function') ? getCurrentAdminPageKey() : 'member';
+    if (curPageAfterLogin !== 'home' && typeof window !== 'undefined' && window.location) {
+        window.location.href = 'backend-home.html';
+        return;
+    }
     unlockAdminUI();
 }
 
@@ -1392,6 +1417,10 @@ function logoutAdmin() {
     if (errEl) errEl.classList.add('hidden');
     const overlayEl = document.getElementById('adminLoginOverlay');
     if (overlayEl) overlayEl.classList.remove('hidden');
+    const curPageOnLogout = (typeof getCurrentAdminPageKey === 'function') ? getCurrentAdminPageKey() : 'home';
+    if (curPageOnLogout !== 'home' && typeof window !== 'undefined' && window.location) {
+        window.location.href = 'backend-home.html';
+    }
 }
 
 function pollSharedStorageChanges() {
@@ -1437,8 +1466,10 @@ document.addEventListener('visibilitychange', () => {
 let lastDailyChatPurgeTickTs = 0;
 setInterval(() => {
     if (!isAdminAuthenticated()) return;
+    const curPageTick = (typeof getCurrentAdminPageKey === 'function') ? getCurrentAdminPageKey() : 'member';
+    if (curPageTick === 'home') return;
     if (typeof CloudSync !== 'undefined' && !CloudSync.initialized) return;
-    checkAutoSchedule2000();
+    if (typeof checkAutoSchedule2000 === 'function') checkAutoSchedule2000();
     const nowTickTs = Date.now();
     if (nowTickTs - lastDailyChatPurgeTickTs >= 15000) {
         lastDailyChatPurgeTickTs = nowTickTs;

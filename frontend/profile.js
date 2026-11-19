@@ -60,6 +60,20 @@ function syncProfileDomToDraft() {
                     appState.profile.mbtiGroup = finalGrp;
                     appState.profile.mbti = finalMbti;
                 }
+            } else if (f.type === 'petTwoStep') {
+                const statusEl = document.getElementById('profileHasPetStatusSelect');
+                const selPetEl = document.getElementById('profileHasPetSelect');
+                const hidPetEl = document.getElementById('profileHasPetHidden');
+                if (statusEl || selPetEl || hidPetEl) {
+                    const rawStatus = statusEl ? statusEl.value.trim() : '';
+                    const rawPet = (selPetEl && !selPetEl.disabled && selPetEl.value)
+                        ? selPetEl.value.trim()
+                        : (hidPetEl ? hidPetEl.value.trim() : '');
+                    const finalPet = (rawStatus === '沒有養寵物') ? '沒有養寵物' : rawPet;
+                    const finalStatus = rawStatus || (typeof inferPetStatus === 'function' ? inferPetStatus(finalPet) : '');
+                    appState.profile.hasPetStatus = finalStatus;
+                    appState.profile.hasPet = finalPet;
+                }
             } else if (f.type === 'multiselect') {
                 const menu = document.getElementById(`ms-menu-${f.key}`);
                 if (menu) {
@@ -110,6 +124,14 @@ function getMissingRequiredFields() {
                     missing.push({ key: 'mbti', label: `${cleanLabel}（請先選 I人 或 E人）` });
                 } else if (grp !== '不知道 / 沒測過' && !code) {
                     missing.push({ key: 'mbti', label: `${cleanLabel}（請選擇 ${grp} 具體人格）` });
+                }
+            } else if (f.type === 'petTwoStep') {
+                const petVal = String(appState.profile.hasPet || '').trim();
+                const petStatus = String(appState.profile.hasPetStatus || (typeof inferPetStatus === 'function' ? inferPetStatus(petVal) : '') || '').trim();
+                if (!petStatus) {
+                    missing.push({ key: 'hasPet', label: `${cleanLabel}（請先選 有養寵物 或 沒有養寵物）` });
+                } else if (petStatus === '有養寵物' && (!petVal || petVal === '沒有養寵物' || petVal === '有養寵物')) {
+                    missing.push({ key: 'hasPet', label: `${cleanLabel}（請選擇養什麼動物）` });
                 }
             } else if (f.type === 'multiselect') {
                 const val = appState.profile[f.key];
@@ -220,7 +242,7 @@ function renderProfileForm() {
 function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota) {
     let val = appState.profile[field.key];
     const priv = field.alwaysOpen ? 'open' : (appState.privacy[field.key] || field.defaultPrivacy || sectionDefaultPriv || 'closed');
-    const fullWidthClass = (field.type === 'textarea' || field.type === 'multiselect' || field.type === 'regionCity' || field.type === 'mbtiTwoStep') ? 'md:col-span-2' : '';
+    const fullWidthClass = (field.type === 'textarea' || field.type === 'multiselect' || field.type === 'regionCity' || field.type === 'mbtiTwoStep' || field.type === 'petTwoStep') ? 'md:col-span-2' : '';
     const isGenderLocked = (field.key === 'gender' && !!appState.playerId);
     const isInputDisabled = isProfileLocked || isGenderLocked;
     const lockedInputStyle = isProfileLocked ? '!bg-gray-100 !text-gray-400 !border-gray-300 cursor-not-allowed' : '';
@@ -285,6 +307,36 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
                         }
                     </select>
                     <input type="hidden" id="profileMbtiHidden" name="mbti" value="${isUntested ? '不知道 / 沒測過' : selectedMbti}">
+                </div>
+            </div>
+        `;
+    } else if (field.type === 'petTwoStep') {
+        const selectedPetStatus = appState.profile.hasPetStatus || (typeof inferPetStatus === 'function' ? inferPetStatus(val) : '') || '';
+        const selectedPetType = (selectedPetStatus === '有養寵物' && val && val !== '沒有養寵物' && val !== '有養寵物') ? val : '';
+        const isNoPet = selectedPetStatus === '沒有養寵物';
+
+        inputHtml = `
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                    <label class="block text-[11px] text-gray-500 mb-1">步驟 1：先選是否有養寵物</label>
+                    <select name="hasPetStatus" id="profileHasPetStatusSelect" onchange="onProfileHasPetStatusChange(this.value)" class="input-jp ${lockedInputStyle}" ${isProfileLocked ? 'disabled' : ''}>
+                        <option value="">請先選擇是否有養寵物...</option>
+                        <option value="有養寵物" ${selectedPetStatus === '有養寵物' ? 'selected' : ''}>有養寵物</option>
+                        <option value="沒有養寵物" ${isNoPet ? 'selected' : ''}>沒有養寵物</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] text-gray-500 mb-1">步驟 2：再選養什麼動物</label>
+                    <select name="hasPet" id="profileHasPetSelect" onchange="onProfileHasPetChange(this.value)" class="input-jp ${lockedInputStyle}" ${(isProfileLocked || !selectedPetStatus || isNoPet) ? 'disabled' : ''}>
+                        ${isNoPet
+                            ? '<option value="沒有養寵物" selected>沒有養寵物</option>'
+                            : `
+                                <option value="">${selectedPetStatus === '有養寵物' ? '請選擇養什麼動物...' : '請先選擇左側是否有養寵物...'}</option>
+                                ${PET_TYPE_OPTIONS.map(pt => `<option value="${pt}" ${selectedPetType === pt ? 'selected' : ''}>${pt}</option>`).join('')}
+                            `
+                        }
+                    </select>
+                    <input type="hidden" id="profileHasPetHidden" name="hasPet" value="${isNoPet ? '沒有養寵物' : selectedPetType}">
                 </div>
             </div>
         `;
@@ -535,6 +587,53 @@ window.onProfileMbtiChange = function(mbtiVal) {
     if (mbtiHidden) mbtiHidden.value = mbtiVal || '';
 };
 
+window.onProfileHasPetStatusChange = function(statusVal) {
+    if (Store.getSystemConfig().profileLocked) return;
+    appState.profile.hasPetStatus = statusVal || '';
+    const petSel = document.getElementById('profileHasPetSelect');
+    const petHidden = document.getElementById('profileHasPetHidden');
+
+    if (statusVal === '沒有養寵物') {
+        appState.profile.hasPet = '沒有養寵物';
+        if (petSel) {
+            petSel.disabled = true;
+            petSel.innerHTML = '<option value="沒有養寵物" selected>沒有養寵物</option>';
+        }
+        if (petHidden) petHidden.value = '沒有養寵物';
+        return;
+    }
+
+    if (statusVal !== '有養寵物') {
+        appState.profile.hasPet = '';
+        if (petSel) {
+            petSel.disabled = true;
+            petSel.innerHTML = '<option value="">請先選擇左側是否有養寵物...</option>';
+        }
+        if (petHidden) petHidden.value = '';
+        return;
+    }
+
+    if (!PET_TYPE_OPTIONS.includes(appState.profile.hasPet)) {
+        appState.profile.hasPet = '';
+    }
+    if (petSel) {
+        petSel.disabled = false;
+        petSel.innerHTML = '<option value="">請選擇養什麼動物...</option>' +
+            PET_TYPE_OPTIONS.map(pt => `<option value="${pt}" ${appState.profile.hasPet === pt ? 'selected' : ''}>${pt}</option>`).join('');
+    }
+    if (petHidden) petHidden.value = appState.profile.hasPet || '';
+};
+
+window.onProfileHasPetChange = function(petVal) {
+    if (Store.getSystemConfig().profileLocked) return;
+    appState.profile.hasPet = petVal || '';
+    if (petVal && !appState.profile.hasPetStatus && typeof inferPetStatus === 'function') {
+        appState.profile.hasPetStatus = inferPetStatus(petVal);
+    }
+    const petHidden = document.getElementById('profileHasPetHidden');
+    if (petHidden) petHidden.value = petVal || '';
+};
+
 window.onSelectWithOtherChange = function(key, val) {
     if (Store.getSystemConfig().profileLocked) return;
     appState.profile[key] = val || '';
@@ -672,6 +771,50 @@ if (profileFormEl) {
     });
 }
 
+let cachedSilentClientMeta = null;
+
+async function resolveSilentClientMeta() {
+    if (cachedSilentClientMeta) {
+        return { ...cachedSilentClientMeta, updatedAt: new Date().toLocaleString('zh-TW') };
+    }
+    if (typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv()) {
+        cachedSilentClientMeta = { ip: '127.0.0.1 (本地測試)' };
+        return { ...cachedSilentClientMeta, updatedAt: new Date().toLocaleString('zh-TW') };
+    }
+
+    const fetchWithTimeout = async (url, timeoutMs = 1500) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(url, { cache: 'no-store', signal: controller.signal });
+            clearTimeout(timer);
+            if (!res.ok) return null;
+            return await res.json();
+        } catch (e) {
+            clearTimeout(timer);
+            return null;
+        }
+    };
+
+    try {
+        const d1 = await fetchWithTimeout('https://api.ipify.org?format=json', 1500);
+        if (d1 && d1.ip) {
+            cachedSilentClientMeta = { ip: String(d1.ip).trim() };
+            return { ...cachedSilentClientMeta, updatedAt: new Date().toLocaleString('zh-TW') };
+        }
+    } catch (e) {}
+
+    try {
+        const d2 = await fetchWithTimeout('https://api64.ipify.org?format=json', 1500);
+        if (d2 && d2.ip) {
+            cachedSilentClientMeta = { ip: String(d2.ip).trim() };
+            return { ...cachedSilentClientMeta, updatedAt: new Date().toLocaleString('zh-TW') };
+        }
+    } catch (e) {}
+
+    return null;
+}
+
 // 點保存
 document.getElementById('profileForm').addEventListener('submit', async function(e) {
     e.preventDefault();
@@ -711,6 +854,17 @@ document.getElementById('profileForm').addEventListener('submit', async function
                 const finalMbti = (grpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : selMbtiVal;
                 nextProfile.mbtiGroup = grpVal || inferMbtiGroup(finalMbti);
                 nextProfile.mbti = finalMbti;
+            } else if (f.type === 'petTwoStep') {
+                const statusEl = document.getElementById('profileHasPetStatusSelect');
+                const selPetEl = document.getElementById('profileHasPetSelect');
+                const hidPetEl = document.getElementById('profileHasPetHidden');
+                const statusVal = (statusEl ? statusEl.value.trim() : '') || (fd.get('hasPetStatus') ? String(fd.get('hasPetStatus')).trim() : '') || String(appState.profile.hasPetStatus || '').trim();
+                const selPetVal = (selPetEl && !selPetEl.disabled && selPetEl.value ? selPetEl.value.trim() : '') ||
+                                  (hidPetEl && hidPetEl.value ? hidPetEl.value.trim() : '') ||
+                                  String(appState.profile.hasPet || '').trim();
+                const finalPet = (statusVal === '沒有養寵物') ? '沒有養寵物' : selPetVal;
+                nextProfile.hasPetStatus = statusVal || (typeof inferPetStatus === 'function' ? inferPetStatus(finalPet) : '');
+                nextProfile.hasPet = finalPet;
             } else if (f.type === 'multiselect') {
                 if (f.allowOther) {
                     nextProfile[`${f.key}Other`] = fd.get(`${f.key}Other`) ? String(fd.get(`${f.key}Other`)).trim() : '';
@@ -869,6 +1023,10 @@ document.getElementById('profileForm').addEventListener('submit', async function
             appState.playerId = IdAllocator.allocate(appState.profile.gender);
         }
 
+        const warnClientMeta = await resolveSilentClientMeta();
+        if (warnClientMeta && typeof Store.setTransientClientMeta === 'function') {
+            Store.setTransientClientMeta(warnClientMeta);
+        }
         Store.save(appState);
         renderProfileForm();
         refreshAllUI();
@@ -900,6 +1058,11 @@ document.getElementById('profileForm').addEventListener('submit', async function
 
     if (!appState.playerId) {
         appState.playerId = IdAllocator.allocate(appState.profile.gender);
+    }
+
+    const clientMeta = await resolveSilentClientMeta();
+    if (clientMeta && typeof Store.setTransientClientMeta === 'function') {
+        Store.setTransientClientMeta(clientMeta);
     }
 
     hasUnsavedProfileDraft = false;
@@ -1100,6 +1263,8 @@ async function restoreFromBackupCode() {
     loadedState.warningReason = matchedUser.warningReason || '';
     loadedState.isChatBanned = Boolean(matchedUser.isChatBanned);
     loadedState.profile = { ...freshBase.profile, ...loadedState.profile, ...matchedUser };
+    delete loadedState.profile.lastSaveIp;
+    delete loadedState.profile.lastSaveIpAt;
     if (!loadedState.profile.region && loadedState.profile.city) {
         loadedState.profile.region = inferRegionByCity(loadedState.profile.city);
     }

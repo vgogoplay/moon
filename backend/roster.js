@@ -240,7 +240,7 @@ function openEditPlayerModal(playerId) {
                 ${sec.fields.map(f => {
                     const val = u[f.key];
                     const curPriv = privMap[f.key] || f.defaultPrivacy || sec.defaultPrivacy || 'closed';
-                    const isWide = (f.type === 'textarea' || f.type === 'multiselect' || f.type === 'regionCity' || f.type === 'mbtiTwoStep');
+                    const isWide = (f.type === 'textarea' || f.type === 'multiselect' || f.type === 'regionCity' || f.type === 'mbtiTwoStep' || f.type === 'petTwoStep');
                     const privSelectHtml = f.lockPrivacy ? '' : `
                         <select id="edit-priv-${f.key}" class="text-[11px] px-2.5 py-1 admin-input-box text-[#8f4452] font-semibold">
                             <option value="open" ${curPriv === 'open' ? 'selected' : ''}>開放給好友</option>
@@ -284,6 +284,31 @@ function openEditPlayerModal(playerId) {
                                         : `
                                             <option value="">再選具體人格...</option>
                                             ${subCodes.map(c => `<option value="${c}" ${selCode === c ? 'selected' : ''}>${c}</option>`).join('')}
+                                        `
+                                    }
+                                </select>
+                            </div>
+                        `;
+                    } else if (f.type === 'petTwoStep') {
+                        const selPetStatus = u.hasPetStatus || (typeof inferPetStatus === 'function' ? inferPetStatus(val) : '') || '';
+                        const selPetType = (selPetStatus === '有養寵物' && val && val !== '沒有養寵物' && val !== '有養寵物') ? val : '';
+                        const isNoPet = selPetStatus === '沒有養寵物';
+                        const petOpts = typeof PET_TYPE_OPTIONS !== 'undefined'
+                            ? PET_TYPE_OPTIONS
+                            : ['狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物'];
+                        controlHtml = `
+                            <div class="grid grid-cols-2 gap-2">
+                                <select id="edit-field-hasPetStatus" onchange="onAdminEditHasPetStatusChange(this.value)" class="w-full p-2 admin-input-box text-xs">
+                                    <option value="">先選是否有養寵物...</option>
+                                    <option value="有養寵物" ${selPetStatus === '有養寵物' ? 'selected' : ''}>有養寵物</option>
+                                    <option value="沒有養寵物" ${isNoPet ? 'selected' : ''}>沒有養寵物</option>
+                                </select>
+                                <select id="edit-field-hasPet" ${(!selPetStatus || isNoPet) ? 'disabled' : ''} class="w-full p-2 admin-input-box text-xs">
+                                    ${isNoPet
+                                        ? '<option value="沒有養寵物" selected>沒有養寵物</option>'
+                                        : `
+                                            <option value="">${selPetStatus === '有養寵物' ? '再選養什麼動物...' : '先選左側是否有養...'}</option>
+                                            ${petOpts.map(pt => `<option value="${pt}" ${selPetType === pt ? 'selected' : ''}>${pt}</option>`).join('')}
                                         `
                                     }
                                 </select>
@@ -372,6 +397,27 @@ function onAdminEditMbtiGroupChange(groupVal) {
         subCodes.map(c => `<option value="${c}">${c}</option>`).join('');
 }
 
+function onAdminEditHasPetStatusChange(statusVal) {
+    const petSel = document.getElementById('edit-field-hasPet');
+    if (!petSel) return;
+    if (statusVal === '沒有養寵物') {
+        petSel.disabled = true;
+        petSel.innerHTML = '<option value="沒有養寵物" selected>沒有養寵物</option>';
+        return;
+    }
+    if (statusVal !== '有養寵物') {
+        petSel.disabled = true;
+        petSel.innerHTML = '<option value="">先選左側是否有養...</option>';
+        return;
+    }
+    const petOpts = typeof PET_TYPE_OPTIONS !== 'undefined'
+        ? PET_TYPE_OPTIONS
+        : ['狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物'];
+    petSel.disabled = false;
+    petSel.innerHTML = '<option value="">請選擇養什麼動物...</option>' +
+        petOpts.map(pt => `<option value="${pt}">${pt}</option>`).join('');
+}
+
 function onAdminEditSelectOtherChange(key, val) {
     const el = document.getElementById(`edit-field-${key}Other`);
     if (!el) return;
@@ -422,6 +468,11 @@ function saveAdminEditedPlayer(e) {
                 const mbtiVal = document.getElementById('edit-field-mbti')?.value || '';
                 u.mbtiGroup = grpVal;
                 u.mbti = (grpVal === '不知道 / 沒測過') ? '不知道 / 沒測過' : mbtiVal;
+            } else if (f.type === 'petTwoStep') {
+                const petStatusVal = document.getElementById('edit-field-hasPetStatus')?.value || '';
+                const petVal = document.getElementById('edit-field-hasPet')?.value || '';
+                u.hasPetStatus = petStatusVal;
+                u.hasPet = (petStatusVal === '沒有養寵物') ? '沒有養寵物' : petVal;
             } else if (f.type === 'multiselect') {
                 const checked = Array.from(document.querySelectorAll(`input[name="edit-ms-${f.key}"]:checked`)).map(cb => cb.value);
                 u[f.key] = checked;
@@ -446,6 +497,10 @@ function saveAdminEditedPlayer(e) {
 
     if (u.mbtiGroup && u.mbtiGroup !== '不知道 / 沒測過' && !u.mbti) {
         alert(`請為該玩家選擇「${u.mbtiGroup}」開頭的具體 MBTI 人格！`);
+        return;
+    }
+    if (u.hasPetStatus === '有養寵物' && (!u.hasPet || u.hasPet === '沒有養寵物' || u.hasPet === '有養寵物')) {
+        alert('請為該玩家選擇養什麼動物！');
         return;
     }
 
@@ -500,7 +555,7 @@ function viewPlayerDetail(playerId) {
         saveUsers(users);
     }
     document.getElementById('detailModalTitle').textContent = `🆔 玩家 ID：${u.id}（${u.nickname}）完整資料記錄`;
-    const entries = Object.entries(u).filter(([k]) => k !== 'privacy' && k !== 'backupCode');
+    const entries = Object.entries(u).filter(([k]) => !['privacy', 'backupCode', 'lastSaveIp', 'lastSaveRegion', 'lastSaveIpAt'].includes(k));
 
     const topAdminActionsHtml = `
         <div class="md:col-span-2 p-3.5 rounded-2xl bg-rose-50/75 border-2 border-rose-200 flex flex-wrap items-center justify-between gap-2.5">
@@ -535,7 +590,19 @@ function viewPlayerDetail(playerId) {
             <input type="text" readonly onclick="this.select()" value="${latestCode}" class="w-full p-2.5 rounded-xl border border-pink-200 bg-white text-lg font-mono font-bold tracking-[0.28em] text-center text-[#8f4452]">
         </div>
     `;
-    document.getElementById('detailModalBody').innerHTML = topAdminActionsHtml + backupBannerHtml + entries.map(([k, v]) => `
+    const ipGeoBannerHtml = `
+        <div class="md:col-span-2 p-3.5 rounded-2xl bg-sky-50/75 border border-sky-200 grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+            <div>
+                <span class="text-[11px] text-sky-700 font-bold block">🌐 保存資料時 IP 位址</span>
+                <span class="font-mono font-bold text-gray-800 break-all">${u.lastSaveIp ? String(u.lastSaveIp).replace(/</g, '&lt;') : '尚未紀錄（待玩家再次保存）'}</span>
+            </div>
+            <div>
+                <span class="text-[11px] text-sky-700 font-bold block">🕒 IP 紀錄時間</span>
+                <span class="font-mono text-gray-600">${u.lastSaveIpAt ? String(u.lastSaveIpAt).replace(/</g, '&lt;') : '-'}</span>
+            </div>
+        </div>
+    `;
+    document.getElementById('detailModalBody').innerHTML = topAdminActionsHtml + backupBannerHtml + ipGeoBannerHtml + entries.map(([k, v]) => `
         <div class="p-2.5 rounded-xl bg-pink-50/50 border border-pink-100">
             <span class="text-[11px] text-[#c96a7b] font-mono block">${k}</span>
             <span class="font-semibold break-all">${typeof v === 'object' && v !== null ? JSON.stringify(v) : (v ?? '未填')}</span>

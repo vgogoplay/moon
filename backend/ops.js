@@ -589,14 +589,20 @@ function submitAdminReportReply(e) {
 }
 
 // 資料維護工具：手動回填公開索引與配對節點（可重複執行，結果一致）
-function runBackfillDerivedNodes() {
+async function runBackfillDerivedNodes() {
     if (typeof CloudSync === 'undefined' || typeof CloudSync.backfillDerivedNodes !== 'function') {
         alert('雲端同步模組尚未載入，請重新整理後再試。');
         return;
     }
-    CloudSync.backfillDerivedNodes()
-        .then(r => alert(`✅ 公開索引回填完成：會員 ${r.users} 位，寫入 ${r.writes} 筆（已一致的資料不會重複寫入）`))
-        .catch(e => alert('回填失敗：' + (e && e.message ? e.message : e)));
+    try {
+        if (typeof CloudSync.ensureBackendNodes === 'function') {
+            await CloudSync.ensureBackendNodes([USERS_KEY, USER_INDEX_KEY]);
+        }
+        const r = await CloudSync.backfillDerivedNodes();
+        alert(`✅ 公開索引回填完成：會員 ${r.users} 位，寫入 ${r.writes} 筆（已一致的資料不會重複寫入）`);
+    } catch (e) {
+        alert('回填失敗：' + (e && e.message ? e.message : e));
+    }
 }
 
 /* ===== 流量修復：資料庫瘦身清理（玩家操作日誌 7 天前 + 已解除配對且超過 7 天的聊天室）===== */
@@ -610,15 +616,20 @@ function collectDbCleanupTargets() {
     const unmatched = (tree[UNMATCHED_PAIRS_CLOUD_NODE] && typeof tree[UNMATCHED_PAIRS_CLOUD_NODE] === 'object') ? tree[UNMATCHED_PAIRS_CLOUD_NODE] : {};
     const chats = (tree[CHATS_KEY] && typeof tree[CHATS_KEY] === 'object') ? tree[CHATS_KEY] : {};
     const roomKeys = Object.keys(unmatched).filter(pk => {
-        const at = Number((unmatched[pk] || {}).unmatchedAt || 0);
+        const item = unmatched[pk] || {};
+        if (item.permanent || Number(item.graceUntil || 0) > Date.now()) return false;
+        const at = Number(item.unmatchedAt || 0);
         return at > 0 && at < cutoff && Boolean(chats[pk]);
     });
     return { opKeys, roomKeys };
 }
 
-function previewDbCleanup() {
+async function previewDbCleanup() {
     const box = document.getElementById('dbCleanupResult');
     if (!box) return;
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.ensureBackendNodes === 'function') {
+        await CloudSync.ensureBackendNodes([PLAYER_OP_LOGS_KEY, UNMATCHED_PAIRS_CLOUD_NODE, CHATS_KEY]);
+    }
     const t = collectDbCleanupTargets();
     const tree = (typeof CloudSync !== 'undefined' && CloudSync.tree) ? CloudSync.tree : {};
     let freed = 0;
@@ -630,6 +641,9 @@ function previewDbCleanup() {
 }
 
 async function runDbCleanup() {
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.ensureBackendNodes === 'function') {
+        await CloudSync.ensureBackendNodes([PLAYER_OP_LOGS_KEY, UNMATCHED_PAIRS_CLOUD_NODE, CHATS_KEY]);
+    }
     const t = collectDbCleanupTargets();
     if (!t.opKeys.length && !t.roomKeys.length) {
         alert('目前沒有需要清理的資料。');

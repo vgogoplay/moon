@@ -55,6 +55,16 @@ function isEveningConfessionPending() {
 
 // ==================== 初始化與前後台即時同步監聽 ====================
 document.addEventListener('DOMContentLoaded', async () => {
+    if (typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv()) {
+        const hdr = document.querySelector('header .max-w-4xl');
+        if (hdr && !document.getElementById('localSandboxTopNotice')) {
+            const pill = document.createElement('div');
+            pill.id = 'localSandboxTopNotice';
+            pill.className = 'text-[11px] px-2.5 py-1 rounded-full bg-teal-50 border border-teal-300 text-teal-800 font-bold shrink-0';
+            pill.textContent = '🧪 本地測試模式（不影響正式庫）';
+            hdr.insertBefore(pill, hdr.lastElementChild);
+        }
+    }
     initSakuraPetals();
     renderRandomMoment();
     if (typeof CloudSync !== 'undefined') {
@@ -454,10 +464,12 @@ function syncFromSharedStorage() {
                     appState.confessionUnlockAt = calcConfessionUnlockTime(now);
                 }
 
-                const detailPart = item.matchDetail ? `（${item.matchDetail}）` : '';
+                const cleanDisplaySession = String(item.session || '').replace(/・?強制補齊/g, '').trim();
+                const cleanDisplayDetail = String(item.matchDetail || '').replace(/・?強制補齊/g, '').trim();
+                const detailPart = cleanDisplayDetail ? `（${cleanDisplayDetail}）` : '';
                 const matchPrefix = item.activityId
-                    ? `🌸【${item.session}】月老牽線成功！${detailPart}`
-                    : `🌸【${item.session}】20:00 月老牽線成功！`;
+                    ? `🌸【${cleanDisplaySession}】月老牽線成功！${detailPart}`
+                    : `🌸【${cleanDisplaySession}】20:00 月老牽線成功！`;
                 const initialThread = [
                     { senderId: 'system', text: `${matchPrefix}好友名單將保留 7 天（聊天紀錄將永久保留，直到直接解除配對才會清空）。`, time: '' }
                 ];

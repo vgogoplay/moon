@@ -16,7 +16,12 @@ const yuelaoAuth = {
     adminRefreshTimer: null,
     apiKey: FIREBASE_WEB_API_KEY,
 
+    isLocalSandbox() {
+        return typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv();
+    },
+
     isEnabled() {
+        if (this.isLocalSandbox()) return false;
         return Boolean(this.apiKey && String(this.apiKey).trim());
     },
 
@@ -135,6 +140,21 @@ const yuelaoAuth = {
 
     // 管理員登入：Email／密碼 → 白名單檢查 → 保存管理員會話
     async signInAdmin(email, password) {
+        if (this.isLocalSandbox()) {
+            const cleanEmail = String(email || '').trim();
+            const cleanPwd = String(password || '');
+            if (!cleanEmail || !cleanPwd) throw new Error('請輸入管理員 Email 與密碼');
+            const session = {
+                uid: 'LOCAL_SANDBOX_ADMIN',
+                email: cleanEmail,
+                idToken: '',
+                refreshToken: '',
+                expiresAt: Date.now() + 24 * 60 * 60 * 1000
+            };
+            this.adminSession = session;
+            this.saveAdminSession();
+            return session;
+        }
         if (!this.isEnabled()) throw new Error('尚未設定 Firebase 金鑰');
         if (!this.dbUrl()) throw new Error('尚未設定資料庫網址');
         const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(this.apiKey)}`, {
@@ -201,6 +221,7 @@ const yuelaoAuth = {
     async restoreAdminSession() {
         this.loadAdminSession();
         if (!this.adminSession) return null;
+        if (this.isLocalSandbox()) return this.adminSession;
         try {
             await this.refreshAdminSession();
         } catch (e) {
@@ -214,6 +235,18 @@ const yuelaoAuth = {
 
     // 初始化：玩家匿名會話（與原行為相同）；後台頁面另外還原管理員會話
     async init() {
+        if (this.isLocalSandbox()) {
+            this.session = {
+                uid: 'LOCAL_SANDBOX_USER',
+                idToken: '',
+                refreshToken: '',
+                expiresAt: Date.now() + 24 * 60 * 60 * 1000
+            };
+            if (this.isBackendPage()) {
+                this.loadAdminSession();
+            }
+            return this.session;
+        }
         if (!this.isEnabled()) return null;
         this.loadSession();
         try {

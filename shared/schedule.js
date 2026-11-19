@@ -318,6 +318,31 @@ function sharedCheckSingleCriterion(key, desiredVal, candidate, seekerCriteria =
         const minH = parseInt(desiredVal, 10);
         return !isNaN(h) && !isNaN(minH) && h >= minH;
     }
+    if (key === 'hasPet') {
+        const want = String(desiredVal || '').trim();
+        if (!want) return false;
+        const candPet = String(candidate.hasPet || '').trim();
+        if (!candPet) return false;
+        const candHasAnyPet = candPet !== '沒有養寵物';
+        if (want === '沒有養寵物') {
+            return candPet === '沒有養寵物';
+        }
+        const parsed = (typeof parsePetCriterionValue === 'function')
+            ? parsePetCriterionValue(want)
+            : (() => {
+                const m = want.match(/^有養寵物[（(](.+)[）)]$/);
+                const t = m ? m[1].trim() : want;
+                return { status: '有養寵物', petType: (t === '有養寵物' || t.startsWith('不限')) ? '不限' : t };
+            })();
+        if (parsed.status === '沒有養寵物') {
+            return candPet === '沒有養寵物';
+        }
+        if (!candHasAnyPet) return false;
+        if (!parsed.petType || parsed.petType === '不限' || parsed.petType.startsWith('不限')) {
+            return true;
+        }
+        return candPet === parsed.petType;
+    }
     return candidate[key] === desiredVal;
 }
 
@@ -853,7 +878,7 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
             return;
         }
 
-        if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl) {
+        if (typeof CloudSync !== 'undefined' && !CloudSync.isLocalSandboxMode() && CloudSync.dbUrl) {
             const encodedActPath = CloudSync.encodePath(`${CUSTOM_ACTIVITIES_KEY}/${activityId}`);
             const encodedLockPath = CloudSync.encodePath(`${CUSTOM_ACT_CLOUD_LOCKS_NODE}/${lockNodeKey}`);
 

@@ -456,7 +456,7 @@ async function submitCreateWishPost(e) {
 
     // 男生限制：一天只能 3 位男生新增，要等每日 20:00 才會重置次數（女生不受任何次數限制）
     if (myGender === '男') {
-        if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl && CloudSync.inFlightWrites === 0) {
+        if (typeof CloudSync !== 'undefined' && !CloudSync.isLocalSandboxMode() && CloudSync.dbUrl && CloudSync.inFlightWrites === 0) {
             try {
                 const encodedWishPath = CloudSync.encodePath(WISH_WALL_KEY);
                 const res = await fetch(`${CloudSync.dbUrl}/${encodedWishPath}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' });

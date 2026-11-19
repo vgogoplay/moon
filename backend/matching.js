@@ -152,10 +152,15 @@ function collectMatchAndChatDiscrepancies() {
     return discrepancies;
 }
 
-function runRepairMatchesFromChats(silentWhenClean = false) {
+async function runRepairMatchesFromChats(silentWhenClean = false) {
     const resultEl = document.getElementById('repairMatchesResult');
     if (!resultEl) return;
 
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.ensureBackendNodes === 'function') {
+        resultEl.classList.remove('hidden');
+        resultEl.innerHTML = `<div class="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 font-semibold">⏳ 正在比對會員名單與聊天紀錄...</div>`;
+        await CloudSync.ensureBackendNodes([USERS_KEY, CHATS_KEY, UNMATCHED_PAIRS_CLOUD_NODE]);
+    }
     const discrepancies = collectMatchAndChatDiscrepancies();
     resultEl.classList.remove('hidden');
 
@@ -169,7 +174,12 @@ function runRepairMatchesFromChats(silentWhenClean = false) {
     }
 
     const cardsHtml = discrepancies.map((item, idx) => {
-        const canRepairBoth = item.userAExists && item.userBExists;
+        const isUnmatchedPair = Boolean(
+            typeof CloudSync !== 'undefined' &&
+            typeof CloudSync.isPairRecentlyUnmatched === 'function' &&
+            CloudSync.isPairRecentlyUnmatched(item.idA, item.idB)
+        );
+        const canRepairBoth = item.userAExists && item.userBExists && !isUnmatchedPair;
         return `
             <div class="p-3 rounded-xl bg-rose-50/65 border border-rose-200 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 text-xs">
                 <div class="min-w-0 flex-1 space-y-1">
@@ -205,7 +215,11 @@ function runRepairMatchesFromChats(silentWhenClean = false) {
         `;
     }).join('');
 
-    const repairableDiscrepancies = discrepancies.filter(item => item.userAExists && item.userBExists);
+    const repairableDiscrepancies = discrepancies.filter(item =>
+        item.userAExists &&
+        item.userBExists &&
+        !(typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(item.idA, item.idB))
+    );
     resultEl.innerHTML = `
         <div class="p-3 rounded-xl bg-amber-50 border border-amber-300 space-y-2.5">
             <div class="flex flex-wrap items-center justify-between gap-2">
@@ -565,7 +579,11 @@ async function manualResolveSyncPair(idA, idB, btnEl = null) {
 async function manualBatchSyncAllDiscrepancies(btnEl = null) {
     if (manualSyncDiscrepancyInFlight) return;
     const discrepancies = collectMatchAndChatDiscrepancies();
-    const repairable = discrepancies.filter(item => item.userAExists && item.userBExists);
+    const repairable = discrepancies.filter(item =>
+        item.userAExists &&
+        item.userBExists &&
+        !(typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(item.idA, item.idB))
+    );
     if (repairable.length === 0) {
         alert('✅ 目前所有聊天室與會員列表的雙向配對皆已一致，沒有需要補齊的遺漏配對！');
         return;
@@ -675,8 +693,8 @@ function adminFillPlayerFullData() {
         minHeight: isFemale ? '170' : '155',
         bmi: '18.5~24(正常區間)',
         targetBmi: '都可以',
+        hasPetStatus: '有養寵物',
         hasPet: '貓',
-        likesPets: '是',
         smoking: '不會',
         acceptSmoking: '不行',
         drinking: '社交場合',
@@ -1043,7 +1061,7 @@ function checkAutoSchedule2000() {
     }
 }
 
-function unmatchPlayerPair(userId, specificPartnerId = null) {
+async function unmatchPlayerPair(userId, specificPartnerId = null) {
     const users = getUsers();
     const userA = users.find(u => String(u.id) === String(userId));
     if (!userA) return;
@@ -1054,7 +1072,7 @@ function unmatchPlayerPair(userId, specificPartnerId = null) {
     const userB = users.find(u => String(u.id) === String(targetPartnerId));
     const partnerName = userB ? `${userB.nickname} (ID:${userB.id})` : `ID:${targetPartnerId}`;
 
-    if (!confirm(`確定要彈性解除「${userA.nickname} (ID:${userA.id})」與「${partnerName}」的配對嗎？\n解除後兩邊對應的好友名單將同步移除。`)) {
+    if (!confirm(`確定要彈性解除「${userA.nickname} (ID:${userA.id})」與「${partnerName}」的配對嗎？\n解除後兩邊對應的好友名單將同步移除，且系統不會再將雙方重新配對或自動回補。`)) {
         return;
     }
 
@@ -1083,23 +1101,31 @@ function unmatchPlayerPair(userId, specificPartnerId = null) {
     }
 
     if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
-        CloudSync.markPairUnmatched(userId, targetPartnerId, 600000);
+        await CloudSync.markPairUnmatched(userId, targetPartnerId, 315360000000);
     }
-    saveUsers(users, { isMatchMutation: true, targetIds: [String(userId), String(targetPartnerId)] });
-    if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+
+    const nextRaw = JSON.stringify(users);
+    if (typeof AdminMemoryCache !== 'undefined') {
+        AdminMemoryCache.usersRaw = nextRaw;
+        AdminMemoryCache.users = users;
+        if (typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('chats');
+        }
+    }
+    localStorage.setItem(USERS_KEY, nextRaw);
+    if (typeof renderAdminAll === 'function') {
+        renderAdminAll(true);
+    }
+
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.unmatchUsersInCloud === 'function') {
+        await CloudSync.unmatchUsersInCloud(userId, targetPartnerId, userA, userB);
+    } else if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
         ChatStore.clearChat(userId, targetPartnerId);
-    } else {
-        const pairKey = [String(userId), String(targetPartnerId)].sort().join('__');
-        const allChats = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
-        if (Object.prototype.hasOwnProperty.call(allChats, pairKey)) {
-            delete allChats[pairKey];
-            localStorage.setItem(CHATS_KEY, JSON.stringify(allChats));
-        }
-        if (typeof CloudSync !== 'undefined') {
-            CloudSync.deleteNode(`${CHATS_KEY}/${pairKey}`);
-        }
     }
-    appendLog(`<span class="text-amber-300">[彈性解除配對]</span> 管理員已解除 <strong>${userA.nickname}</strong> ⇄ <strong>${partnerName}</strong> 的好友關係並清空聊天紀錄，前台名單已同步更新。`);
+    if (typeof renderAdminAll === 'function') {
+        renderAdminAll(true);
+    }
+    appendLog(`<span class="text-amber-300">[彈性解除配對]</span> 管理員已解除 <strong>${userA.nickname}</strong> ⇄ <strong>${partnerName}</strong> 的好友關係並清空聊天紀錄，前後台資料庫已同步且不再自動回補。`);
 }
 
 function checkSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
@@ -1153,6 +1179,21 @@ function checkSingleCriterion(key, desiredVal, candidate, seekerCriteria = {}) {
         const minH = parseInt(desiredVal, 10);
         return !isNaN(h) && !isNaN(minH) && h >= minH;
     }
+    if (key === 'hasPet') {
+        const want = String(desiredVal || '').trim();
+        if (!want) return false;
+        const candPet = String(candidate.hasPet || '').trim();
+        if (!candPet) return false;
+        const candHasAnyPet = candPet !== '沒有養寵物';
+        if (want === '沒有養寵物') return candPet === '沒有養寵物';
+        const parsed = (typeof parsePetCriterionValue === 'function')
+            ? parsePetCriterionValue(want)
+            : { status: '有養寵物', petType: want };
+        if (parsed.status === '沒有養寵物') return candPet === '沒有養寵物';
+        if (!candHasAnyPet) return false;
+        if (!parsed.petType || parsed.petType === '不限' || parsed.petType.startsWith('不限')) return true;
+        return candPet === parsed.petType;
+    }
     return candidate[key] === desiredVal;
 }
 
@@ -1194,6 +1235,9 @@ function canPair(A, B) {
     const idA = String(A.id || '').trim();
     const idB = String(B.id || '').trim();
     if (!idA || !idB || idA === idB) return false;
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(idA, idB)) {
+        return false;
+    }
     const aHasB = (A.matchedHistory || []).some(h => String(h.partnerId).trim() === idB) ||
                   String(A.matchedWithId || '').trim() === idB;
     const bHasA = (B.matchedHistory || []).some(h => String(h.partnerId).trim() === idA) ||
@@ -1764,7 +1808,7 @@ async function claimAndRunAutoSchedule2000(dateKey, dayOfWeek) {
         const autoSession = dayOfWeek === 3 ? sched.wedLabel : sched.satLabel;
 
         // 1. 先從雲端確認今天 20:00 是否已被其他後台分頁／裝置執行過，若已執行則直接同步本地鎖並停止
-        if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl) {
+        if (typeof CloudSync !== 'undefined' && !CloudSync.isLocalSandboxMode() && CloudSync.dbUrl) {
             try {
                 const encodedLogPath = CloudSync.encodePath(AUTO_RUN_LOG_KEY);
                 const res = await fetch(`${CloudSync.dbUrl}/${encodedLogPath}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' });
@@ -2269,7 +2313,7 @@ function repairDuplicateSameSessionMatches(targetSessionFilter = '') {
         affectedUserIds.add(idA);
         affectedUserIds.add(idB);
         if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
-            CloudSync.markPairUnmatched(idA, idB, 600000);
+            CloudSync.markPairUnmatched(idA, idB, 315360000000);
         }
         if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
             ChatStore.clearChat(idA, idB);

@@ -585,7 +585,7 @@ function renderFriendsSection() {
                                 ` : ''}
                                 ${hasCardUnread ? `<span class="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold shrink-0">新訊息</span>` : ''}
                             </div>
-                            <p class="text-[11px] text-gray-500 truncate">${friend.sessionLabel || '七日緣分'}${(friend.isForceRepaired && !String(friend.sessionLabel || '').includes('・強制補齊')) ? '<span class="text-amber-700 font-bold">・強制補齊</span>' : ''} ・ ${friend.profile.region ? friend.profile.region + ' ' : ''}${friend.profile.city || '同城緣分'}</p>
+                            <p class="text-[11px] text-gray-500 truncate">${yuelaoEscapeHtml(String(friend.sessionLabel || '七日緣分').replace(/・?強制補齊/g, '').trim() || '七日緣分')} ・ ${friend.profile.region ? friend.profile.region + ' ' : ''}${friend.profile.city || '同城緣分'}</p>
                         </div>
                     </div>
                     <div class="flex flex-col items-end gap-1.5 shrink-0">
@@ -877,6 +877,8 @@ function renderActiveFriendWorkspace() {
                 let displayVal = val;
                 if (f.key === 'city' && friend.profile.region) {
                     displayVal = `${friend.profile.region} ・ ${val}`;
+                } else if (f.key === 'hasPet' && val && val !== '沒有養寵物' && val !== '有養寵物') {
+                    displayVal = `有養寵物（${val}）`;
                 } else if (Array.isArray(val)) {
                     const otherTxt = friend.profile[`${f.key}Other`];
                     displayVal = val.map(v => (v === '其他' && otherTxt) ? `其他（${otherTxt}）` : v).join('、');
@@ -1625,16 +1627,16 @@ function completeMutualContinuation(friend) {
     refreshAllUI();
 }
 
-function clearMutualFriendship(friend, noticeMsg) {
+async function clearMutualFriendship(friend, noticeMsg) {
     const myPid = String(appState.playerId || '').trim();
     const partnerPid = String(friend.id || '').trim();
 
-    // 1. 立即寫入解除配對墓碑（本地 + 雲端），防止任何同步快照或單邊補齊復活配對
+    // 1. 立即寫入永久解除配對墓碑（本地 + 雲端），防止任何同步快照或自動補齊復活配對
     if (myPid && partnerPid && typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
-        CloudSync.markPairUnmatched(myPid, partnerPid, 600000);
+        await CloudSync.markPairUnmatched(myPid, partnerPid, 315360000000);
     }
 
-    // 2. 合併本地與雲端快取的玩家資料，確保雙方紀錄（即使其中一方尚未寫入本地陣列）都能完整移除彼此
+    // 2. 合併本地與雲端快取的玩家資料，確保雙方紀錄都能完整移除彼此
     let users = [];
     try {
         users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
@@ -1653,7 +1655,6 @@ function clearMutualFriendship(friend, noticeMsg) {
             rec = { ...cloudRec, id: targetId };
             users.push(rec);
         } else if (rec && cloudRec && typeof cloudRec === 'object') {
-            // 補齊本地可能缺少的最新雲端欄位，避免覆蓋對方的個人資料
             Object.assign(rec, { ...cloudRec, ...rec, id: targetId });
         }
         return rec || null;
@@ -1669,7 +1670,7 @@ function clearMutualFriendship(friend, noticeMsg) {
             : (Array.isArray(u.matchedHistory) ? u.matchedHistory : []);
         u.matchedHistory = normHist.filter(h => String(h.partnerId).trim() !== removeTargetId);
 
-        if (String(u.matchedWithId || '').trim() === removeTargetId) {
+        if (!u.matchedWithId || String(u.matchedWithId).trim() === removeTargetId) {
             const fallbackHist = u.matchedHistory.length > 0
                 ? u.matchedHistory[u.matchedHistory.length - 1]
                 : null;
@@ -1684,20 +1685,8 @@ function clearMutualFriendship(friend, noticeMsg) {
     removePartnerFromUserRecord(partnerUserRec, myPid);
 
     localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
-
-    // 3. 依序執行雲端同步：先提交解除配對墓碑 -> 再更新雙方會員資料 -> 最後清空雙方聊天室紀錄
-    if (myPid && partnerPid && typeof CloudSync !== 'undefined') {
-        if (typeof CloudSync.unmatchUsersInCloud === 'function') {
-            CloudSync.unmatchUsersInCloud(myPid, partnerPid, myUserRec, partnerUserRec);
-        } else {
-            if (myUserRec) CloudSync.upsertUser(myUserRec, true, { isMatchMutation: true });
-            if (partnerUserRec) CloudSync.upsertUser(partnerUserRec, true, { isMatchMutation: true });
-            ChatStore.clearChat(myPid, partnerPid);
-        }
-        lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
-    } else if (myPid && partnerPid) {
-        ChatStore.clearChat(myPid, partnerPid);
-        lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
+    if (typeof LocalJsonCache !== 'undefined') {
+        LocalJsonCache.invalidate(USERS_LOCAL_KEY);
     }
 
     removeFriendReadReceipt(partnerPid);
@@ -1715,6 +1704,22 @@ function clearMutualFriendship(friend, noticeMsg) {
     // 傳入 skipCloudPush = true，避免重複觸發非配對異動的 upsertUser 覆蓋剛送出的解除配對狀態
     Store.save(appState, false, true);
     refreshAllUI();
+
+    // 3. 同步更新雲端雙方會員節點、配對快照與聊天室
+    if (myPid && partnerPid && typeof CloudSync !== 'undefined') {
+        if (typeof CloudSync.unmatchUsersInCloud === 'function') {
+            await CloudSync.unmatchUsersInCloud(myPid, partnerPid, myUserRec, partnerUserRec);
+        } else {
+            if (myUserRec) await CloudSync.upsertUser(myUserRec, true, { isMatchMutation: true });
+            if (partnerUserRec) await CloudSync.upsertUser(partnerUserRec, true, { isMatchMutation: true });
+            ChatStore.clearChat(myPid, partnerPid);
+        }
+        lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
+    } else if (myPid && partnerPid) {
+        ChatStore.clearChat(myPid, partnerPid);
+        lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
+    }
+
     if (noticeMsg) showMiniNotice('🍃 已解除好友', noticeMsg);
 }
 
