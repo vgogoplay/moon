@@ -423,3 +423,75 @@ function buildBackupCodeFromParts(playerId, profileObj, privacyObj, preferredCod
     if (!playerId) return '';
     return deriveFixedBackupCode(playerId);
 }
+
+
+/* ==================== 公開索引與配對共享資料（階段 B2） ==================== */
+// 全站公開索引：只保留統計（首頁人數、場次統計、性別上限）所需的最小欄位
+const USER_INDEX_BASE_FIELDS = ['id', 'nickname', 'gender', 'registeredSessions', 'customActivityRegs'];
+// 索引中依隱私設定才公開的欄位 → 對應的隱私開關（region 依 city 設定、mbtiGroup 依 mbti 設定）
+const PRIVACY_GATED_INDEX = { region: 'city', mbtiGroup: 'mbti' };
+// 絕對不進入任何公開或配對節點的欄位（備份碼、IG、配對紀錄、封鎖與警告狀態等）
+const USER_SECRET_FIELDS = [
+    'backupCode', 'ig', 'matchedHistory', 'matchedSession', 'matchedWithId', 'matchedWithName', 'matchedAt',
+    'exactMatchCriteria', 'mustMatchKeys', 'readMailIds', 'isChatBanned', 'isMatchBanned', 'isWarned',
+    'warningReason', 'updatedAt', 'registeredSession', 'registeredSessions', 'customActivityRegs'
+];
+// 配對卡片快照中一律保留的識別欄位（其餘欄位需本人隱私設定為 open）
+const PAIR_PROFILE_ALWAYS_FIELDS = ['id', 'nickname', 'privacy'];
+
+function isEmptyStoredValue(v) {
+    if (v === undefined || v === null) return true;
+    if (Array.isArray(v)) return v.length === 0;
+    if (typeof v === 'object') return Object.keys(v).length === 0;
+    return v === '';
+}
+
+// 穩定序列化（鍵值排序），用於判斷內容是否真的改變，避免重複寫入
+function canonJson(value) {
+    if (value === undefined) return 'null';
+    if (Array.isArray(value)) return '[' + value.map(canonJson).join(',') + ']';
+    if (value && typeof value === 'object') {
+        return '{' + Object.keys(value).sort()
+            .filter(k => value[k] !== undefined)
+            .map(k => JSON.stringify(k) + ':' + canonJson(value[k]))
+            .join(',') + '}';
+    }
+    return JSON.stringify(value === null ? null : value);
+}
+
+function buildUserIndexRecord(u) {
+    if (!u || typeof u !== 'object' || isEmptyStoredValue(u.id)) return null;
+    const out = { id: String(u.id) };
+    USER_INDEX_BASE_FIELDS.forEach(k => {
+        if (k === 'id' || isEmptyStoredValue(u[k])) return;
+        out[k] = u[k];
+    });
+    const priv = (u.privacy && typeof u.privacy === 'object') ? u.privacy : {};
+    Object.keys(PRIVACY_GATED_INDEX).forEach(field => {
+        if (priv[PRIVACY_GATED_INDEX[field]] === 'open' && !isEmptyStoredValue(u[field])) {
+            out[field] = u[field];
+        }
+    });
+    return out;
+}
+
+// 配對卡片快照：只包含本人設為 open 的欄位（closed 欄位不寫入配對節點）
+function buildPairProfileRecord(u) {
+    if (!u || typeof u !== 'object' || isEmptyStoredValue(u.id)) return null;
+    const priv = (u.privacy && typeof u.privacy === 'object') ? u.privacy : {};
+    const out = {};
+    Object.keys(u).forEach(k => {
+        if (u[k] === undefined || USER_SECRET_FIELDS.indexOf(k) !== -1) return;
+        if (PAIR_PROFILE_ALWAYS_FIELDS.indexOf(k) !== -1) { out[k] = u[k]; return; }
+        if (priv[k] === 'open') { out[k] = u[k]; return; }
+        if (PRIVACY_GATED_INDEX[k] && priv[PRIVACY_GATED_INDEX[k]] === 'open') { out[k] = u[k]; }
+    });
+    out.id = String(u.id);
+    return out;
+}
+
+// 配對專屬 IG：只寫入本人 IG；沒有 IG 時回傳 null（代表刪除節點）
+function buildPairIgRecord(u) {
+    const ig = (u && typeof u === 'object') ? String(u.ig || '').trim() : '';
+    return ig ? { ig } : null;
+}

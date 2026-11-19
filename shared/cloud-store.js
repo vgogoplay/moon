@@ -1,7 +1,21 @@
 /* shared/cloud-store.js - 前後台共用：Firebase 即時雲端同步、玩家資料庫、信箱與聊天室管理器 */
 
+/* 全站共用 HTML 跳脫（所有使用者輸入插入 innerHTML 前必須經過此函式） */
+function yuelaoEscapeHtml(value) {
+    return String(value === null || value === undefined ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+
 const STORAGE_KEY = 'yuelao_romance_app_v2';
 const USERS_KEY = 'yuelao_users';
+const USER_INDEX_KEY = 'yuelao_user_index';
+const PAIR_PROFILES_KEY = 'yuelao_pair_profiles';
+const PAIR_IG_KEY = 'yuelao_pair_ig';
 const REPORTS_KEY = 'yuelao_reports';
 const REPORTS_MAX_COUNT = 15;
 const ID_COUNTER_KEY = 'yuelao_id_counters';
@@ -29,7 +43,7 @@ const PLAYER_OP_LOGS_MAX_COUNT = 30;
 const FATE_WALL_KEY = 'yuelao_fate_wall';
 const WISH_WALL_KEY = 'yuelao_wish_wall';
 
-const FIREBASE_DB_URL = 'https://moon-8b627-default-rtdb.asia-southeast1.firebasedatabase.app';
+const FIREBASE_DB_URL = 'https://moon1-cb403-default-rtdb.asia-southeast1.firebasedatabase.app';
 
 // ==================== ⚡ 本地 JSON 解析記憶體快取（避免重複 JSON.parse 造成 CPU 與 GC 負擔） ====================
 const LocalJsonCache = {
@@ -1163,8 +1177,13 @@ const CloudSync = {
         this.refreshCloudBadge();
     },
 
-    async fetchFullTree() {
+    async fetchFullTree(options = {}) {
         if (this.inFlightWrites > 0) return false;
+        const force = Boolean(options && options.force);
+        // 免費方案流量保護：本次工作階段已完整下載過，且 SSE 仍保持資料新鮮時，不重複下載整個資料庫
+        if (!force && this.lastFullFetchAt > 0 && (Date.now() - this.lastFullFetchAt) < this.FULL_FETCH_MIN_INTERVAL_MS) {
+            return true;
+        }
         const epochBefore = this.writeEpoch;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 15000);
@@ -1182,6 +1201,7 @@ const CloudSync = {
             }
             this.tree = (data && typeof data === 'object') ? data : {};
             this.hasLoadedFullTree = true;
+            this.lastFullFetchAt = Date.now();
             this.chatsTreeVersion++;
             this.applyTreeToLocalStorage();
             this.updateCloudBadge(true);
@@ -1240,6 +1260,348 @@ const CloudSync = {
         }, delayMs);
     },
 
+    FULL_FETCH_MIN_INTERVAL_MS: 60000,
+    MAX_SCOPED_RESYNC_PATHS: 20,
+    lastFullFetchAt: 0,
+    sseHadError: false,
+    pendingFullResync: false,
+    flushingDirty: false,
+    dirtyStreamPaths: null,
+
+    settleInFlightWrite() {
+        this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
+        if (this.inFlightWrites === 0) this.flushDirtyStreamPaths();
+    },
+
+    queueDirtyStreamEvent(e) {
+        if (!this.dirtyStreamPaths) this.dirtyStreamPaths = new Set();
+        try {
+            const payload = JSON.parse(e.data);
+            const base = String((payload && payload.path) || '/').replace(/^\/+|\/+$/g, '');
+            const isPatchMap = e.type === 'patch' && payload && payload.data && typeof payload.data === 'object';
+            if (!base) {
+                if (isPatchMap) {
+                    Object.keys(payload.data).forEach(k => this.dirtyStreamPaths.add(k));
+                } else {
+                    this.pendingFullResync = true;
+                }
+            } else if (isPatchMap) {
+                Object.keys(payload.data).forEach(k => this.dirtyStreamPaths.add(`${base}/${k}`));
+            } else {
+                this.dirtyStreamPaths.add(base);
+            }
+        } catch (err) {
+            this.pendingFullResync = true;
+        }
+    },
+
+    async fetchNodeIntoTree(path) {
+        // 回傳 true（成功）、false（網路失敗）或 'raced'（期間有本地寫入，結果不可信）
+        const epochBefore = this.writeEpoch;
+        try {
+            const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json`, {
+                method: 'GET',
+                cache: 'no-store'
+            });
+            if (!res.ok) return false;
+            const data = await res.json();
+            if (this.inFlightWrites > 0 || this.writeEpoch !== epochBefore) return 'raced';
+            this.applyStreamPatch(path, data);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    },
+
+    flushDirtyStreamPaths() {
+        if (!this.dirtyStreamPaths) this.dirtyStreamPaths = new Set();
+        if (this.inFlightWrites > 0 || this.flushingDirty) return;
+        const needsFull = this.pendingFullResync === true;
+        const dirty = Array.from(this.dirtyStreamPaths);
+        if (!needsFull && dirty.length === 0) return;
+        this.pendingFullResync = false;
+        this.dirtyStreamPaths.clear();
+        this.flushingDirty = true;
+        const finish = (ok) => {
+            this.flushingDirty = false;
+            if (ok && typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+        };
+        if (needsFull || dirty.length > this.MAX_SCOPED_RESYNC_PATHS) {
+            this.fetchFullTree({ force: needsFull }).then(finish);
+            return;
+        }
+        Promise.all(dirty.map(p => this.fetchNodeIntoTree(p))).then(results => {
+            let retryLater = false;
+            results.forEach((r, i) => {
+                if (r === 'raced') {
+                    this.dirtyStreamPaths.add(dirty[i]);
+                    retryLater = true;
+                } else if (r === false) {
+                    this.pendingFullResync = true;
+                    retryLater = true;
+                }
+            });
+            this.flushingDirty = false;
+            if (results.some(r => r === true) && typeof this.onUpdateCallback === 'function') {
+                this.onUpdateCallback();
+            }
+            if (retryLater) {
+                setTimeout(() => this.flushDirtyStreamPaths(), 1500);
+            }
+        });
+    },
+
+    // ===================== 方案 C：玩家端混合同步（功能開關，預設關閉） =====================
+    PLAYER_SYNC_ENABLED: false,
+    PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch'],
+    PLAYER_COLD_NODES: ['yuelao_custom_activities', 'yuelao_banned_rules', 'yuelao_force_matches', 'yuelao_unmatched_pairs', 'yuelao_activity_reg_history'],
+    PLAYER_HOT_INTERVAL_MS: 15000,
+    PLAYER_COLD_INTERVAL_MS: 60000,
+    etagCache: null,
+    activeRoomPath: '',
+    activeRoomEs: null,
+    playerTimersStarted: false,
+
+    isPlayerSyncMode() {
+        if (this.isBackendContext()) return false;
+        if (this.PLAYER_SYNC_ENABLED === true) return true;
+        // 測試用：網址加上 ?syncMode=c 即啟用（不影響其他使用者）
+        try {
+            return typeof window !== 'undefined' && window.location
+                && new URLSearchParams(window.location.search).get('syncMode') === 'c';
+        } catch (e) {
+            return false;
+        }
+    },
+
+    syncStats: { notModified: 0, bodies: 0, bodyBytes: 0, errors: 0, startedAt: 0 },
+
+    logSyncStats() {
+        const s = this.syncStats;
+        console.info('[syncMode=c] 304 次數:', s.notModified, '｜ 下載次數:', s.bodies,
+            '｜ 下載位元組:', s.bodyBytes, '｜ 錯誤:', s.errors,
+            '｜ 統計開始:', s.startedAt ? new Date(s.startedAt).toLocaleTimeString() : '-');
+    },
+
+    async conditionalGetNode(path) {
+        // 以 ETag 條件式讀取：資料未變動時 Firebase 回 304 且無內容，幾乎不耗下載流量
+        if (!this.etagCache) this.etagCache = {};
+        const epochBefore = this.writeEpoch;
+        const headers = { 'X-Firebase-ETag': 'true' };
+        if (this.etagCache[path]) headers['If-None-Match'] = this.etagCache[path];
+        try {
+            const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json`, {
+                method: 'GET',
+                headers,
+                cache: 'no-store'
+            });
+            if (this.inFlightWrites > 0 || this.writeEpoch !== epochBefore) return { status: 'raced' };
+            if (!this.syncStats.startedAt) this.syncStats.startedAt = Date.now();
+            if (res.status === 304) {
+                this.syncStats.notModified++;
+                return { status: 'unchanged' };
+            }
+            if (!res.ok) {
+                this.syncStats.errors++;
+                return { status: 'error' };
+            }
+            const etag = res.headers.get('ETag');
+            const text = await res.text();
+            this.syncStats.bodies++;
+            this.syncStats.bodyBytes += text.length;
+            const data = text ? JSON.parse(text) : null;
+            if (etag) this.etagCache[path] = etag; else delete this.etagCache[path];
+            return { status: 'changed', data };
+        } catch (e) {
+            this.syncStats.errors++;
+            return { status: 'error' };
+        }
+    },
+
+    playerSelfId() {
+        return (typeof appState !== 'undefined' && appState && appState.playerId) ? String(appState.playerId) : '';
+    },
+
+    // 玩家端需要輪詢的動態節點：本人私有記錄、每位配對好友的卡片快照與 IG、雙方聊天室
+    playerDynamicPaths() {
+        const me = this.playerSelfId();
+        if (!me) return [];
+        const paths = [`${USERS_KEY}/${me}`];
+        const rec = this.tree && this.tree[USERS_KEY] ? this.tree[USERS_KEY][me] : null;
+        this.partnerIdsOf(rec).forEach(partnerId => {
+            const pk = this.pairKeyOf(me, partnerId);
+            paths.push(`${PAIR_PROFILES_KEY}/${pk}/${partnerId}`);
+            paths.push(`${PAIR_IG_KEY}/${pk}/${partnerId}`);
+            paths.push(`${CHATS_KEY}/${pk}`);
+        });
+        return paths;
+    },
+
+    // 把索引、好友卡片快照、配對 IG 與本人私有記錄合併成與原本相同形狀的 tree[USERS_KEY]，
+    // 讓既有前端程式碼（人數統計、好友卡片、性別上限）不需要改動。
+    composePlayerUsers() {
+        const t = this.tree || {};
+        const idx = t[USER_INDEX_KEY] && typeof t[USER_INDEX_KEY] === 'object' ? t[USER_INDEX_KEY] : {};
+        const me = this.playerSelfId();
+        const out = {};
+        Object.keys(idx).forEach(pid => { out[pid] = { ...idx[pid] }; });
+        const selfRaw = me && t[USERS_KEY] && t[USERS_KEY][me] && typeof t[USERS_KEY][me] === 'object'
+            ? t[USERS_KEY][me] : null;
+        this.partnerIdsOf(selfRaw).forEach(partnerId => {
+            const pk = this.pairKeyOf(me, partnerId);
+            const prof = t[PAIR_PROFILES_KEY] && t[PAIR_PROFILES_KEY][pk] ? t[PAIR_PROFILES_KEY][pk][partnerId] : null;
+            const igNode = t[PAIR_IG_KEY] && t[PAIR_IG_KEY][pk] ? t[PAIR_IG_KEY][pk][partnerId] : null;
+            const merged = { ...(out[partnerId] || {}), ...(prof && typeof prof === 'object' ? prof : {}) };
+            if (igNode && igNode.ig) merged.ig = igNode.ig; else delete merged.ig;
+            if (Object.keys(merged).length) out[partnerId] = merged;
+        });
+        if (me && selfRaw) {
+            out[me] = { ...(out[me] || {}), ...selfRaw };
+        }
+        this.tree[USERS_KEY] = out;
+    },
+
+    // 登入或同步時，為本人補寫索引與配對節點（涵蓋祈願牆等由對方發起、本人無法代寫的配對）
+    async ensurePlayerDerivedNodes() {
+        const me = this.playerSelfId();
+        const rec = me && this.tree && this.tree[USERS_KEY] ? this.tree[USERS_KEY][me] : null;
+        if (!rec) return 0;
+        return this.syncDerivedNodesFor(me, rec, { bothSides: false });
+    },
+
+    async fetchPlayerPaths(paths) {
+        const unique = Array.from(new Set((paths || []).filter(Boolean)));
+        await Promise.all(unique.map(p => this.conditionalGetNode(p).then(r => {
+            if (r.status === 'changed') this.applyStreamPatch(p, r.data);
+        })));
+    },
+
+    async pollPlayerNodes(paths) {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (this.inFlightWrites > 0) return;
+        const unique = Array.from(new Set(paths.filter(Boolean)));
+        const results = await Promise.all(unique.map(p => this.conditionalGetNode(p).then(r => ({ p, r }))));
+        let changed = false;
+        results.forEach(({ p, r }) => {
+            if (r.status === 'changed') {
+                this.applyStreamPatch(p, r.data);
+                changed = true;
+            }
+        });
+        if (changed) {
+            this.composePlayerUsers();
+            this.chatsTreeVersion++;
+            this.applyTreeToLocalStorage();
+            if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+        }
+    },
+
+    playerRoomPaths() {
+        const me = (typeof appState !== 'undefined' && appState && appState.playerId) ? String(appState.playerId) : '';
+        if (!me || !this.tree || !this.tree[USERS_KEY]) return [];
+        const user = this.tree[USERS_KEY][me];
+        const partners = new Set();
+        (user && Array.isArray(user.matchedHistory) ? user.matchedHistory : []).forEach(h => {
+            if (h && h.partnerId) partners.add(String(h.partnerId));
+        });
+        return Array.from(partners).map(pid => `${CHATS_KEY}/${ChatStore.getPairKey(me, pid)}`);
+    },
+
+    pollPlayerHot() {
+        const dyn = this.playerDynamicPaths().filter(p => p !== this.activeRoomPath);
+        return this.pollPlayerNodes([...this.PLAYER_HOT_NODES, ...dyn]);
+    },
+
+    pollPlayerCold() {
+        return this.pollPlayerNodes(this.PLAYER_COLD_NODES);
+    },
+
+    startPlayerTimers() {
+        if (this.playerTimersStarted) return;
+        this.playerTimersStarted = true;
+        setInterval(() => this.logSyncStats(), 60000);
+        setInterval(() => this.pollPlayerHot(), this.PLAYER_HOT_INTERVAL_MS);
+        setInterval(() => this.pollPlayerCold(), this.PLAYER_COLD_INTERVAL_MS);
+    },
+
+    setActiveChatRoom(roomPath) {
+        // 只對「目前開啟的單一聊天室」建立 SSE；切換聊天室或分頁隱藏時關閉
+        if (!this.isPlayerSyncMode()) return;
+        if (roomPath === this.activeRoomPath && this.activeRoomEs) return;
+        this.closeActiveChatRoom();
+        if (!roomPath || typeof EventSource === 'undefined') return;
+        this.activeRoomPath = roomPath;
+        const handler = (e) => {
+            try {
+                const payload = JSON.parse(e.data);
+                if (!payload) return;
+                const rel = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
+                const base = rel ? `${roomPath}/${rel}` : roomPath;
+                if (e.type === 'patch' && payload.data && typeof payload.data === 'object') {
+                    Object.keys(payload.data).forEach(k => this.applyStreamPatch(`${base}/${k}`, payload.data[k]));
+                } else {
+                    this.applyStreamPatch(base, payload.data);
+                }
+                this.chatsTreeVersion++;
+                this.scheduleStreamFlush(60);
+            } catch (err) {}
+        };
+        const es = new EventSource(`${this.dbUrl}/${this.encodePath(roomPath)}.json`);
+        es.addEventListener('put', handler);
+        es.addEventListener('patch', handler);
+        es.onopen = () => {
+            // 連線（含重連）後補讀一次，避免斷線期間漏掉訊息
+            if (this.activeRoomEs === es) {
+                this.conditionalGetNode(roomPath).then(r => {
+                    if (r.status === 'changed') {
+                        this.applyStreamPatch(roomPath, r.data);
+                        this.applyTreeToLocalStorage();
+                        if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+                    }
+                });
+            }
+        };
+        this.activeRoomEs = es;
+    },
+
+    closeActiveChatRoom() {
+        if (this.activeRoomEs) {
+            try { this.activeRoomEs.close(); } catch (e) {}
+        }
+        this.activeRoomEs = null;
+        this.activeRoomPath = '';
+    },
+
+    async initPlayerScopedSync() {
+        this.tree = this.tree && typeof this.tree === 'object' ? this.tree : {};
+        const me = this.playerSelfId();
+        // 第一階段：索引、冷門節點、本人私有記錄（好友清單需要本人記錄）
+        const stage1 = [...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES];
+        if (me) stage1.push(`${USERS_KEY}/${me}`);
+        await this.fetchPlayerPaths(stage1);
+        // 第二階段：好友卡片快照、配對 IG、聊天室（依本人記錄的配對名單決定）
+        await this.fetchPlayerPaths(this.playerDynamicPaths());
+        this.composePlayerUsers();
+        this.hasLoadedFullTree = true;
+        this.initialized = true;
+        this.applyTreeToLocalStorage();
+        this.updateCloudBadge(true);
+        this.ensurePlayerDerivedNodes().catch(() => {});
+        this.startPlayerTimers();
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    this.closeActiveChatRoom();
+                } else {
+                    this.pollPlayerHot();
+                    this.pollPlayerCold();
+                }
+            });
+        }
+        if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+        return true;
+    },
+
     startRealtimeStream() {
         if (typeof EventSource === 'undefined') return;
         if (this.eventSource) {
@@ -1248,7 +1610,11 @@ const CloudSync = {
         try {
             const es = new EventSource(`${this.dbUrl}/.json`);
             const handleEvent = (e) => {
-                if (this.inFlightWrites > 0) return;
+                if (this.inFlightWrites > 0) {
+                    // 寫入中收到的遠端事件不可直接丟棄：記錄變動路徑，寫入結束後只重新抓取這些節點
+                    this.queueDirtyStreamEvent(e);
+                    return;
+                }
                 try {
                     const payload = JSON.parse(e.data);
                     if (!payload) return;
@@ -1280,8 +1646,15 @@ const CloudSync = {
             };
             es.onopen = () => {
                 this.updateCloudBadge(true);
+                if (this.sseHadError) {
+                    // 斷線期間可能漏掉事件：重新連上後完整同步一次
+                    this.sseHadError = false;
+                    this.pendingFullResync = true;
+                    this.flushDirtyStreamPaths();
+                }
             };
             es.onerror = () => {
+                this.sseHadError = true;
                 this.updateCloudBadge(false);
             };
             es.addEventListener('put', handleEvent);
@@ -1292,6 +1665,7 @@ const CloudSync = {
 
     async init(onUpdate) {
         this.onUpdateCallback = onUpdate || null;
+        if (this.isPlayerSyncMode()) return this.initPlayerScopedSync();
         let loadedOk = await this.fetchFullTree();
         if (!loadedOk) {
             await new Promise(r => setTimeout(r, 400));
@@ -1299,6 +1673,9 @@ const CloudSync = {
         }
         this.initialized = true;
         this.startRealtimeStream();
+        if (this.isBackendContext()) {
+            this.backfillDerivedNodes().catch(() => {});
+        }
 
         // 已關閉多餘的 3.5 秒全庫輪詢，完全改由 EventSource 即時推播與分頁聚焦同步
         if (this.pollTimer) {
@@ -1353,7 +1730,7 @@ const CloudSync = {
             }
             return false;
         } finally {
-            this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
+            this.settleInFlightWrite();
             this.writeEpoch++;
             this.refreshCloudBadge();
         }
@@ -1379,10 +1756,97 @@ const CloudSync = {
         } catch (e) {
             console.warn('CloudSync patchNode 同步失敗', path, e);
         } finally {
-            this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
+            this.settleInFlightWrite();
             this.writeEpoch++;
             this.refreshCloudBadge();
         }
+    },
+
+    pairKeyOf(a, b) {
+        return [String(a), String(b)].sort().join('__');
+    },
+
+    partnerIdsOf(record) {
+        const set = new Set();
+        const hist = record && Array.isArray(record.matchedHistory) ? record.matchedHistory : [];
+        hist.forEach(h => { if (h && h.partnerId) set.add(String(h.partnerId)); });
+        return Array.from(set);
+    },
+
+    // 比對本地已知的配對節點，只把內容真正不同的項目加入寫入計畫（冪等）
+    pairWritePlan(ownerId, ownerRecord, pk, plan) {
+        const tree = this.tree || {};
+        const profile = buildPairProfileRecord(ownerRecord);
+        const ig = buildPairIgRecord(ownerRecord);
+        const curP = tree[PAIR_PROFILES_KEY] && tree[PAIR_PROFILES_KEY][pk] ? tree[PAIR_PROFILES_KEY][pk][ownerId] : null;
+        const curI = tree[PAIR_IG_KEY] && tree[PAIR_IG_KEY][pk] ? tree[PAIR_IG_KEY][pk][ownerId] : null;
+        if (profile && canonJson(profile) !== canonJson(curP || null)) {
+            plan.push([`${PAIR_PROFILES_KEY}/${pk}/${ownerId}`, profile]);
+        }
+        if (canonJson(ig) !== canonJson(curI || null)) {
+            plan.push([`${PAIR_IG_KEY}/${pk}/${ownerId}`, ig]);
+        }
+    },
+
+    // 同步一位會員的公開索引與其配對節點。options.bothSides（後台）時一併寫入對方側資料
+    async syncDerivedNodesFor(pid, record, options = {}) {
+        const ownerId = String(pid || '').trim();
+        if (!ownerId || !record || typeof record !== 'object') return 0;
+        const tree = this.tree || {};
+        const plan = [];
+        const idx = buildUserIndexRecord(record);
+        const curIdx = tree[USER_INDEX_KEY] ? tree[USER_INDEX_KEY][ownerId] : null;
+        if (idx && canonJson(idx) !== canonJson(curIdx || null)) {
+            plan.push([`${USER_INDEX_KEY}/${ownerId}`, idx]);
+        }
+        this.partnerIdsOf(record).forEach(partnerId => {
+            const pk = this.pairKeyOf(ownerId, partnerId);
+            this.pairWritePlan(ownerId, record, pk, plan);
+            if (options && options.bothSides) {
+                const partnerRec = tree[USERS_KEY] ? tree[USERS_KEY][partnerId] : null;
+                if (partnerRec && typeof partnerRec === 'object') {
+                    this.pairWritePlan(partnerId, partnerRec, pk, plan);
+                }
+            }
+        });
+        const unique = new Map();
+        plan.forEach(([path, value]) => unique.set(path, value));
+        const entries = Array.from(unique.entries());
+        for (const [path, value] of entries) {
+            await this.putNode(path, value);
+        }
+        return entries.length;
+    },
+
+    // 比較前後快照，只產生「真正變動」的欄位（PATCH 內容）。
+    // 不會因為缺少某欄位就刪除它（例如 matchedHistory）；只有明確給 null 或空值才刪除。
+    buildRecordPatch(prev, next) {
+        const base = prev && typeof prev === 'object' ? prev : {};
+        const patch = {};
+        const isEmpty = v => v === undefined || v === null || (Array.isArray(v) && v.length === 0)
+            || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+        Object.keys(next || {}).forEach(k => {
+            const value = next[k];
+            if (value === undefined) return;
+            if (canonJson(value) === canonJson(base[k] === undefined ? null : base[k])) return;
+            patch[k] = isEmpty(value) ? null : value;
+        });
+        return patch;
+    },
+
+    // 後台回填：遍歷完整會員資料，補齊索引與雙方配對節點；可重複執行，結果一致
+    async backfillDerivedNodes() {
+        if (!this.isBackendContext()) return { users: 0, writes: 0, skipped: true };
+        const users = (this.tree && this.tree[USERS_KEY]) || {};
+        let writes = 0;
+        let count = 0;
+        for (const pid of Object.keys(users)) {
+            const rec = users[pid];
+            if (!rec || typeof rec !== 'object') continue;
+            count++;
+            writes += await this.syncDerivedNodesFor(pid, rec, { bothSides: true });
+        }
+        return { users: count, writes };
     },
 
     async patchUserFields(playerId, patchFields, updatedUserRecord = null) {
@@ -1425,6 +1889,7 @@ const CloudSync = {
         this.setSharedPendingUser(pid, mergedRecord, 18000);
 
         await this.patchNode(`${USERS_KEY}/${pid}`, firebasePatch);
+        await this.syncDerivedNodesFor(pid, mergedRecord, { bothSides: this.isBackendContext() });
     },
 
     async deleteNode(path) {
@@ -1445,7 +1910,7 @@ const CloudSync = {
         } catch (e) {
             console.warn('CloudSync deleteNode 同步失敗', path, e);
         } finally {
-            this.inFlightWrites = Math.max(0, this.inFlightWrites - 1);
+            this.settleInFlightWrite();
             this.writeEpoch++;
             this.refreshCloudBadge();
         }
@@ -1458,6 +1923,13 @@ const CloudSync = {
         try {
             localStorage.removeItem(PLAYER_STATE_PREFIX + pid);
         } catch (e) {}
+        const rec = this.tree && this.tree[USERS_KEY] ? this.tree[USERS_KEY][pid] : null;
+        await this.deleteNode(`${USER_INDEX_KEY}/${pid}`);
+        for (const partnerId of this.partnerIdsOf(rec)) {
+            const pk = this.pairKeyOf(pid, partnerId);
+            await this.deleteNode(`${PAIR_PROFILES_KEY}/${pk}/${pid}`);
+            await this.deleteNode(`${PAIR_IG_KEY}/${pk}/${pid}`);
+        }
         await this.deleteNode(`${USERS_KEY}/${pid}`);
     },
 
@@ -1544,7 +2016,15 @@ const CloudSync = {
         this.lastPushedUsersJson[pid] = serialized;
         this.setSharedPendingUser(pid, cleanRecord, 25000);
 
-        await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord, { throwOnError: Boolean(options && options.throwOnError) });
+        if (existingTreeUser) {
+            const diffPatch = this.buildRecordPatch(existingTreeUser, cleanRecord);
+            if (Object.keys(diffPatch).length) {
+                await this.patchNode(`${USERS_KEY}/${pid}`, diffPatch);
+            }
+        } else {
+            await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord, { throwOnError: Boolean(options && options.throwOnError) });
+        }
+        await this.syncDerivedNodesFor(pid, cleanRecord, { bothSides: this.isBackendContext() });
         const cleanupTasks = [];
         if (isMatchMutation) {
             if (!Array.isArray(cleanRecord.matchedHistory) || cleanRecord.matchedHistory.length === 0) {
@@ -1626,26 +2106,6 @@ const CloudSync = {
         });
     },
 
-    async clearAll() {
-        this.tree = {};
-        this.lastPushedUsersJson = {};
-        this.pendingUsers = {};
-        this.deletedUsers = {};
-        this.unmatchedPairs = {};
-        try {
-            localStorage.removeItem(PENDING_USERS_SYNC_KEY);
-            localStorage.removeItem(DELETED_USERS_SYNC_KEY);
-            localStorage.removeItem(UNMATCHED_PAIRS_SYNC_KEY);
-            Object.keys(localStorage).forEach(k => {
-                if (k.startsWith('yuelao_custom_act_lock_')) {
-                    localStorage.removeItem(k);
-                }
-            });
-        } catch (e) {}
-        try {
-            await fetch(`${this.dbUrl}/.json`, { method: 'DELETE' });
-        } catch (e) {}
-    }
 };
 
 // 4. 唯一玩家 ID 分配器（男 10001 起 / 女 20001 起）

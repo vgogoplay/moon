@@ -587,3 +587,14 @@ function submitAdminReportReply(e) {
     renderAdminAll();
     appendLog(`<span class="text-sky-300">[回覆問題回報]</span> 已回覆玩家 <strong>${target.contact || '匿名玩家'}</strong> 的問題單號 <strong>${target.id}</strong>（狀態：${target.status}），已同步至前台！`);
 }
+
+// 資料維護工具：手動回填公開索引與配對節點（可重複執行，結果一致）
+function runBackfillDerivedNodes() {
+    if (typeof CloudSync === 'undefined' || typeof CloudSync.backfillDerivedNodes !== 'function') {
+        alert('雲端同步模組尚未載入，請重新整理後再試。');
+        return;
+    }
+    CloudSync.backfillDerivedNodes()
+        .then(r => alert(`✅ 公開索引回填完成：會員 ${r.users} 位，寫入 ${r.writes} 筆（已一致的資料不會重複寫入）`))
+        .catch(e => alert('回填失敗：' + (e && e.message ? e.message : e)));
+}

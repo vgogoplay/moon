@@ -579,7 +579,7 @@ function renderFriendsSection() {
                             <div class="flex items-center gap-1.5 min-w-0">
                                 <h4 class="font-bold text-[#8f4452] text-sm truncate">${friend.nickname} <span class="text-[11px] font-normal text-[#c96a7b]">(${friend.profile.gender || '保密'})</span></h4>
                                 ${canManualUnfriend ? `
-                                    <button type="button" onclick="event.stopPropagation(); openManualUnfriendModal('${friend.id}')" title="手動解除好友（配對第二天起開放）" aria-label="解除好友 ${friend.nickname}" class="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-200 hover:border-rose-500 flex items-center justify-center text-[11px] font-bold leading-none transition shrink-0">
+                                    <button type="button" onclick="event.stopPropagation(); openManualUnfriendModal('${yuelaoEscapeHtml(friend.id)}')" title="手動解除好友（配對第二天起開放）" aria-label="解除好友 ${friend.nickname}" class="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-200 hover:border-rose-500 flex items-center justify-center text-[11px] font-bold leading-none transition shrink-0">
                                         ✕
                                     </button>
                                 ` : ''}
@@ -788,7 +788,7 @@ function renderSingleChatBubbleHtml(m, friend) {
         return `
             <div class="text-center my-2">
                 <span class="inline-block px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-[#8f4452] leading-relaxed">
-                    ${m.text}
+                    ${yuelaoEscapeHtml(m.text)}
                 </span>
             </div>
         `;
@@ -798,9 +798,9 @@ function renderSingleChatBubbleHtml(m, friend) {
         : (m.sender === 'me');
     return `
         <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'}">
-            ${!isMe ? `<span class="text-[10px] text-[#c96a7b] font-semibold mb-0.5 px-1">${friend.nickname}</span>` : ''}
+            ${!isMe ? `<span class="text-[10px] text-[#c96a7b] font-semibold mb-0.5 px-1">${yuelaoEscapeHtml(friend.nickname)}</span>` : ''}
             <div class="max-w-[80%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-2xs ${isMe ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white rounded-br-xs' : 'bg-white border border-pink-100 text-gray-700 rounded-bl-xs'}">
-                ${m.text}
+                ${yuelaoEscapeHtml(m.text)}
             </div>
             <span class="text-[10px] text-gray-400 mt-1 px-1">${m.time || ''}</span>
         </div>
@@ -848,6 +848,13 @@ function ensureChatBoxScrollPagination(chatBox) {
 }
 
 function renderActiveFriendWorkspace() {
+    // 方案 C：只對目前開啟的聊天室建立即時 SSE（功能開關關閉時為 no-op）
+    if (typeof CloudSync !== 'undefined' && CloudSync.isPlayerSyncMode && CloudSync.isPlayerSyncMode()) {
+        const activeId = appState && appState.activeFriendId ? String(appState.activeFriendId) : '';
+        CloudSync.setActiveChatRoom(activeId && appState.playerId
+            ? `${CHATS_KEY}/${ChatStore.getPairKey(appState.playerId, activeId)}`
+            : '');
+    }
     const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
     if (!friend) return;
 
@@ -982,9 +989,9 @@ function renderActiveFriendWorkspace() {
     if (isZeroDays) {
         banner.classList.remove('hidden');
         if (friend.myContinue === true && friend.partnerContinue !== true) {
-            statusText.innerHTML = `💖 你已按下「繼續配對」，聊天室仍暫停發話，正在等待 <strong>${friend.nickname}</strong> 按下繼續（雙方都按下後將再延後 7 天並重新開放聊天）...`;
+            statusText.innerHTML = `💖 你已按下「繼續配對」，聊天室仍暫停發話，正在等待 <strong>${yuelaoEscapeHtml(friend.nickname)}</strong> 按下繼續（雙方都按下後將再延後 7 天並重新開放聊天）...`;
         } else if (friend.partnerContinue === true && friend.myContinue !== true) {
-            statusText.innerHTML = `💌 <strong>${friend.nickname}</strong> 已經按下「繼續配對」！只要你也按下「繼續配對」，雙方將再延後 7 天並繼續聊天！`;
+            statusText.innerHTML = `💌 <strong>${yuelaoEscapeHtml(friend.nickname)}</strong> 已經按下「繼續配對」！只要你也按下「繼續配對」，雙方將再延後 7 天並繼續聊天！`;
         } else {
             statusText.textContent = '目前聊天室已暫停發話；兩個人都按「繼續配對」即可再延後 7 天並繼續聊天，其中一人放棄則兩邊好友名單清空刪除。';
         }

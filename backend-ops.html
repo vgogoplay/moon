@@ -179,6 +179,20 @@
                 </div>
                 <div id="repairMatchesResult" class="hidden space-y-2.5"></div>
             </div>
+            <div class="p-3.5 rounded-xl bg-white border border-amber-200 space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <div class="text-xs font-bold text-amber-900">🧩 公開索引與配對節點回填</div>
+                        <p class="text-[11px] text-amber-800/80 mt-0.5">
+                            後台載入時會自動檢查並補齊；此按鈕為備用，可重複執行，已一致的資料不會重複寫入。
+                        </p>
+                    </div>
+                    <button type="button" onclick="runBackfillDerivedNodes()"
+                        class="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-2xs transition shrink-0">
+                        🧩 手動回填
+                    </button>
+                </div>
+            </div>
         </div>
 
         <!-- ==================== 4. 🧪 互動流程測試工具 ==================== -->
@@ -402,12 +416,12 @@
 
     <!-- 前後台共用核心層 -->
     <script src="shared/schedule.js?v=20261118av"></script>
-    <script src="shared/schema.js?v=20261117a"></script>
-    <script src="shared/cloud-store.js?v=20261119e"></script>
+    <script src="shared/schema.js?v=20261119l"></script>
+    <script src="shared/cloud-store.js?v=20261119l"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261119e"></script>
-    <script src="backend/matching.js?v=20261119d"></script>
-    <script src="backend/ops.js?v=20261118v"></script>
+    <script src="backend/matching.js?v=20261119f"></script>
+    <script src="backend/ops.js?v=20261119l"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261119c"></script>
 </body>

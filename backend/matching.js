@@ -925,7 +925,7 @@ function adminTriggerConfessionForPlayer() {
 
     const totalFriendCount = partnerIdSet.size;
     if (totalFriendCount < 2) {
-        alert(`⚠️ 玩家「${targetUser.nickname || targetId} (ID:${targetId})」目前僅有 ${totalFriendCount} 位好友。\n\n必須擁有「2 位以上好友」才能觸發心動抉擇！\n（可先為該玩家配對或使用下方「連動新增一位好友」加至 2 位以上好友）`);
+        alert(`⚠️ 玩家「${yuelaoEscapeHtml(targetUser.nickname || targetId)} (ID:${yuelaoEscapeHtml(targetId)})」目前僅有 ${totalFriendCount} 位好友。\n\n必須擁有「2 位以上好友」才能觸發心動抉擇！\n（可先為該玩家配對或使用下方「連動新增一位好友」加至 2 位以上好友）`);
         return;
     }
 
@@ -951,10 +951,10 @@ function adminTriggerConfessionForPlayer() {
     triggerFrontendTestEvent('ADVANCE_CONFESSION_2000', targetId, { triggerToken });
 
     if (statusEl) {
-        statusEl.innerHTML = `<span class="text-emerald-700 font-bold">✅ 已於 ${new Date().toLocaleTimeString('zh-TW')} 為玩家「${targetUser.nickname || targetId} (ID:${targetId})」（目前 ${totalFriendCount} 位好友）觸發心動抉擇！</span>`;
+        statusEl.innerHTML = `<span class="text-emerald-700 font-bold">✅ 已於 ${new Date().toLocaleTimeString('zh-TW')} 為玩家「${yuelaoEscapeHtml(targetUser.nickname || targetId)} (ID:${yuelaoEscapeHtml(targetId)})」（目前 ${totalFriendCount} 位好友）觸發心動抉擇！</span>`;
     }
     appendLog(`<span class="text-pink-300">[指定觸發心動抉擇]</span> 已為玩家 <strong>${targetUser.nickname || targetId} (ID:${targetId})</strong>（共 ${totalFriendCount} 位好友）直接觸發 20:00 心動抉擇！`);
-    alert(`💘 已成功為玩家「${targetUser.nickname || targetId} (ID:${targetId})」觸發心動抉擇！\n\n目前好友數：${totalFriendCount} 位\n該玩家前台（含目前在線或稍後開啟／重新整理）將立即彈出心動抉擇視窗。`);
+    alert(`💘 已成功為玩家「${yuelaoEscapeHtml(targetUser.nickname || targetId)} (ID:${yuelaoEscapeHtml(targetId)})」觸發心動抉擇！\n\n目前好友數：${totalFriendCount} 位\n該玩家前台（含目前在線或稍後開啟／重新整理）將立即彈出心動抉擇視窗。`);
 }
 
 function triggerFrontendTestEvent(type, targetPlayerId = '', extraPayload = {}) {
