@@ -1188,7 +1188,7 @@ const CloudSync = {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 15000);
         try {
-            const res = await fetch(`${this.dbUrl}/.json`, {
+            const res = await fetch(`${this.dbUrl}/.json${this.authQuery()}`, {
                 method: 'GET',
                 cache: 'no-store',
                 signal: controller.signal
@@ -1299,7 +1299,7 @@ const CloudSync = {
         // 回傳 true（成功）、false（網路失敗）或 'raced'（期間有本地寫入，結果不可信）
         const epochBefore = this.writeEpoch;
         try {
-            const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json`, {
+            const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json${this.authQuery()}`, {
                 method: 'GET',
                 cache: 'no-store'
             });
@@ -1352,7 +1352,7 @@ const CloudSync = {
     },
 
     // ===================== 方案 C：玩家端混合同步（功能開關，預設關閉） =====================
-    PLAYER_SYNC_ENABLED: false,
+    PLAYER_SYNC_ENABLED: true,
     PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch'],
     PLAYER_COLD_NODES: ['yuelao_custom_activities', 'yuelao_banned_rules', 'yuelao_force_matches', 'yuelao_unmatched_pairs', 'yuelao_activity_reg_history'],
     PLAYER_HOT_INTERVAL_MS: 15000,
@@ -1364,6 +1364,11 @@ const CloudSync = {
 
     isPlayerSyncMode() {
         if (this.isBackendContext()) return false;
+        // 緊急回退：網址加上 ?syncMode=off 可改回舊版完整下載模式（除錯用）
+        try {
+            if (typeof window !== 'undefined' && window.location
+                && new URLSearchParams(window.location.search).get('syncMode') === 'off') return false;
+        } catch (e) {}
         if (this.PLAYER_SYNC_ENABLED === true) return true;
         // 測試用：網址加上 ?syncMode=c 即啟用（不影響其他使用者）
         try {
@@ -1390,7 +1395,7 @@ const CloudSync = {
         const headers = { 'X-Firebase-ETag': 'true' };
         if (this.etagCache[path]) headers['If-None-Match'] = this.etagCache[path];
         try {
-            const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json`, {
+            const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json${this.authQuery()}`, {
                 method: 'GET',
                 headers,
                 cache: 'no-store'
@@ -1546,7 +1551,7 @@ const CloudSync = {
                 this.scheduleStreamFlush(60);
             } catch (err) {}
         };
-        const es = new EventSource(`${this.dbUrl}/${this.encodePath(roomPath)}.json`);
+        const es = new EventSource(`${this.dbUrl}/${this.encodePath(roomPath)}.json${this.authQuery()}`);
         es.addEventListener('put', handler);
         es.addEventListener('patch', handler);
         es.onopen = () => {
@@ -1608,7 +1613,7 @@ const CloudSync = {
             try { this.eventSource.close(); } catch (e) {}
         }
         try {
-            const es = new EventSource(`${this.dbUrl}/.json`);
+            const es = new EventSource(`${this.dbUrl}/.json${this.authQuery()}`);
             const handleEvent = (e) => {
                 if (this.inFlightWrites > 0) {
                     // 寫入中收到的遠端事件不可直接丟棄：記錄變動路徑，寫入結束後只重新抓取這些節點
@@ -1665,6 +1670,9 @@ const CloudSync = {
 
     async init(onUpdate) {
         this.onUpdateCallback = onUpdate || null;
+        if (typeof yuelaoAuth !== 'undefined' && yuelaoAuth && typeof yuelaoAuth.init === 'function') {
+            await yuelaoAuth.init();
+        }
         if (this.isPlayerSyncMode()) return this.initPlayerScopedSync();
         let loadedOk = await this.fetchFullTree();
         if (!loadedOk) {
@@ -1703,6 +1711,13 @@ const CloudSync = {
         });
     },
 
+    // 階段 C：有登入權杖時附加到請求網址（未啟用匿名登入時為空字串，行為與之前相同）
+    authQuery() {
+        const token = (typeof yuelaoAuth !== 'undefined' && yuelaoAuth && typeof yuelaoAuth.getIdTokenSync === 'function')
+            ? yuelaoAuth.getIdTokenSync() : '';
+        return token ? `?auth=${encodeURIComponent(token)}` : '';
+    },
+
     encodePath(path) {
         return String(path || '').split('/').filter(Boolean).map(seg => encodeURIComponent(seg)).join('/');
     },
@@ -1714,7 +1729,7 @@ const CloudSync = {
         this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
-            const res = await fetch(`${this.dbUrl}/${encoded}.json`, {
+            const res = await fetch(`${this.dbUrl}/${encoded}.json${this.authQuery()}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(value)
@@ -1748,7 +1763,7 @@ const CloudSync = {
         this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
-            await fetch(`${this.dbUrl}/${encoded}.json`, {
+            await fetch(`${this.dbUrl}/${encoded}.json${this.authQuery()}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(patchObj)
@@ -1904,7 +1919,7 @@ const CloudSync = {
         this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
-            await fetch(`${this.dbUrl}/${encoded}.json`, {
+            await fetch(`${this.dbUrl}/${encoded}.json${this.authQuery()}`, {
                 method: 'DELETE'
             });
         } catch (e) {
