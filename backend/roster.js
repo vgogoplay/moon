@@ -792,7 +792,11 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
         { value: '', label: '請選擇' },
         { value: 'all', label: '全部' },
         { value: 'gender:男', label: '男生' },
-        { value: 'gender:女', label: '女生' }
+        { value: 'gender:女', label: '女生' },
+        { value: 'region:北部', label: '北部' },
+        { value: 'region:中部', label: '中部' },
+        { value: 'region:南部', label: '南部' },
+        { value: 'region:東部', label: '東部' }
     ];
     filterSelect.innerHTML = dynamicFilterOpts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
     if (dynamicFilterOpts.some(o => o.value === prevFilterVal)) {
@@ -806,6 +810,11 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
     const filteredUsers = users.filter(u => {
         if (rosterFilter === 'gender:男' && u.gender !== '男') return false;
         if (rosterFilter === 'gender:女' && u.gender !== '女') return false;
+        if (rosterFilter.startsWith('region:')) {
+            const targetRegion = rosterFilter.slice('region:'.length);
+            const userRegion = u.region || (typeof inferRegionByCity === 'function' ? inferRegionByCity(u.city) : '');
+            if (userRegion !== targetRegion) return false;
+        }
         if (!kw) return true;
 
         const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : (u.registeredSession ? [u.registeredSession] : []);

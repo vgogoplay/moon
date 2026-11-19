@@ -169,9 +169,14 @@ function renderAdminSharedShell() {
                         🚫 帳號或密碼錯誤，無法訪問後台管理中心！
                     </div>
 
-                    <button type="submit" class="w-full py-3 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-sm font-bold shadow-md hover:opacity-95 transition">
-                        🔓 登入後台管理中心
-                    </button>
+                    <div class="space-y-2.5">
+                        <button type="submit" class="w-full py-3 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-sm font-bold shadow-md hover:opacity-95 transition">
+                            🔓 登入後台管理中心
+                        </button>
+                        <a href="index.html" class="flex items-center justify-center w-full py-2.5 rounded-xl bg-white border border-pink-200 text-[#8f4452] text-sm font-bold shadow-sm hover:bg-pink-50 transition">
+                            🏠 返回前台首頁
+                        </a>
+                    </div>
                 </form>
             </div>
         </div>
