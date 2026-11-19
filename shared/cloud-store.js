@@ -2568,6 +2568,28 @@ const CloudSync = {
             return;
         }
         const baseUser = (freshBase && typeof freshBase === 'object') ? freshBase : null;
+        
+        // 核心修復：寫入前強制將最新雲端的配對名單合併進 cleanRecord，徹底斷絕舊網頁覆蓋好友名單的問題
+        if (baseUser && !isMatchMutation) {
+            const latestCloudHist = this.normalizeMatchedHistoryList(baseUser.matchedHistory);
+            cleanRecord.matchedHistory = this.normalizeMatchedHistoryList([...latestCloudHist, ...cleanRecord.matchedHistory])
+                .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId) && !this.isRogueCustomMatchEntry(h));
+                
+            const rawPrimaryId = String(baseUser.matchedWithId || cleanRecord.matchedWithId || '').trim();
+            if (rawPrimaryId && !this.isPairRecentlyUnmatched(pid, rawPrimaryId)) {
+                cleanRecord.matchedSession = baseUser.matchedSession || cleanRecord.matchedSession || null;
+                cleanRecord.matchedWithId = rawPrimaryId;
+                cleanRecord.matchedWithName = baseUser.matchedWithName || cleanRecord.matchedWithName || null;
+                cleanRecord.matchedAt = baseUser.matchedAt || cleanRecord.matchedAt || null;
+            } else {
+                const fallbackPrimary = cleanRecord.matchedHistory[cleanRecord.matchedHistory.length - 1] || null;
+                cleanRecord.matchedSession = fallbackPrimary ? (fallbackPrimary.session || null) : null;
+                cleanRecord.matchedWithId = fallbackPrimary ? (fallbackPrimary.partnerId || null) : null;
+                cleanRecord.matchedWithName = fallbackPrimary ? (fallbackPrimary.partnerName || null) : null;
+                cleanRecord.matchedAt = fallbackPrimary ? (fallbackPrimary.matchedAt || null) : null;
+            }
+        }
+
         // 不完整的記錄（例如組合出來的配對對象）不可新建整筆節點
         if (!baseUser && !hasInput('matchedHistory')) return;
         if (baseUser) {
