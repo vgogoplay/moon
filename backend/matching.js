@@ -464,7 +464,7 @@ async function persistRepairedUsersToLocalAndCloud(users, affectedUserIds, expec
             targetUsers.map(async (uObj) => {
                 const pid = String(uObj.id).trim();
                 const encoded = CloudSync.encodePath(`${USERS_KEY}/${pid}`);
-                const verifyRes = await fetch(`${CloudSync.dbUrl}/${encoded}.json`, { method: 'GET', cache: 'no-store' });
+                const verifyRes = await fetch(`${CloudSync.dbUrl}/${encoded}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' });
                 if (!verifyRes.ok) {
                     throw new Error(`回讀驗證失敗 (ID:${pid}, HTTP ${verifyRes.status})`);
                 }
@@ -1767,7 +1767,7 @@ async function claimAndRunAutoSchedule2000(dateKey, dayOfWeek) {
         if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl) {
             try {
                 const encodedLogPath = CloudSync.encodePath(AUTO_RUN_LOG_KEY);
-                const res = await fetch(`${CloudSync.dbUrl}/${encodedLogPath}.json`, { method: 'GET', cache: 'no-store' });
+                const res = await fetch(`${CloudSync.dbUrl}/${encodedLogPath}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' });
                 if (res.ok) {
                     const remoteMap = await res.json();
                     if (remoteMap && typeof remoteMap === 'object' && remoteMap[dateKey]) {

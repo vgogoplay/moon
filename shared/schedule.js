@@ -815,6 +815,13 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     return { executed: true, actName: act.name, pairCount, unmatchedCount };
 }
 
+// 流量修復：前台只做精準單節點刷新，嚴禁整包 /.json；後台維持原行為
+async function refreshCustomActFresh(isFrontendCaller) {
+    if (isFrontendCaller && typeof CloudSync.refreshPlayerFresh === 'function') return CloudSync.refreshPlayerFresh();
+    if (typeof CloudSync.fetchFullTree === 'function') return CloudSync.fetchFullTree();
+    return false;
+}
+
 async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, isFrontendCaller = false) {
     const lockNodeKey = makeCustomActLockNodeKey(activityId, matchTs);
     let claimedSuccessfully = false;
@@ -851,8 +858,8 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
             const encodedLockPath = CloudSync.encodePath(`${CUSTOM_ACT_CLOUD_LOCKS_NODE}/${lockNodeKey}`);
 
             const [actRes, lockRes] = await Promise.all([
-                fetch(`${CloudSync.dbUrl}/${encodedActPath}.json`, { method: 'GET', cache: 'no-store' }),
-                fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json`, { method: 'GET', cache: 'no-store' })
+                fetch(`${CloudSync.dbUrl}/${encodedActPath}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' }),
+                fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' })
             ]);
 
             // 若查詢雲端鎖失敗（網路逾時或離線），允許 12 秒後重試而不永久鎖死
@@ -878,7 +885,7 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
                     } catch (e) {}
                 }
                 if (typeof CloudSync.fetchFullTree === 'function') {
-                    await CloudSync.fetchFullTree();
+                    await refreshCustomActFresh(isFrontendCaller);
                 }
                 if (typeof renderAdminAll === 'function') renderAdminAll();
                 if (typeof refreshAllUI === 'function') refreshAllUI();
@@ -896,7 +903,7 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
 
             await new Promise(resolve => setTimeout(resolve, 180));
 
-            const verifyRes = await fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json`, { method: 'GET', cache: 'no-store' });
+            const verifyRes = await fetch(`${CloudSync.dbUrl}/${encodedLockPath}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' });
             if (!verifyRes.ok) {
                 return;
             }
@@ -905,7 +912,7 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
                 claimedSuccessfully = true;
                 try { localStorage.setItem(lockKey, `DONE_${Date.now()}`); } catch (e) {}
                 if (typeof CloudSync.fetchFullTree === 'function') {
-                    await CloudSync.fetchFullTree();
+                    await refreshCustomActFresh(isFrontendCaller);
                 }
                 if (typeof renderAdminAll === 'function') renderAdminAll();
                 if (typeof refreshAllUI === 'function') refreshAllUI();
@@ -922,7 +929,7 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
                 waitTries++;
             }
             if (typeof CloudSync.fetchFullTree === 'function') {
-                await CloudSync.fetchFullTree();
+                await refreshCustomActFresh(isFrontendCaller);
             }
         } else {
             claimedSuccessfully = true;

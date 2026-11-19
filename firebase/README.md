@@ -61,3 +61,30 @@ Realtime Database → 規則 → 「規則模擬器（Rules Playground）」：
 1. **還原碼機制**：目前 `backupCode` 可由玩家 ID 公開推算，無法作為秘密。需要改為隨機產生的還原碼（以雜湊儲存），並決定舊的 133 位玩家的還原碼如何遷移。
 2. **玩家與帳號的對應（ownerUid）**：決定新裝置如何證明自己是某位玩家，才能讀取該玩家的私有資料與 IG。
 3. **管理員登入**：目前後台是密碼輸入，白名單需要穩定的 UID。建議改用 Firebase 電子郵件登入（免費），管理員帳號的 UID 加入 `yuelao_admin_uids/{uid}: true`。
+
+---
+
+## C2-a 部署順序（管理員 Email 登入 + UID 白名單）
+
+檔案：`firebase/database.rules.C2a.json`。**請依序執行，順序不可對調。**
+
+1. Realtime Database → 資料：新增 `yuelao_admin_uids/wI2NbSH9SKRfar6wckPJqeXcQwq2` = `true`（目前 C1 規則下可寫入）。
+2. 部署網站（update.zip）。舊版後台使用匿名權杖寫入後台節點，先部署網站可避免寫入失敗。
+3. 以管理員 Email 登入後台，確認可正常讀取與操作。
+4. 規則模擬器測試：未驗證寫入 `yuelao_system_batch` 應拒絕；已驗證非白名單 UID 應拒絕；白名單 UID 應允許。
+5. 發佈 `database.rules.C2a.json`。
+6. 前台煙霧測試：註冊、送出聊天、許願、檢舉、配對；後台測試：批次設定、自訂活動建立。
+
+回退：改回 `database.rules.C1.json` 即可（不需改程式）。
+
+---
+
+## 流量與聊天修復（v20261119o）部署順序
+
+檔案：`firebase/database.rules.C1b.json`（C1 + `yuelao_users.backupCode` 索引，供通行碼精準還原）。
+
+1. **先**發佈 `database.rules.C1b.json`（沒有索引時還原會下載整包 yuelao_users，流量爆炸）。
+2. **再**部署網站（update.zip）。
+3. ⚠️ 此包含 C2-a 的管理員 Email 登入程式。部署前必須先在資料庫新增 `yuelao_admin_uids/wI2NbSH9SKRfar6wckPJqeXcQwq2` = `true`，否則後台無法登入。
+
+回退：改回舊規則與舊網站檔案即可。

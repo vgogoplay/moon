@@ -598,3 +598,61 @@ function runBackfillDerivedNodes() {
         .then(r => alert(`✅ 公開索引回填完成：會員 ${r.users} 位，寫入 ${r.writes} 筆（已一致的資料不會重複寫入）`))
         .catch(e => alert('回填失敗：' + (e && e.message ? e.message : e)));
 }
+
+/* ===== 流量修復：資料庫瘦身清理（玩家操作日誌 7 天前 + 已解除配對且超過 7 天的聊天室）===== */
+const DB_CLEANUP_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+function collectDbCleanupTargets() {
+    const cutoff = Date.now() - DB_CLEANUP_RETENTION_MS;
+    const tree = (typeof CloudSync !== 'undefined' && CloudSync.tree) ? CloudSync.tree : {};
+    const opLogs = (tree[PLAYER_OP_LOGS_KEY] && typeof tree[PLAYER_OP_LOGS_KEY] === 'object') ? tree[PLAYER_OP_LOGS_KEY] : {};
+    const opKeys = Object.keys(opLogs).filter(k => Number((opLogs[k] || {}).ts || 0) < cutoff);
+    const unmatched = (tree[UNMATCHED_PAIRS_CLOUD_NODE] && typeof tree[UNMATCHED_PAIRS_CLOUD_NODE] === 'object') ? tree[UNMATCHED_PAIRS_CLOUD_NODE] : {};
+    const chats = (tree[CHATS_KEY] && typeof tree[CHATS_KEY] === 'object') ? tree[CHATS_KEY] : {};
+    const roomKeys = Object.keys(unmatched).filter(pk => {
+        const at = Number((unmatched[pk] || {}).unmatchedAt || 0);
+        return at > 0 && at < cutoff && Boolean(chats[pk]);
+    });
+    return { opKeys, roomKeys };
+}
+
+function previewDbCleanup() {
+    const box = document.getElementById('dbCleanupResult');
+    if (!box) return;
+    const t = collectDbCleanupTargets();
+    const tree = (typeof CloudSync !== 'undefined' && CloudSync.tree) ? CloudSync.tree : {};
+    let freed = 0;
+    t.opKeys.forEach(k => { freed += JSON.stringify(tree[PLAYER_OP_LOGS_KEY][k]).length + k.length; });
+    t.roomKeys.forEach(pk => { freed += JSON.stringify(tree[CHATS_KEY][pk]).length + pk.length; });
+    const totalKB = Math.round(JSON.stringify(tree).length / 1024);
+    box.innerHTML = `預覽：玩家操作日誌 <strong>${t.opKeys.length}</strong> 筆、已解除配對的舊聊天室 <strong>${t.roomKeys.length}</strong> 間，預估可釋放約 <strong>${Math.round(freed / 1024)} KB</strong>（後台目前快取約 ${totalKB} KB）。`;
+    box.classList.remove('hidden');
+}
+
+async function runDbCleanup() {
+    const t = collectDbCleanupTargets();
+    if (!t.opKeys.length && !t.roomKeys.length) {
+        alert('目前沒有需要清理的資料。');
+        return;
+    }
+    if (!confirm(`確定執行清理？\n・玩家操作日誌：${t.opKeys.length} 筆（7 天前）\n・已解除配對的舊聊天室：${t.roomKeys.length} 間\n清理後雲端與本地皆會刪除，無法復原。`)) return;
+    try {
+        if (t.opKeys.length) {
+            const p = {};
+            t.opKeys.forEach(k => { p[k] = null; });
+            await CloudSync.patchNode(PLAYER_OP_LOGS_KEY, p, { throwOnError: true });
+        }
+        if (t.roomKeys.length) {
+            const chatPatch = {};
+            const unPatch = {};
+            t.roomKeys.forEach(pk => { chatPatch[pk] = null; unPatch[pk] = null; });
+            await CloudSync.patchNode(CHATS_KEY, chatPatch, { throwOnError: true });
+            await CloudSync.patchNode(UNMATCHED_PAIRS_CLOUD_NODE, unPatch, { throwOnError: true });
+        }
+        alert('清理完成。');
+        if (typeof renderAdminAll === 'function') renderAdminAll(true);
+        previewDbCleanup();
+    } catch (err) {
+        alert('清理失敗，請稍後重試（已完成的部分不會重複刪除）。');
+    }
+}

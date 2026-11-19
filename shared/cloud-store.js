@@ -1608,64 +1608,9 @@ const CloudSync = {
     },
 
     startRealtimeStream() {
-        if (typeof EventSource === 'undefined') return;
-        if (this.eventSource) {
-            try { this.eventSource.close(); } catch (e) {}
-        }
-        try {
-            const es = new EventSource(`${this.dbUrl}/.json${this.authQuery()}`);
-            const handleEvent = (e) => {
-                if (this.inFlightWrites > 0) {
-                    // 寫入中收到的遠端事件不可直接丟棄：記錄變動路徑，寫入結束後只重新抓取這些節點
-                    this.queueDirtyStreamEvent(e);
-                    return;
-                }
-                try {
-                    const payload = JSON.parse(e.data);
-                    if (!payload) return;
-                    const cleanPath = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
-                    // 若尚未取得完整資料庫快照，收到局部節點事件時改為補拉完整資料庫，避免局部資料覆蓋全站快取
-                    if (!this.hasLoadedFullTree && cleanPath !== '') {
-                        this.fetchFullTree().then(ok => {
-                            if (ok && typeof this.onUpdateCallback === 'function') {
-                                this.onUpdateCallback();
-                            }
-                        });
-                        return;
-                    }
-                    if (e.type === 'patch' && payload.data && typeof payload.data === 'object') {
-                        const base = cleanPath;
-                        Object.keys(payload.data).forEach(k => {
-                            const subPath = base ? `${base}/${k}` : k;
-                            this.applyStreamPatch(subPath, payload.data[k]);
-                        });
-                    } else {
-                        this.applyStreamPatch(payload.path, payload.data);
-                    }
-                    if (!this.isRelevantStreamEvent(e.type, payload)) {
-                        return;
-                    }
-                    const isFastLane = cleanPath.startsWith(CHATS_KEY) || cleanPath.startsWith('yuelao_test_event');
-                    this.scheduleStreamFlush(isFastLane ? 60 : 180);
-                } catch (err) {}
-            };
-            es.onopen = () => {
-                this.updateCloudBadge(true);
-                if (this.sseHadError) {
-                    // 斷線期間可能漏掉事件：重新連上後完整同步一次
-                    this.sseHadError = false;
-                    this.pendingFullResync = true;
-                    this.flushDirtyStreamPaths();
-                }
-            };
-            es.onerror = () => {
-                this.sseHadError = true;
-                this.updateCloudBadge(false);
-            };
-            es.addEventListener('put', handleEvent);
-            es.addEventListener('patch', handleEvent);
-            this.eventSource = es;
-        } catch (e) {}
+        // 流量修復：不再開啟 /.json 全庫 SSE；後台改為每 15 秒輕量輪詢（索引＋熱門節點，ETag 命中時不下載）
+        if (this.backendPollTimer) return;
+        this.backendPollTimer = setInterval(() => this.pollBackendLight(), 15000);
     },
 
     async init(onUpdate) {
@@ -1703,10 +1648,7 @@ const CloudSync = {
 
         document.addEventListener('visibilitychange', async () => {
             if (!document.hidden && this.inFlightWrites === 0) {
-                const ok = await this.fetchFullTree();
-                if (ok && typeof this.onUpdateCallback === 'function') {
-                    this.onUpdateCallback();
-                }
+                await this.pollBackendLight();
             }
         });
     },
@@ -1722,6 +1664,87 @@ const CloudSync = {
         return String(path || '').split('/').filter(Boolean).map(seg => encodeURIComponent(seg)).join('/');
     },
 
+    // ===== 流量修復：精準單節點讀取（嚴禁前台請求根節點 /.json）=====
+    async getNodeOnce(path) {
+        // 回傳節點值；節點不存在為 null；網路錯誤為 undefined（呼叫端不可把 undefined 當作「不存在」）
+        try {
+            const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json${this.authQuery()}`, { cache: 'no-store' });
+            if (!res.ok) return undefined;
+            return await res.json();
+        } catch (e) {
+            return undefined;
+        }
+    },
+
+    async refreshPlayerFresh() {
+        const me = this.playerSelfId();
+        const paths = [USER_INDEX_KEY, ...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES, ...(me ? [`${USERS_KEY}/${me}`] : []), ...this.playerDynamicPaths()];
+        await this.fetchPlayerPaths(paths);
+        this.composePlayerUsers();
+        this.chatsTreeVersion++;
+        this.applyTreeToLocalStorage();
+        if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+        return true;
+    },
+
+    // 通行碼還原：以 orderBy 精準查詢單一玩家（需 yuelao_users 的 backupCode 索引）
+    async findUserByBackupCode(code) {
+        const c = String(code || '').trim().toUpperCase();
+        if (!c) return null;
+        const q = `orderBy=${encodeURIComponent('"backupCode"')}&equalTo=${encodeURIComponent('"' + c + '"')}&limitToFirst=1`;
+        const auth = this.authQuery();
+        const url = `${this.dbUrl}/${USERS_KEY}.json?${q}${auth ? '&' + auth.slice(1) : ''}`;
+        try {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) return null;
+            const data = await res.json();
+            if (!data || typeof data !== 'object') return null;
+            const key = Object.keys(data)[0];
+            const rec = data[key];
+            if (!rec || typeof rec !== 'object') return null;
+            const uid = String(rec.id || key);
+            this.applyStreamPatch(`${USERS_KEY}/${uid}`, rec);
+            return { ...rec, id: uid };
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // ===== 流量修復：寫入遇 401/403 或網路錯誤時，刷新權杖後自動重試一次 =====
+    async refreshAuthForRetry() {
+        if (typeof yuelaoAuth === 'undefined' || !yuelaoAuth) return;
+        try {
+            if (yuelaoAuth.isBackendPage() && yuelaoAuth.adminSession) {
+                await yuelaoAuth.refreshAdminSession();
+            } else {
+                await yuelaoAuth.refreshSession();
+            }
+        } catch (e) {
+            try { await yuelaoAuth.signInAnonymously(); } catch (err) {}
+        }
+    },
+
+    async writeRequest(buildInit, buildUrl) {
+        let res = null;
+        try { res = await fetch(buildUrl(), buildInit()); } catch (e) { res = null; }
+        if (res && (res.ok || (res.status !== 401 && res.status !== 403))) return res;
+        await this.refreshAuthForRetry();
+        return fetch(buildUrl(), buildInit());
+    },
+
+    // ===== 流量修復：後台輕量輪詢（取代 /.json 全庫 SSE）=====
+    async pollBackendLight() {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (this.inFlightWrites > 0) return;
+        const paths = Array.from(new Set([USER_INDEX_KEY, ...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES]));
+        const results = await Promise.all(paths.map(p => this.conditionalGetNode(p).then(r => ({ p, r }))));
+        let changed = false;
+        results.forEach(({ p, r }) => {
+            if (r.status === 'changed') { this.applyStreamPatch(p, r.data); changed = true; }
+        });
+        if (changed && typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+    },
+
     async putNode(path, value, options = {}) {
         this.applyStreamPatch(path, value);
         this.inFlightWrites++;
@@ -1729,11 +1752,10 @@ const CloudSync = {
         this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
-            const res = await fetch(`${this.dbUrl}/${encoded}.json${this.authQuery()}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(value)
-            });
+            const res = await this.writeRequest(
+                () => ({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
+                () => `${this.dbUrl}/${encoded}.json${this.authQuery()}`
+            );
             if (!res.ok) {
                 throw new Error(`HTTP ${res.status}`);
             }
@@ -1751,7 +1773,7 @@ const CloudSync = {
         }
     },
 
-    async patchNode(path, patchObj) {
+    async patchNode(path, patchObj, options = {}) {
         if (!patchObj || typeof patchObj !== 'object') return;
         const cleanBase = String(path || '').replace(/^\/+|\/+$/g, '');
         Object.entries(patchObj).forEach(([k, v]) => {
@@ -1763,13 +1785,16 @@ const CloudSync = {
         this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
-            await fetch(`${this.dbUrl}/${encoded}.json${this.authQuery()}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(patchObj)
-            });
+            const res = await this.writeRequest(
+                () => ({ method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patchObj) }),
+                () => `${this.dbUrl}/${encoded}.json${this.authQuery()}`
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return true;
         } catch (e) {
             console.warn('CloudSync patchNode 同步失敗', path, e);
+            if (options && options.throwOnError) throw e;
+            return false;
         } finally {
             this.settleInFlightWrite();
             this.writeEpoch++;
@@ -1919,9 +1944,11 @@ const CloudSync = {
         this.refreshCloudBadge();
         try {
             const encoded = this.encodePath(path);
-            await fetch(`${this.dbUrl}/${encoded}.json${this.authQuery()}`, {
-                method: 'DELETE'
-            });
+            const res = await this.writeRequest(
+                () => ({ method: 'DELETE' }),
+                () => `${this.dbUrl}/${encoded}.json${this.authQuery()}`
+            );
+            if (!res.ok) console.warn('CloudSync deleteNode HTTP', res.status, path);
         } catch (e) {
             console.warn('CloudSync deleteNode 同步失敗', path, e);
         } finally {
@@ -2031,10 +2058,16 @@ const CloudSync = {
         this.lastPushedUsersJson[pid] = serialized;
         this.setSharedPendingUser(pid, cleanRecord, 25000);
 
-        if (existingTreeUser) {
-            const diffPatch = this.buildRecordPatch(existingTreeUser, cleanRecord);
+        // 寫入前以雲端最新單節點為基準（玩家端）；只 PATCH 差異欄位，避免舊快取整包覆寫 matchedHistory
+        let baseUser = existingTreeUser;
+        if (!this.isBackendContext()) {
+            const fresh = await this.getNodeOnce(`${USERS_KEY}/${pid}`);
+            if (fresh !== undefined) baseUser = (fresh && typeof fresh === 'object') ? fresh : null;
+        }
+        if (baseUser) {
+            const diffPatch = this.buildRecordPatch(baseUser, cleanRecord);
             if (Object.keys(diffPatch).length) {
-                await this.patchNode(`${USERS_KEY}/${pid}`, diffPatch);
+                await this.patchNode(`${USERS_KEY}/${pid}`, diffPatch, { throwOnError: Boolean(options && options.throwOnError) });
             }
         } else {
             await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord, { throwOnError: Boolean(options && options.throwOnError) });
@@ -2834,7 +2867,21 @@ const ChatStore = {
         this.saveAll(all);
         
         if (typeof CloudSync !== 'undefined') {
-            CloudSync.putNode(`${CHATS_KEY}/${key}/${savedMsg.id}`, savedMsg);
+            const sendPath = `${CHATS_KEY}/${key}/${savedMsg.id}`;
+            CloudSync.putNode(sendPath, savedMsg, { throwOnError: true }).catch(() => {
+                // 寫入失敗（權杖刷新後仍失敗）：撤回樂觀顯示的假訊息，並通知畫面
+                try {
+                    const cur = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
+                    if (cur && Array.isArray(cur[key])) {
+                        cur[key] = cur[key].filter(m => m && m.id !== savedMsg.id);
+                        this.saveAll(cur);
+                    }
+                } catch (e) {}
+                CloudSync.applyStreamPatch(sendPath, null);
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('chat-send-failed', { detail: { key, msgId: savedMsg.id } }));
+                }
+            });
             removedIds.forEach(delId => {
                 CloudSync.deleteNode(`${CHATS_KEY}/${key}/${delId}`);
             });

@@ -368,8 +368,8 @@ function renderMyIssueReportsList() {
 }
 
 async function refreshMyIssueReports() {
-    if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchFullTree === 'function') {
-        await CloudSync.fetchFullTree();
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.refreshPlayerFresh === 'function') {
+        await CloudSync.refreshPlayerFresh();
     }
     markMyReportRepliesAsRead();
     renderMyIssueReportsList();
@@ -1840,3 +1840,9 @@ function submitEveningConfession() {
         trimFortuneGridTo5();
     });
 })();
+
+// 流量修復：訊息寫入最終失敗時，明確提示（假訊息已由 ChatStore 撤回）
+window.addEventListener('chat-send-failed', () => {
+    showMiniNotice('⚠️ 訊息傳送失敗，請重試', '訊息未送達雲端，已撤回顯示，請重新輸入後再送出。');
+    try { renderActiveFriendWorkspace(); } catch (e) {}
+});

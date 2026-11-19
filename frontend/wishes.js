@@ -354,8 +354,8 @@ function handleHeaderAddWishClick() {
 }
 
 async function refreshWishWallManual() {
-    if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchFullTree === 'function' && CloudSync.inFlightWrites === 0) {
-        await CloudSync.fetchFullTree();
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchPlayerPaths === 'function' && CloudSync.inFlightWrites === 0) {
+        await CloudSync.fetchPlayerPaths([WISH_WALL_KEY]);
     }
     lastWishWallRenderSig = '';
     renderWishWallTab(true);
@@ -459,7 +459,7 @@ async function submitCreateWishPost(e) {
         if (typeof CloudSync !== 'undefined' && CloudSync.dbUrl && CloudSync.inFlightWrites === 0) {
             try {
                 const encodedWishPath = CloudSync.encodePath(WISH_WALL_KEY);
-                const res = await fetch(`${CloudSync.dbUrl}/${encodedWishPath}.json`, { method: 'GET', cache: 'no-store' });
+                const res = await fetch(`${CloudSync.dbUrl}/${encodedWishPath}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' });
                 if (res.ok) {
                     const remoteData = await res.json();
                     const remoteArr = CloudSync.mapToArray(remoteData)

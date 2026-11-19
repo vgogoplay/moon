@@ -144,13 +144,13 @@ function renderAdminSharedShell() {
                     </div>
                     <p class="text-[11px] tracking-[0.22em] text-[#c96a7b] font-serif-jp pt-1">YUELAO ADMIN ACCESS</p>
                     <h2 class="text-xl font-bold font-serif-jp text-[#8f4452]">月老牽線計畫・後台驗證</h2>
-                    <p class="text-xs text-gray-500">請輸入管理員帳號與密碼以進入後台管理中心</p>
+                    <p class="text-xs text-gray-500">請輸入管理員 Email 與密碼以進入後台管理中心</p>
                 </div>
 
                 <form id="adminLoginForm" onsubmit="handleAdminLogin(event)" class="space-y-3.5">
                     <div class="admin-field-box">
-                        <label class="block text-xs font-bold text-[#8f4452] mb-1.5">管理員帳號</label>
-                        <input type="text" id="adminLoginAccount" autocomplete="username" placeholder="請輸入管理員帳號" class="w-full p-2.5 admin-input-box text-sm" required>
+                        <label class="block text-xs font-bold text-[#8f4452] mb-1.5">管理員 Email</label>
+                        <input type="email" id="adminLoginAccount" autocomplete="username" placeholder="請輸入管理員 Email" class="w-full p-2.5 admin-input-box text-sm" required>
                     </div>
                     <div class="admin-field-box">
                         <label class="block text-xs font-bold text-[#8f4452] mb-1.5">管理員密碼</label>

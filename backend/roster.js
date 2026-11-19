@@ -53,31 +53,13 @@ let pendingAdminActionCallback = null;
 let currentDetailModalPlayerId = null;
 
 function requestAdminPasswordForAction(actionLabel, onVerifiedCallback) {
-    const expectedPass = (typeof VALID_ADMIN_PASS !== 'undefined') ? VALID_ADMIN_PASS : 'tff456';
-    const modal = document.getElementById('adminActionPasswordModal');
-    const inputEl = document.getElementById('adminActionPwdInput');
-    const errEl = document.getElementById('adminActionPwdError');
-    const subEl = document.getElementById('adminActionPwdSubtitle');
-
-    if (modal && inputEl) {
-        pendingAdminActionCallback = onVerifiedCallback;
-        if (subEl) subEl.textContent = `執行「${actionLabel}」前，請先輸入後台管理員密碼`;
-        if (errEl) errEl.classList.add('hidden');
-        inputEl.value = '';
-        modal.classList.remove('hidden');
-        setTimeout(() => inputEl.focus(), 50);
+    // C2-a：權限改由 Firebase 管理員登入與資料庫規則保護，不再使用本地寫死的密碼
+    if (typeof isAdminAuthenticated === 'function' && !isAdminAuthenticated()) {
+        alert('請先登入後台管理員帳號');
         return;
     }
-
-    const pwd = prompt(`執行「${actionLabel}」前，請輸入後台管理員密碼：`);
-    if (pwd === null) return;
-    if (pwd !== expectedPass) {
-        alert('🚫 管理員密碼錯誤，無法執行此操作！');
-        return;
-    }
-    if (typeof onVerifiedCallback === 'function') {
-        onVerifiedCallback();
-    }
+    if (!confirm(`確定要執行「${actionLabel}」嗎？`)) return;
+    if (typeof onVerifiedCallback === 'function') onVerifiedCallback();
 }
 
 function closeAdminActionPasswordModal() {
@@ -92,25 +74,9 @@ function closeAdminActionPasswordModal() {
 
 function submitAdminActionPassword(e) {
     if (e) e.preventDefault();
-    const expectedPass = (typeof VALID_ADMIN_PASS !== 'undefined') ? VALID_ADMIN_PASS : 'tff456';
-    const inputEl = document.getElementById('adminActionPwdInput');
-    const errEl = document.getElementById('adminActionPwdError');
-    const pwd = inputEl ? inputEl.value : '';
-
-    if (pwd !== expectedPass) {
-        if (errEl) errEl.classList.remove('hidden');
-        if (inputEl) {
-            inputEl.value = '';
-            inputEl.focus();
-        }
-        return;
-    }
-
     const cb = pendingAdminActionCallback;
     closeAdminActionPasswordModal();
-    if (typeof cb === 'function') {
-        cb();
-    }
+    if (typeof cb === 'function') cb();
 }
 
 function closePlayerDetailModal() {

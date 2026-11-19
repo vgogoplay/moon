@@ -700,7 +700,7 @@ async function checkSinglePlayerMailReadStatusDaily(options = {}) {
     if (!skipRemoteFetch && typeof CloudSync !== 'undefined' && CloudSync.dbUrl && CloudSync.inFlightWrites === 0) {
         try {
             const encodedMailPath = CloudSync.encodePath(MAILBOX_KEY);
-            const res = await fetch(`${CloudSync.dbUrl}/${encodedMailPath}.json`, { method: 'GET', cache: 'no-store' });
+            const res = await fetch(`${CloudSync.dbUrl}/${encodedMailPath}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' });
             if (res.ok) {
                 const remoteMailRaw = await res.json();
                 const remoteMails = CloudSync.mapToArray(remoteMailRaw);
@@ -1262,12 +1262,12 @@ function shuffle(arr) {
 }
 
 
-const ADMIN_AUTH_KEY = 'yuelao_admin_auth';
-const VALID_ADMIN_USER = 'roy';
-const VALID_ADMIN_PASS = 'tff456';
+const ADMIN_AUTH_KEY = 'yuelao_admin_auth'; // 舊版 sessionStorage 鍵，僅供登出時清除
 
+// C2-a：以 Firebase 管理員會話為準（獨立鍵 yuelao_admin_auth_session_v1），不再比對本地密碼
 function isAdminAuthenticated() {
-    return sessionStorage.getItem(ADMIN_AUTH_KEY) === 'roy_authenticated';
+    if (typeof yuelaoAuth === 'undefined' || !yuelaoAuth) return false;
+    return Boolean(yuelaoAuth.adminSession || yuelaoAuth.loadAdminSession());
 }
 
 async function unlockAdminUI() {
@@ -1304,64 +1304,80 @@ async function unlockAdminUI() {
     }).catch(() => {});
 }
 
+async function recordAdminLoginSuccess(email) {
+    try {
+        let ip = 'Unknown IP';
+        try {
+            const res = await fetch('https://api.ipify.org?format=json');
+            if (res.ok) {
+                const data = await res.json();
+                ip = data.ip || 'Unknown IP';
+            }
+        } catch (err) {}
+
+        const logEntry = {
+            id: 'AL_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+            type: 'success',
+            accountTried: email,
+            ipAddress: ip,
+            userAgent: navigator.userAgent || 'Unknown Browser',
+            ts: Date.now(),
+            createdAt: new Date().toLocaleString('zh-TW')
+        };
+        const logs = JSON.parse(localStorage.getItem('yuelao_admin_login_logs') || '[]');
+        logs.unshift(logEntry);
+        const removedLogs = logs.length > 10 ? logs.slice(10) : [];
+        localStorage.setItem('yuelao_admin_login_logs', JSON.stringify(logs.slice(0, 10)));
+
+        // 雲端：以剛取得的管理員權杖寫入（不依賴 CloudSync 是否已初始化）
+        const token = yuelaoAuth.getIdTokenSync();
+        const dbUrl = yuelaoAuth.dbUrl();
+        if (!token || !dbUrl) return;
+        await fetch(`${dbUrl}/yuelao_admin_login_logs/${encodeURIComponent(logEntry.id)}.json?auth=${encodeURIComponent(token)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(logEntry)
+        });
+        removedLogs.forEach(old => {
+            if (old && old.id) {
+                fetch(`${dbUrl}/yuelao_admin_login_logs/${encodeURIComponent(old.id)}.json?auth=${encodeURIComponent(token)}`, { method: 'DELETE' }).catch(() => {});
+            }
+        });
+    } catch (err) {
+        console.warn('[admin] 登入紀錄寫入失敗', err);
+    }
+}
+
+// C2-a：僅記錄成功登入；失敗不再寫入紀錄（失敗時尚未取得管理員權杖）
 async function handleAdminLogin(e) {
     e.preventDefault();
-    const acc = document.getElementById('adminLoginAccount').value.trim();
-    const pwd = document.getElementById('adminLoginPassword').value;
+    const email = document.getElementById('adminLoginAccount').value.trim();
+    const pwdEl = document.getElementById('adminLoginPassword');
     const errBox = document.getElementById('adminLoginError');
+    const btn = e.target && e.target.querySelector ? e.target.querySelector('button[type="submit"]') : null;
+    if (btn) btn.disabled = true;
 
-    if (acc === VALID_ADMIN_USER && pwd === VALID_ADMIN_PASS) {
-        errBox.classList.add('hidden');
-        sessionStorage.setItem(ADMIN_AUTH_KEY, 'roy_authenticated');
-        unlockAdminUI();
-    } else {
+    try {
+        await yuelaoAuth.signInAdmin(email, pwdEl.value);
+    } catch (err) {
+        errBox.textContent = '🚫 ' + ((err && err.message) || '登入失敗，請稍後再試');
         errBox.classList.remove('hidden');
-        document.getElementById('adminLoginPassword').value = '';
-        document.getElementById('adminLoginPassword').focus();
-
-        // 記錄登入失敗日誌（包含嘗試取得當前 IP）
-        try {
-            let ip = 'Unknown IP';
-            try {
-                const res = await fetch('https://api.ipify.org?format=json');
-                if (res.ok) {
-                    const data = await res.json();
-                    ip = data.ip || 'Unknown IP';
-                }
-            } catch (err) {
-                console.warn('Failed to fetch IP', err);
-            }
-            
-            const logEntry = {
-                id: 'AL_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-                accountTried: acc,
-                ipAddress: ip,
-                userAgent: navigator.userAgent || 'Unknown Browser',
-                ts: Date.now(),
-                createdAt: new Date().toLocaleString('zh-TW')
-            };
-
-            const logs = JSON.parse(localStorage.getItem('yuelao_admin_login_logs') || '[]');
-            logs.unshift(logEntry);
-            // 只保留最近 10 筆失敗紀錄（同步清理雲端與本地超過 10 筆的舊紀錄）
-            const removedLogs = logs.length > 10 ? logs.slice(10) : [];
-            const keptLogs = logs.slice(0, 10);
-            localStorage.setItem('yuelao_admin_login_logs', JSON.stringify(keptLogs));
-            
-            if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
-                CloudSync.putNode(`yuelao_admin_login_logs/${logEntry.id}`, logEntry);
-                removedLogs.forEach(oldItem => {
-                    if (oldItem && oldItem.id) {
-                        CloudSync.deleteNode(`yuelao_admin_login_logs/${oldItem.id}`);
-                    }
-                });
-            }
-        } catch (logErr) {}
+        pwdEl.value = '';
+        pwdEl.focus();
+        if (btn) btn.disabled = false;
+        return;
     }
+
+    errBox.classList.add('hidden');
+    pwdEl.value = '';
+    if (btn) btn.disabled = false;
+    recordAdminLoginSuccess(email);
+    unlockAdminUI();
 }
 
 function logoutAdmin() {
     sessionStorage.removeItem(ADMIN_AUTH_KEY);
+    if (typeof yuelaoAuth !== 'undefined' && yuelaoAuth) yuelaoAuth.clearAdminSession();
     const mainEl = document.getElementById('adminMainContent');
     if (mainEl) mainEl.classList.add('hidden');
     const pBody = document.getElementById('playersTableBody');

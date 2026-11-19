@@ -803,8 +803,8 @@ document.getElementById('profileForm').addEventListener('submit', async function
             submitBtn.textContent = '檢查暱稱中...';
         }
         try {
-            if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchFullTree === 'function') {
-                await CloudSync.fetchFullTree();
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchPlayerPaths === 'function') {
+                await CloudSync.fetchPlayerPaths([USER_INDEX_KEY]);
             }
         } catch (err) {
         } finally {
@@ -815,8 +815,8 @@ document.getElementById('profileForm').addEventListener('submit', async function
         }
 
         const localUsers = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-        const cloudUsersMap = (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && typeof CloudSync.tree[USERS_KEY] === 'object')
-            ? CloudSync.tree[USERS_KEY]
+        const cloudUsersMap = (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USER_INDEX_KEY] && typeof CloudSync.tree[USER_INDEX_KEY] === 'object')
+            ? CloudSync.tree[USER_INDEX_KEY]
             : {};
         const mergedUsersMap = new Map();
         localUsers.forEach(u => {
@@ -1063,12 +1063,11 @@ async function restoreFromBackupCode() {
         return;
     }
 
-    // 無條件向 Firebase 拉取最新完整玩家資料庫，確保跨裝置／重複登入讀取到最新好友名單
-    if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchFullTree === 'function') {
-        await CloudSync.fetchFullTree();
-    }
-
+    // 以通行碼精準查詢單一玩家（yuelao_users 的 backupCode 索引），不下載整包資料庫
+    const fetchedUser = (typeof CloudSync !== 'undefined' && typeof CloudSync.findUserByBackupCode === 'function')
+        ? await CloudSync.findUserByBackupCode(cleaned) : null;
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    if (fetchedUser && !users.some(u => u && String(u.id) === String(fetchedUser.id))) users.push(fetchedUser);
     const matchedUser = users.find(u => {
         if (!u || !u.id) return false;
         const storedCode = String(u.backupCode || '').trim().toUpperCase();
