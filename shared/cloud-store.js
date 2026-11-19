@@ -960,7 +960,7 @@ const CloudSync = {
         }
         const canPersistSymmetricRepair = Boolean(this.initialized && this.isBackendContext() && this.inFlightWrites === 0);
         this.reconcileSymmetricMatches(usersArr, canPersistSymmetricRepair);
-        this.writeLocalIfChanged(USERS_KEY, JSON.stringify(usersArr));
+        this.writeLocalIfChanged(USERS_LOCAL_KEY, JSON.stringify(usersArr));
         usersArr.forEach(u => {
             if (u && u.id) {
                 this.lastPushedUsersJson[String(u.id)] = JSON.stringify(u);
@@ -1355,7 +1355,7 @@ const CloudSync = {
     PLAYER_SYNC_ENABLED: true,
     PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch'],
     PLAYER_COLD_NODES: ['yuelao_custom_activities', 'yuelao_banned_rules', 'yuelao_force_matches', 'yuelao_unmatched_pairs', 'yuelao_activity_reg_history'],
-    PLAYER_HOT_INTERVAL_MS: 15000,
+    PLAYER_HOT_INTERVAL_MS: 30000,
     PLAYER_COLD_INTERVAL_MS: 60000,
     etagCache: null,
     activeRoomPath: '',
@@ -1581,17 +1581,25 @@ const CloudSync = {
         this.tree = this.tree && typeof this.tree === 'object' ? this.tree : {};
         const me = this.playerSelfId();
         // 第一階段：索引、冷門節點、本人私有記錄（好友清單需要本人記錄）
-        const stage1 = [...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES];
-        if (me) stage1.push(`${USERS_KEY}/${me}`);
-        await this.fetchPlayerPaths(stage1);
-        // 第二階段：好友卡片快照、配對 IG、聊天室（依本人記錄的配對名單決定）
-        await this.fetchPlayerPaths(this.playerDynamicPaths());
+        const earlyNodes = [USER_INDEX_KEY, 'yuelao_system_batch', WISH_WALL_KEY];
+        if (me) earlyNodes.push(`${USERS_KEY}/${me}`);
+        await this.fetchPlayerPaths(earlyNodes);
+        // 第二階段：其餘熱門節點與聊天室（依本人記錄的配對名單決定）
+        const restHot = this.PLAYER_HOT_NODES.filter(p => !earlyNodes.includes(p));
+        await this.fetchPlayerPaths([...restHot, ...this.playerDynamicPaths()]);
         this.composePlayerUsers();
         this.hasLoadedFullTree = true;
         this.initialized = true;
         this.applyTreeToLocalStorage();
         this.updateCloudBadge(true);
         this.ensurePlayerDerivedNodes().catch(() => {});
+        // 冷門節點於首屏渲染後背景載入，不阻塞首次開啟
+        this.fetchPlayerPaths(this.PLAYER_COLD_NODES).then(() => {
+            this.composePlayerUsers();
+            this.chatsTreeVersion++;
+            this.applyTreeToLocalStorage();
+            if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
+        }).catch(() => {});
         this.startPlayerTimers();
         if (typeof document !== 'undefined') {
             document.addEventListener('visibilitychange', () => {
@@ -1745,7 +1753,63 @@ const CloudSync = {
         if (changed && typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
     },
 
+    // ===== 單節點讀取：同路徑併發合併（in-flight）＋ 30 秒 TTL；逾時以 ETag 條件式重新驗證（未變動回 304，不下載內容）=====
+    readCacheTtlMs: 30000,
+    nodeReadCache: null,
+    nodeReadInflight: null,
+
+    async readNodeCached(path, options = {}) {
+        if (!this.nodeReadCache) this.nodeReadCache = new Map();
+        if (!this.nodeReadInflight) this.nodeReadInflight = new Map();
+        const key = String(path || '').replace(/^\/+|\/+$/g, '');
+        const clone = v => (v === undefined || v === null) ? v : JSON.parse(JSON.stringify(v));
+        const hit = this.nodeReadCache.get(key);
+        if (!options.force && hit && Date.now() - hit.at < this.readCacheTtlMs) {
+            return { status: 'cache', data: clone(hit.value) };
+        }
+        if (this.nodeReadInflight.has(key)) {
+            const r = await this.nodeReadInflight.get(key);
+            return { status: r.status, data: clone(r.data) };
+        }
+        const task = (async () => {
+            try {
+                const headers = { 'X-Firebase-ETag': 'true' };
+                if (hit && hit.etag) headers['If-None-Match'] = hit.etag;
+                const res = await fetch(`${this.dbUrl}/${this.encodePath(key)}.json${this.authQuery()}`, {
+                    method: 'GET', headers, cache: 'no-store'
+                });
+                if (res.status === 304 && hit) {
+                    hit.at = Date.now();
+                    return { status: 'cache', data: hit.value };
+                }
+                if (!res.ok) return { status: 'error', data: null };
+                const etag = res.headers.get('ETag') || '';
+                const text = await res.text();
+                const data = text ? JSON.parse(text) : null;
+                this.nodeReadCache.set(key, { value: data, etag, at: Date.now() });
+                return { status: 'fresh', data };
+            } catch (e) {
+                return { status: 'error', data: null };
+            } finally {
+                this.nodeReadInflight.delete(key);
+            }
+        })();
+        this.nodeReadInflight.set(key, task);
+        const r = await task;
+        return { status: r.status, data: clone(r.data) };
+    },
+
+    // 寫入後讓該路徑（及其上下層）的快取過期；保留 ETag，下次讀取以 304 驗證
+    invalidateNodeReadCache(path) {
+        if (!this.nodeReadCache) return;
+        const key = String(path || '').replace(/^\/+|\/+$/g, '');
+        for (const [k, entry] of this.nodeReadCache.entries()) {
+            if (k === key || k.startsWith(key + '/') || key.startsWith(k + '/')) entry.at = 0;
+        }
+    },
+
     async putNode(path, value, options = {}) {
+        this.invalidateNodeReadCache(path);
         this.applyStreamPatch(path, value);
         this.inFlightWrites++;
         this.writeEpoch++;
@@ -1774,6 +1838,7 @@ const CloudSync = {
     },
 
     async patchNode(path, patchObj, options = {}) {
+        this.invalidateNodeReadCache(path);
         if (!patchObj || typeof patchObj !== 'object') return;
         const cleanBase = String(path || '').replace(/^\/+|\/+$/g, '');
         Object.entries(patchObj).forEach(([k, v]) => {
@@ -1860,7 +1925,7 @@ const CloudSync = {
 
     // 比較前後快照，只產生「真正變動」的欄位（PATCH 內容）。
     // 不會因為缺少某欄位就刪除它（例如 matchedHistory）；只有明確給 null 或空值才刪除。
-    buildRecordPatch(prev, next) {
+    buildRecordPatch(prev, next, inputRecord = null) {
         const base = prev && typeof prev === 'object' ? prev : {};
         const patch = {};
         const isEmpty = v => v === undefined || v === null || (Array.isArray(v) && v.length === 0)
@@ -1868,6 +1933,7 @@ const CloudSync = {
         Object.keys(next || {}).forEach(k => {
             const value = next[k];
             if (value === undefined) return;
+            if (inputRecord && !Object.prototype.hasOwnProperty.call(inputRecord, k)) return;
             if (canonJson(value) === canonJson(base[k] === undefined ? null : base[k])) return;
             patch[k] = isEmpty(value) ? null : value;
         });
@@ -1933,6 +1999,7 @@ const CloudSync = {
     },
 
     async deleteNode(path) {
+        this.invalidateNodeReadCache(path);
         this.applyStreamPatch(path, null);
         const pathParts = String(path || '').replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
         if (pathParts.length === 2 && pathParts[0] === USERS_KEY) {
@@ -1984,6 +2051,7 @@ const CloudSync = {
             ? this.tree[USERS_KEY][pid]
             : null;
         const cleanRecord = { ...record };
+        const hasInput = k => Object.prototype.hasOwnProperty.call(record, k);
         delete cleanRecord.registeredSession;
         cleanRecord.city = String(cleanRecord.city || '').trim();
         cleanRecord.region = String(cleanRecord.region || inferRegionByCity(cleanRecord.city) || '').trim();
@@ -2009,7 +2077,7 @@ const CloudSync = {
             // 非配對／解除配對異動時，同時合併雲端樹、本地快取與傳入紀錄的配對歷史（排除近期已解除配對與異常誤配對），絕不以舊快照覆蓋減少已配對好友
             let localCachedUser = null;
             try {
-                const localUsers = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+                const localUsers = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
                 if (Array.isArray(localUsers)) {
                     localCachedUser = localUsers.find(u => u && String(u.id).trim() === pid) || null;
                 }
@@ -2059,50 +2127,53 @@ const CloudSync = {
         this.setSharedPendingUser(pid, cleanRecord, 25000);
 
         // 寫入前以雲端最新單節點為基準（玩家端）；只 PATCH 差異欄位，避免舊快取整包覆寫 matchedHistory
-        let baseUser = existingTreeUser;
-        if (!this.isBackendContext()) {
-            const fresh = await this.getNodeOnce(`${USERS_KEY}/${pid}`);
-            if (fresh !== undefined) baseUser = (fresh && typeof fresh === 'object') ? fresh : null;
+        const freshBase = await this.getNodeOnce(`${USERS_KEY}/${pid}`);
+        if (freshBase === undefined) {
+            console.warn('[upsertUser] 無法讀取雲端最新資料，略過寫入以免覆蓋 ID:', pid);
+            return;
         }
+        const baseUser = (freshBase && typeof freshBase === 'object') ? freshBase : null;
+        // 不完整的記錄（例如組合出來的配對對象）不可新建整筆節點
+        if (!baseUser && !hasInput('matchedHistory')) return;
         if (baseUser) {
-            const diffPatch = this.buildRecordPatch(baseUser, cleanRecord);
+            const diffPatch = this.buildRecordPatch(baseUser, cleanRecord, record);
             if (Object.keys(diffPatch).length) {
                 await this.patchNode(`${USERS_KEY}/${pid}`, diffPatch, { throwOnError: Boolean(options && options.throwOnError) });
             }
         } else {
             await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord, { throwOnError: Boolean(options && options.throwOnError) });
         }
-        await this.syncDerivedNodesFor(pid, cleanRecord, { bothSides: this.isBackendContext() });
+        if (hasInput('matchedHistory')) await this.syncDerivedNodesFor(pid, cleanRecord, { bothSides: this.isBackendContext() });
         const cleanupTasks = [];
         if (isMatchMutation) {
-            if (!Array.isArray(cleanRecord.matchedHistory) || cleanRecord.matchedHistory.length === 0) {
+            if (hasInput('matchedHistory') && (!Array.isArray(cleanRecord.matchedHistory) || cleanRecord.matchedHistory.length === 0)) {
                 cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedHistory`));
             }
-            if (!cleanRecord.matchedWithId) {
+            if (hasInput('matchedWithId') && !cleanRecord.matchedWithId) {
                 cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedWithId`));
                 cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedWithName`));
                 cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedSession`));
                 cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedAt`));
             }
         }
-        if (cleanRecord.registeredSessions.length === 0) {
+        if (hasInput('registeredSessions') && cleanRecord.registeredSessions.length === 0) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/registeredSessions`));
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/registeredSession`));
         }
-        if (Object.keys(cleanRecord.exactMatchCriteria).length === 0) {
+        if (hasInput('exactMatchCriteria') && Object.keys(cleanRecord.exactMatchCriteria).length === 0) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/exactMatchCriteria`));
         }
-        if (!Array.isArray(cleanRecord.mustMatchKeys) || cleanRecord.mustMatchKeys.length === 0) {
+        if (hasInput('mustMatchKeys') && (!Array.isArray(cleanRecord.mustMatchKeys) || cleanRecord.mustMatchKeys.length === 0)) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/mustMatchKeys`));
         }
         const prevTreeUser = (this.tree && this.tree[USERS_KEY] && this.tree[USERS_KEY][pid]) ? this.tree[USERS_KEY][pid] : null;
         const prevCustomKeys = (prevTreeUser && prevTreeUser.customActivityRegs && typeof prevTreeUser.customActivityRegs === 'object')
             ? Object.keys(prevTreeUser.customActivityRegs)
             : [];
-        if (Object.keys(cleanRecord.customActivityRegs).length === 0) {
+        if (hasInput('customActivityRegs') && Object.keys(cleanRecord.customActivityRegs).length === 0) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/customActivityRegs`));
         } else {
-            prevCustomKeys.forEach(oldActKey => {
+            if (hasInput('customActivityRegs')) prevCustomKeys.forEach(oldActKey => {
                 if (!Object.prototype.hasOwnProperty.call(cleanRecord.customActivityRegs, oldActKey)) {
                     cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/customActivityRegs/${oldActKey}`));
                 }
@@ -2160,7 +2231,7 @@ const CloudSync = {
 const IdAllocator = {
     allocate(gender) {
         const counters = JSON.parse(localStorage.getItem(ID_COUNTER_KEY) || '{"male":10001,"female":20001,"other":30001}');
-        const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
         const usedIds = new Set(users.map(u => String(u.id)));
 
         if (gender === '男') {
@@ -2191,7 +2262,7 @@ const IdAllocator = {
 // 5. 跨版本永久儲存管理器、禁止字眼、信件與系統開關控制
 const Store = {
     getUsersArray() {
-        const arr = LocalJsonCache.get(USERS_KEY, () => []);
+        const arr = LocalJsonCache.get(USERS_LOCAL_KEY, () => []);
         return Array.isArray(arr) ? arr : [];
     },
 
@@ -2463,8 +2534,9 @@ const Store = {
                     CloudSync.writeLocalIfChanged(CHATS_KEY, JSON.stringify(CloudSync.chatsMapToLocal(CloudSync.tree[CHATS_KEY])));
                 }
                 try {
-                    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+                    const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
                     const userRec = users.find(u => String(u.id) === pid);
+                    if (userRec) mergeConfessionFromCloud(state, userRec);
                     if (userRec) {
                         if (!state.profile.city && userRec.city) state.profile.city = String(userRec.city).trim();
                         if (!state.profile.region) {
@@ -2502,7 +2574,7 @@ const Store = {
 
         // 若本地尚未有該玩家緩存，從共享資料庫 yuelao_users 還原
         try {
-            const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
             const userRec = users.find(u => String(u.id) === pid);
             if (userRec) {
                 const state = this.normalizeParsedState({
@@ -2584,7 +2656,7 @@ const Store = {
             if (!forceCloudPush && typeof CloudSync !== 'undefined' && typeof CloudSync.isUserDeleted === 'function' && CloudSync.isUserDeleted(state.playerId)) {
                 return;
             }
-            const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
             const idx = users.findIndex(u => String(u.id) === String(state.playerId));
             const hasCloudTreeRec = Boolean(typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][String(state.playerId)]);
             const cloudTreeRec = hasCloudTreeRec ? CloudSync.tree[USERS_KEY][String(state.playerId)] : {};
@@ -2664,27 +2736,27 @@ const Store = {
             delete record.registeredSession;
             if (idx >= 0) users[idx] = record;
             else users.push(record);
-            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+            localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
             if (!skipCloudPush && typeof CloudSync !== 'undefined') {
                 const pushPromise = CloudSync.upsertUser(record, forceCloudPush);
                 if (state.playerId) {
                     sessionStorage.setItem(TAB_PLAYER_ID_KEY, String(state.playerId));
-                    localStorage.setItem(PLAYER_STATE_PREFIX + String(state.playerId), JSON.stringify(state));
+                    writeStateSafely(PLAYER_STATE_PREFIX + String(state.playerId), state);
                 }
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                writeStateSafely(STORAGE_KEY, state);
                 return pushPromise;
             }
         }
 
         if (state.playerId) {
             sessionStorage.setItem(TAB_PLAYER_ID_KEY, String(state.playerId));
-            localStorage.setItem(PLAYER_STATE_PREFIX + String(state.playerId), JSON.stringify(state));
+            writeStateSafely(PLAYER_STATE_PREFIX + String(state.playerId), state);
         }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        writeStateSafely(STORAGE_KEY, state);
     },
 
     saveSharedUsers(users, options = { isMatchMutation: false }) {
-        localStorage.setItem(USERS_KEY, JSON.stringify(users));
+        localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
         if (typeof CloudSync !== 'undefined') {
             const list = Array.isArray(users) ? users : [];
             const forcePush = Boolean(options && options.isMatchMutation);
@@ -3012,7 +3084,7 @@ const ChatStore = {
 
         let users = [];
         try {
-            users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
             if (!Array.isArray(users)) users = [];
         } catch (e) {
             users = [];
@@ -3060,7 +3132,7 @@ const ChatStore = {
         });
 
         if (touchedUsersMap.size > 0) {
-            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+            localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
             if (typeof CloudSync !== 'undefined') {
                 touchedUsersMap.forEach(u => {
                     CloudSync.upsertUser(u, true, { isMatchMutation: true });
@@ -3307,3 +3379,66 @@ const ActivityRegArchive = {
         }
     }
 };
+
+// ===== 心動抉擇狀態同步（跨裝置／重新整理不重複觸發）=====
+// 三個欄位與時間戳同步寫入雲端 yuelao_users/{pid}；載入時以較新的 confessionUpdatedAt 為準合併
+function persistConfessionState() {
+    if (typeof CloudSync === 'undefined' || typeof appState === 'undefined' || !appState || !appState.playerId) return;
+    const ts = Date.now();
+    appState.confessionUpdatedAt = ts;
+    try {
+        const p = CloudSync.patchUserFields(String(appState.playerId), {
+            lastConfessionDate: appState.lastConfessionDate || null,
+            confessionUnlockAt: appState.confessionUnlockAt || null,
+            lastHandledForceConfessionId: appState.lastHandledForceConfessionId || null,
+            confessionUpdatedAt: ts
+        });
+        if (p && typeof p.catch === 'function') p.catch(err => console.warn('[confession] 雲端同步失敗', err));
+    } catch (e) {
+        console.warn('[confession] 雲端同步失敗', e);
+    }
+}
+
+function mergeConfessionFromCloud(localState, cloudRec) {
+    if (!localState || !cloudRec || typeof cloudRec !== 'object') return false;
+    let changed = false;
+    const cloudTs = Number(cloudRec.confessionUpdatedAt || 0);
+    const localTs = Number(localState.confessionUpdatedAt || 0);
+    if (cloudTs > localTs) {
+        localState.lastConfessionDate = cloudRec.lastConfessionDate || null;
+        localState.confessionUnlockAt = cloudRec.confessionUnlockAt || null;
+        localState.confessionUpdatedAt = cloudTs;
+        changed = true;
+    }
+    const cloudForce = cloudRec.lastHandledForceConfessionId ? String(cloudRec.lastHandledForceConfessionId) : '';
+    if (cloudForce && cloudForce !== String(localState.lastHandledForceConfessionId || '')) {
+        localState.lastHandledForceConfessionId = cloudForce;
+        changed = true;
+    }
+    return changed;
+}
+
+// ===== 本機狀態存檔：好友訊息只保留最新 5 則摘要（完整訊息由 yuelao_chats 管理），並防止配額超限導致存檔失敗 =====
+function compactStateForStorage(state) {
+    const copy = JSON.parse(JSON.stringify(state));
+    if (Array.isArray(copy.friends)) {
+        copy.friends = copy.friends.map(f => {
+            if (!f || typeof f !== 'object' || String(f.id || '').startsWith('MOCK_FRIEND_')) return f;
+            const msgs = Array.isArray(f.messages) ? f.messages.slice(-5) : [];
+            return { ...f, messages: msgs.map(m => (m && typeof m.text === 'string' && m.text.length > 120)
+                ? { ...m, text: m.text.slice(0, 120) + '…' } : m) };
+        });
+    }
+    return copy;
+}
+
+function writeStateSafely(key, state) {
+    try {
+        localStorage.setItem(key, JSON.stringify(compactStateForStorage(state)));
+        return true;
+    } catch (e) {
+        console.warn('[Store] 狀態存檔失敗（可能超過容量）', key, e);
+        return false;
+    }
+}
+

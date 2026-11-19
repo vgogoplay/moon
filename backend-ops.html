@@ -184,7 +184,7 @@
                     <div>
                         <div class="text-xs font-bold text-amber-900">🧩 公開索引與配對節點回填</div>
                         <p class="text-[11px] text-amber-800/80 mt-0.5">
-                            後台載入時會自動檢查並補齊；此按鈕為備用，可重複執行，已一致的資料不會重複寫入。
+                            後台載入時會自動檢查並補齊（含前台 MBTI 圖表所需的 mbti 欄位）；此按鈕為備用，可重複執行，已一致的資料不會重複寫入。
                         </p>
                     </div>
                     <button type="button" onclick="runBackfillDerivedNodes()"
@@ -436,13 +436,13 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261119o"></script>
-    <script src="shared/schema.js?v=20261119l"></script>
+    <script src="shared/schedule.js?v=20261119s"></script>
+    <script src="shared/schema.js?v=20261119s"></script>
     <script src="shared/auth.js?v=20261119n"></script>
-    <script src="shared/cloud-store.js?v=20261119o"></script>
+    <script src="shared/cloud-store.js?v=20261119t"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261119o"></script>
-    <script src="backend/matching.js?v=20261119o"></script>
+    <script src="backend/matching.js?v=20261119p"></script>
     <script src="backend/ops.js?v=20261119o"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261119n"></script>

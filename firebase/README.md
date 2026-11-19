@@ -88,3 +88,11 @@ Realtime Database → 規則 → 「規則模擬器（Rules Playground）」：
 3. ⚠️ 此包含 C2-a 的管理員 Email 登入程式。部署前必須先在資料庫新增 `yuelao_admin_uids/wI2NbSH9SKRfar6wckPJqeXcQwq2` = `true`，否則後台無法登入。
 
 回退：改回舊規則與舊網站檔案即可。
+
+---
+
+## 會員欄位遺失修復（v20261119r）
+
+原因：會員寫入時，本機記錄缺少的欄位（如配對紀錄、篩選條件）會被當作「空值」刪除雲端資料。已修正為：只有輸入記錄明確帶有的欄位才允許寫入或刪除，且寫入前一律以雲端最新資料為基準。
+
+部署後請先匯出一次 Realtime Database JSON 作為新的基準備份。

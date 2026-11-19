@@ -179,7 +179,7 @@ function renderHomeStatsCharts(forceRender = false) {
         return;
     }
 
-    const rawUsersStr = localStorage.getItem(USERS_KEY) || '[]';
+    const rawUsersStr = localStorage.getItem(USERS_LOCAL_KEY) || '[]';
     if (rawUsersStr === lastUsersStatsSnapshot && donutBox.dataset.rendered === '1') {
         lastHomeStatsRenderTs = nowTs;
         return;
@@ -779,7 +779,7 @@ function handleCustomActivityClick(activityId) {
         return;
     }
     if (schedState.status === 'matched') {
-        const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
         const me = appState.playerId ? users.find(u => String(u.id) === String(appState.playerId)) : null;
         const matchedHist = (me && Array.isArray(me.matchedHistory))
             ? me.matchedHistory.find(h => String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name))
@@ -1314,7 +1314,7 @@ function refreshAllUI() {
             customAlertBox.innerHTML = '';
         } else {
             if (customSectionBox) customSectionBox.classList.remove('hidden');
-            const allUsersForActCheck = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            const allUsersForActCheck = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
             const meUserRec = appState.playerId ? allUsersForActCheck.find(u => String(u.id) === String(appState.playerId)) : null;
 
             customBtnBox.classList.remove('hidden');

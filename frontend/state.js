@@ -128,7 +128,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('storage', (e) => {
         const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
         const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
-        if ([USERS_KEY, SYSTEM_STATE_KEY, CUSTOM_ACTIVITIES_KEY, BANNED_RULES_KEY, MAILBOX_KEY, REPORTS_KEY, CHATS_KEY, fwKey, wwKey, 'yuelao_test_event'].includes(e.key)) {
+        if ([USERS_LOCAL_KEY, SYSTEM_STATE_KEY, CUSTOM_ACTIVITIES_KEY, BANNED_RULES_KEY, MAILBOX_KEY, REPORTS_KEY, CHATS_KEY, fwKey, wwKey, 'yuelao_test_event'].includes(e.key)) {
             if (e.key === fwKey && typeof renderHomeFateWall === 'function') {
                 renderHomeFateWall(true);
             }
@@ -172,7 +172,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function syncFromSharedStorage() {
-    const rawUsersStr = localStorage.getItem(USERS_KEY) || '[]';
+    const rawUsersStr = localStorage.getItem(USERS_LOCAL_KEY) || '[]';
     const users = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function')
         ? Store.getUsersArray()
         : JSON.parse(rawUsersStr);
@@ -180,8 +180,8 @@ function syncFromSharedStorage() {
         lastReconciledUsersRaw = rawUsersStr;
         if (typeof CloudSync !== 'undefined' && typeof CloudSync.reconcileSymmetricMatches === 'function') {
             if (CloudSync.reconcileSymmetricMatches(users, false)) {
-                localStorage.setItem(USERS_KEY, JSON.stringify(users));
-                if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_KEY);
+                localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
+                if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_LOCAL_KEY);
             }
         }
     }
@@ -206,7 +206,7 @@ function syncFromSharedStorage() {
     if (typeof checkScheduledCustomActivities === 'function') {
         const autoMatchedNow = checkScheduledCustomActivities(true);
         if (autoMatchedNow) {
-            users.splice(0, users.length, ...JSON.parse(localStorage.getItem(USERS_KEY) || '[]'));
+            users.splice(0, users.length, ...JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]'));
             stateChanged = true;
         }
     }
@@ -214,7 +214,7 @@ function syncFromSharedStorage() {
     if (typeof cleanupExpiredActivityRegistrations === 'function') {
         const regCleanedNow = cleanupExpiredActivityRegistrations(true);
         if (regCleanedNow) {
-            users.splice(0, users.length, ...JSON.parse(localStorage.getItem(USERS_KEY) || '[]'));
+            users.splice(0, users.length, ...JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]'));
             stateChanged = true;
         }
     }
@@ -291,6 +291,7 @@ function syncFromSharedStorage() {
             if (u && u.id) userById.set(String(u.id), u);
         });
         const me = userById.get(String(appState.playerId));
+        if (me && mergeConfessionFromCloud(appState, me)) stateChanged = true;
 
         // 2. 若雲端已初始化且玩家資料已被後台管理員整筆刪除，同步重置前台本地狀態
         const isDeletedByAdmin = (typeof CloudSync !== 'undefined' && typeof CloudSync.isUserDeleted === 'function' && CloudSync.isUserDeleted(appState.playerId));
@@ -569,6 +570,7 @@ function syncFromSharedStorage() {
                 appState.lastConfessionDate = null;
                 stateChanged = true;
             }
+            persistConfessionState();
         }
     }
 

@@ -463,12 +463,12 @@ async function persistRepairedUsersToLocalAndCloud(users, affectedUserIds, expec
         await Promise.all(
             targetUsers.map(async (uObj) => {
                 const pid = String(uObj.id).trim();
-                const encoded = CloudSync.encodePath(`${USERS_KEY}/${pid}`);
-                const verifyRes = await fetch(`${CloudSync.dbUrl}/${encoded}.json${CloudSync.authQuery()}`, { method: 'GET', cache: 'no-store' });
-                if (!verifyRes.ok) {
-                    throw new Error(`回讀驗證失敗 (ID:${pid}, HTTP ${verifyRes.status})`);
+                // 流量修復：改用去重＋快取的單節點讀取（寫入後會使快取失效，以 ETag 驗證）
+                const readRes = await CloudSync.readNodeCached(`${USERS_KEY}/${pid}`, { force: true });
+                if (readRes.status === 'error') {
+                    throw new Error(`回讀驗證失敗 (ID:${pid})`);
                 }
-                const remoteUser = await verifyRes.json();
+                const remoteUser = readRes.data;
                 const remoteHistArr = Array.isArray(remoteUser && remoteUser.matchedHistory)
                     ? remoteUser.matchedHistory
                     : (remoteUser && remoteUser.matchedHistory && typeof remoteUser.matchedHistory === 'object'

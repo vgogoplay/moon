@@ -794,7 +794,7 @@ async function selectWishResponderAndMatch(wishId, anonNumber) {
     const partnerPid = String(chosenResp.responderId || '').trim();
     if (!partnerPid || partnerPid === myPid) return;
 
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
     const meUser = users.find(u => String(u.id).trim() === myPid);
     const partnerUser = users.find(u => String(u.id).trim() === partnerPid);
     if (!meUser || !partnerUser) {
@@ -853,7 +853,7 @@ async function selectWishResponderAndMatch(wishId, anonNumber) {
     partnerUser.matchedWithName = meUser.nickname;
     partnerUser.matchedAt = nowTs;
 
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
 
     // 寫入配對日誌與建立雙方聊天室開場白
     if (typeof CloudSync !== 'undefined') {

@@ -626,7 +626,7 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     try {
         users = (typeof getUsers === 'function')
             ? getUsers()
-            : JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+            : JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
     } catch (e) {
         users = [];
     }
@@ -803,7 +803,7 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
         }
     });
 
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
     if (matchedUsersToPush.length > 0 && typeof CloudSync !== 'undefined') {
         await Promise.all(matchedUsersToPush.map(u => CloudSync.upsertUser(u, true, { isMatchMutation: true })));
     }
@@ -1060,7 +1060,7 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
 
     let users = [];
     try {
-        users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
     } catch (e) {
         return false;
     }
@@ -1179,9 +1179,9 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
 
     if (changedUsers.length === 0) return false;
 
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
     if (typeof LocalJsonCache !== 'undefined') {
-        LocalJsonCache.invalidate(USERS_KEY);
+        LocalJsonCache.invalidate(USERS_LOCAL_KEY);
     }
 
     if (isFrontendCaller && currentPlayerId && typeof appState !== 'undefined' && appState) {

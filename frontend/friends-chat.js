@@ -1490,7 +1490,7 @@ document.getElementById('chatSendForm').addEventListener('submit', function(e) {
 });
 
 function recordMutualContinueVote(myId, partnerId, voterNickname, isSimulatedPartner = false) {
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
     const idA = String(myId);
     const idB = String(partnerId);
     const voterId = isSimulatedPartner ? idB : idA;
@@ -1637,7 +1637,7 @@ function clearMutualFriendship(friend, noticeMsg) {
     // 2. 合併本地與雲端快取的玩家資料，確保雙方紀錄（即使其中一方尚未寫入本地陣列）都能完整移除彼此
     let users = [];
     try {
-        users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
         if (!Array.isArray(users)) users = [];
     } catch (e) {
         users = [];
@@ -1683,7 +1683,7 @@ function clearMutualFriendship(friend, noticeMsg) {
     removePartnerFromUserRecord(myUserRec, partnerPid);
     removePartnerFromUserRecord(partnerUserRec, myPid);
 
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
 
     // 3. 依序執行雲端同步：先提交解除配對墓碑 -> 再更新雙方會員資料 -> 最後清空雙方聊天室紀錄
     if (myPid && partnerPid && typeof CloudSync !== 'undefined') {
@@ -1788,6 +1788,7 @@ function submitEveningConfession() {
 
     appState.lastConfessionDate = new Date().toDateString();
     appState.confessionUnlockAt = calcConfessionUnlockTime(Date.now());
+    persistConfessionState();
     document.getElementById('confessionMessageInput').value = '';
     closeEveningConfessionModal();
     appState.activeFriendId = chosenId;

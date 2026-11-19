@@ -814,7 +814,7 @@ document.getElementById('profileForm').addEventListener('submit', async function
             }
         }
 
-        const localUsers = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        const localUsers = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
         const cloudUsersMap = (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USER_INDEX_KEY] && typeof CloudSync.tree[USER_INDEX_KEY] === 'object')
             ? CloudSync.tree[USER_INDEX_KEY]
             : {};
@@ -1066,7 +1066,7 @@ async function restoreFromBackupCode() {
     // 以通行碼精準查詢單一玩家（yuelao_users 的 backupCode 索引），不下載整包資料庫
     const fetchedUser = (typeof CloudSync !== 'undefined' && typeof CloudSync.findUserByBackupCode === 'function')
         ? await CloudSync.findUserByBackupCode(cleaned) : null;
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
     if (fetchedUser && !users.some(u => u && String(u.id) === String(fetchedUser.id))) users.push(fetchedUser);
     const matchedUser = users.find(u => {
         if (!u || !u.id) return false;
@@ -1095,6 +1095,7 @@ async function restoreFromBackupCode() {
     loadedState.playerId = pid;
     loadedState.backupCode = cleaned;
     loadedState.lastSyncedCloudUpdatedAt = matchedUser.updatedAt || '';
+    mergeConfessionFromCloud(loadedState, matchedUser);
     loadedState.isWarnedAccount = Boolean(matchedUser.isWarned);
     loadedState.warningReason = matchedUser.warningReason || '';
     loadedState.isChatBanned = Boolean(matchedUser.isChatBanned);
@@ -1149,7 +1150,7 @@ async function restoreFromBackupCode() {
 
 // ==================== 單機多分頁測試：切換已有玩家 ID 或以新玩家註冊 ====================
 function switchTestPlayerAccount() {
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
     const existingSummary = users.length > 0
         ? '\n目前資料庫已有玩家：' + users.slice(0, 10).map(u => `${u.id}(${u.nickname})`).join('、')
         : '';

@@ -1,3 +1,6 @@
+// 本機會員快取鍵：後台沿用 yuelao_users；前台使用獨立鍵，避免精簡索引覆寫後台資料
+const USERS_LOCAL_KEY = (typeof document !== 'undefined' && document.body && document.body.dataset && document.body.dataset.adminPage)
+    ? 'yuelao_users' : 'yuelao_player_users_cache';
 /* shared/schema.js - 前後台共用：表單欄位結構、地區/MBTI對照表、戀愛語錄與 5 碼通行碼演算法 */
 
 const SCHEMA_VERSION = 31;
@@ -427,9 +430,10 @@ function buildBackupCodeFromParts(playerId, profileObj, privacyObj, preferredCod
 
 /* ==================== 公開索引與配對共享資料（階段 B2） ==================== */
 // 全站公開索引：只保留統計（首頁人數、場次統計、性別上限）所需的最小欄位
-const USER_INDEX_BASE_FIELDS = ['id', 'nickname', 'gender', 'registeredSessions', 'customActivityRegs'];
-// 索引中依隱私設定才公開的欄位 → 對應的隱私開關（region 依 city 設定、mbtiGroup 依 mbti 設定）
-const PRIVACY_GATED_INDEX = { region: 'city', mbtiGroup: 'mbti' };
+const USER_INDEX_BASE_FIELDS = ['id', 'nickname', 'gender', 'registeredSessions', 'customActivityRegs', 'mbtiGroup'];
+// 索引中依隱私設定才公開的欄位 → 對應的隱私開關（region 依 city 設定、完整 mbti 依 mbti 設定）
+// mbtiGroup（I人／E人分組）不受隱私影響，供 MBTI 統計涵蓋全部會員
+const PRIVACY_GATED_INDEX = { region: 'city', mbti: 'mbti' };
 // 絕對不進入任何公開或配對節點的欄位（備份碼、IG、配對紀錄、封鎖與警告狀態等）
 const USER_SECRET_FIELDS = [
     'backupCode', 'ig', 'matchedHistory', 'matchedSession', 'matchedWithId', 'matchedWithName', 'matchedAt',
