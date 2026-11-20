@@ -59,7 +59,8 @@ function purgeExpiredForumPostsFrontend(rawPosts) {
         }
     });
 
-    if (expiredIds.length > 0 && typeof CloudSync !== 'undefined') {
+    // 前台僅本地過濾過期文章避免多端同時發送重複 DELETE；由後台或沙盒模式執行實際節點清理
+    if (expiredIds.length > 0 && typeof CloudSync !== 'undefined' && (CloudSync.isLocalSandboxMode() || CloudSync.isBackendContext())) {
         expiredIds.forEach(pid => {
             CloudSync.deleteNode(`${FORUM_INDEX_KEY}/${pid}`).catch(() => {});
             CloudSync.deleteNode(`${FORUM_POSTS_KEY}/${pid}`).catch(() => {});
@@ -253,10 +254,22 @@ async function refreshForum() {
     }
     try {
         if (typeof CloudSync !== 'undefined' && (CloudSync.initialized || isSandbox)) {
-            const res = await CloudSync.getNodeOnce(FORUM_INDEX_KEY);
-            if (res !== undefined) {
-                const rawArr = CloudSync.mapToArray(res || {});
-                forumPosts = purgeExpiredForumPostsFrontend(rawArr);
+            if (!isSandbox && typeof CloudSync.conditionalGetNode === 'function') {
+                const r = await CloudSync.conditionalGetNode(FORUM_INDEX_KEY);
+                if (r.status === 'changed') {
+                    CloudSync.applyStreamPatch(FORUM_INDEX_KEY, r.data);
+                    const rawArr = CloudSync.mapToArray(r.data || {});
+                    forumPosts = purgeExpiredForumPostsFrontend(rawArr);
+                } else if (r.status === 'unchanged' && forumPosts.length === 0 && CloudSync.tree && CloudSync.tree[FORUM_INDEX_KEY]) {
+                    const rawArr = CloudSync.mapToArray(CloudSync.tree[FORUM_INDEX_KEY]);
+                    forumPosts = purgeExpiredForumPostsFrontend(rawArr);
+                }
+            } else {
+                const res = await CloudSync.getNodeOnce(FORUM_INDEX_KEY);
+                if (res !== undefined) {
+                    const rawArr = CloudSync.mapToArray(res || {});
+                    forumPosts = purgeExpiredForumPostsFrontend(rawArr);
+                }
             }
         }
         renderForumList();

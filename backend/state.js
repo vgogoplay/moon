@@ -1327,7 +1327,10 @@ async function recordAdminLoginSuccess(email) {
     try {
         let ip = 'Unknown IP';
         try {
-            const res = await fetch('https://api.ipify.org?format=json');
+            const ipCtrl = new AbortController();
+            const ipTimer = setTimeout(() => ipCtrl.abort(), 800);
+            const res = await fetch('https://api.ipify.org?format=json', { signal: ipCtrl.signal });
+            clearTimeout(ipTimer);
             if (res.ok) {
                 const data = await res.json();
                 ip = data.ip || 'Unknown IP';
@@ -1485,7 +1488,7 @@ setInterval(() => {
         }
     }
     pollSharedStorageChanges();
-}, 3000);
+}, 10000);
 
 // 由 backend/layout.js 渲染側邊欄骨架後自動檢查登入狀態
 

@@ -849,9 +849,18 @@ function switchTab(tabName) {
         renderWishWallTab(true);
     }
 
+    if (tabName !== 'friends') {
+        if (typeof CloudSync !== 'undefined' && typeof CloudSync.closeActiveChatRoom === 'function') {
+            CloudSync.closeActiveChatRoom();
+        }
+    }
+
     if (tabName === 'friends') {
         shouldScrollChatToLatest = true;
         renderFriendsSection();
+        if (typeof CloudSync !== 'undefined' && CloudSync.initialized && !CloudSync.isLocalSandboxMode() && typeof CloudSync.pollPlayerHot === 'function') {
+            CloudSync.pollPlayerHot();
+        }
         if (isEveningConfessionPending()) {
             openEveningConfessionModal();
         }

@@ -367,15 +367,20 @@ function renderMyIssueReportsList() {
     }).join('');
 }
 
-async function refreshMyIssueReports() {
-    if (typeof CloudSync !== 'undefined' && typeof CloudSync.refreshPlayerFresh === 'function') {
-        await CloudSync.refreshPlayerFresh();
+async function fetchReportsOnDemand() {
+    if (typeof CloudSync === 'undefined' || !CloudSync.initialized || CloudSync.isLocalSandboxMode()) return;
+    if (typeof CloudSync.pollPlayerNodes === 'function') {
+        await CloudSync.pollPlayerNodes([REPORTS_KEY]);
     }
+}
+
+async function refreshMyIssueReports() {
+    await fetchReportsOnDemand();
     markMyReportRepliesAsRead();
     renderMyIssueReportsList();
 }
 
-function openReportModal() {
+async function openReportModal() {
     const contactInput = document.getElementById('reportContact');
     if (contactInput && !contactInput.value && (appState.playerId || appState.profile.nickname)) {
         contactInput.value = `ID:${appState.playerId || '未產生'} / ${appState.profile.nickname || ''}`;
@@ -383,6 +388,9 @@ function openReportModal() {
     markMyReportRepliesAsRead();
     renderMyIssueReportsList();
     document.getElementById('reportModal').classList.remove('hidden');
+    await fetchReportsOnDemand();
+    markMyReportRepliesAsRead();
+    renderMyIssueReportsList();
 }
 
 function closeReportModal() {
@@ -848,12 +856,18 @@ function ensureChatBoxScrollPagination(chatBox) {
 }
 
 function renderActiveFriendWorkspace() {
-    // 方案 C：只對目前開啟的聊天室建立即時 SSE（功能開關關閉時為 no-op）
+    // 方案 C：僅在「好友清單」分頁開啟時，對目前開啟的單一聊天室建立即時 SSE；離開該分頁時關閉以節省連線
     if (typeof CloudSync !== 'undefined' && CloudSync.isPlayerSyncMode && CloudSync.isPlayerSyncMode()) {
-        const activeId = appState && appState.activeFriendId ? String(appState.activeFriendId) : '';
-        CloudSync.setActiveChatRoom(activeId && appState.playerId
-            ? `${CHATS_KEY}/${ChatStore.getPairKey(appState.playerId, activeId)}`
-            : '');
+        const friendsTabEl = document.getElementById('tab-friends');
+        const isFriendsTabVisible = Boolean(friendsTabEl && !friendsTabEl.classList.contains('hidden'));
+        if (!isFriendsTabVisible) {
+            CloudSync.closeActiveChatRoom();
+        } else {
+            const activeId = appState && appState.activeFriendId ? String(appState.activeFriendId) : '';
+            CloudSync.setActiveChatRoom(activeId && appState.playerId
+                ? `${CHATS_KEY}/${ChatStore.getPairKey(appState.playerId, activeId)}`
+                : '');
+        }
     }
     const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
     if (!friend) return;

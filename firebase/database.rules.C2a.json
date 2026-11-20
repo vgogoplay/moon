@@ -6,7 +6,10 @@
       ".read": "auth != null"
     },
 
-    "yuelao_users":                 { ".write": "auth != null" },
+    "yuelao_users": {
+      ".write": "auth != null",
+      ".indexOn": ["backupCode"]
+    },
     "yuelao_user_index":            { ".write": "auth != null" },
     "yuelao_pair_profiles":         { ".write": "auth != null" },
     "yuelao_pair_ig":               { ".write": "auth != null" },

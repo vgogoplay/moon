@@ -1425,8 +1425,8 @@ const CloudSync = {
 
     // ===================== 方案 C：前後台省流混合同步（閒置降頻 + 跨頁 ETag 快取 + 後台按頁讀取） =====================
     PLAYER_SYNC_ENABLED: true,
-    PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch'],
-    PLAYER_COLD_NODES: ['yuelao_custom_activities', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
+    PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch'],
+    PLAYER_COLD_NODES: ['yuelao_reports', 'yuelao_custom_activities', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
     PLAYER_HOT_INTERVAL_MS: 50000,   // 熱門節點每 50 秒檢查一次（45~60 秒區間）
     PLAYER_COLD_INTERVAL_MS: 240000, // 冷門節點每 4 分鐘檢查一次（3~5 分鐘區間）
     PLAYER_IDLE_TIMEOUT_MS: 180000,  // 超過 3 分鐘無滑動／點擊／輸入即自動暫停輪詢
@@ -1767,19 +1767,41 @@ const CloudSync = {
         return (typeof appState !== 'undefined' && appState && appState.playerId) ? String(appState.playerId) : '';
     },
 
-    // 玩家端需要輪詢的動態節點：本人私有記錄、每位配對好友的卡片快照與 IG、雙方聊天室
-    playerDynamicPaths() {
+    // 玩家端高頻輪詢的動態節點：本人私有記錄（好友清單 tab 開啟時一併檢查非當前聊天室）
+    playerHotDynamicPaths(includeAllChats = false) {
         const me = this.playerSelfId();
         if (!me) return [];
         const paths = [`${USERS_KEY}/${me}`];
+        const isFriendsTabOpen = (typeof document !== 'undefined')
+            ? Boolean(document.getElementById('tab-friends') && !document.getElementById('tab-friends').classList.contains('hidden'))
+            : false;
+        if (includeAllChats || isFriendsTabOpen) {
+            const rec = this.tree && this.tree[USERS_KEY] ? this.tree[USERS_KEY][me] : null;
+            this.partnerIdsOf(rec).forEach(partnerId => {
+                const pk = this.pairKeyOf(me, partnerId);
+                paths.push(`${CHATS_KEY}/${pk}`);
+            });
+        }
+        return paths;
+    },
+
+    // 玩家端低頻輪詢的動態節點（每 4 分鐘）：好友公開資料快照與 IG 解鎖節點
+    playerColdDynamicPaths() {
+        const me = this.playerSelfId();
+        if (!me) return [];
+        const paths = [];
         const rec = this.tree && this.tree[USERS_KEY] ? this.tree[USERS_KEY][me] : null;
         this.partnerIdsOf(rec).forEach(partnerId => {
             const pk = this.pairKeyOf(me, partnerId);
             paths.push(`${PAIR_PROFILES_KEY}/${pk}/${partnerId}`);
             paths.push(`${PAIR_IG_KEY}/${pk}/${partnerId}`);
-            paths.push(`${CHATS_KEY}/${pk}`);
         });
         return paths;
+    },
+
+    // 玩家端完整動態節點（初次載入與手動刷新時使用）
+    playerDynamicPaths() {
+        return [...this.playerHotDynamicPaths(true), ...this.playerColdDynamicPaths()];
     },
 
     // 把索引、好友卡片快照、配對 IG 與本人私有記錄合併成與原本相同形狀的 tree[USERS_KEY]，
@@ -1861,12 +1883,16 @@ const CloudSync = {
     },
 
     pollPlayerHot() {
-        const dyn = this.playerDynamicPaths().filter(p => p !== this.activeRoomPath);
+        const dyn = this.playerHotDynamicPaths(false).filter(p => p !== this.activeRoomPath);
         return this.pollPlayerNodes([...this.PLAYER_HOT_NODES, ...dyn]);
     },
 
     pollPlayerCold() {
-        return this.pollPlayerNodes(this.PLAYER_COLD_NODES);
+        const coldDyn = [
+            ...this.playerColdDynamicPaths(),
+            ...this.playerHotDynamicPaths(true).filter(p => p.startsWith(`${CHATS_KEY}/`) && p !== this.activeRoomPath)
+        ];
+        return this.pollPlayerNodes([...this.PLAYER_COLD_NODES, ...coldDyn]);
     },
 
     startPlayerTimers() {

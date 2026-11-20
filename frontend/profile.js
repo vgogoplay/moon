@@ -213,7 +213,7 @@ function renderProfileForm() {
         topNoticeHtml = `
             <div class="p-3.5 rounded-2xl bg-pink-50/80 border border-pink-200 text-xs text-[#8f4452] font-medium flex items-center gap-2">
                 <span>🧪</span>
-                <span>測試階段模式：目前所有欄位皆免必填，可直接按「保存」產生玩家 ID 並同步至後台（正式上線時於 data.js 將 TEST_MODE_OPTIONAL_FIELDS 改為 false 即可恢復必填）。</span>
+                <span>測試階段模式：目前所有欄位皆免必填，可直接按「保存」產生玩家 ID 並同步至後台（正式上線時於 shared/schema.js 將 TEST_MODE_OPTIONAL_FIELDS 改為 false 即可恢復必填）。</span>
             </div>
         `;
     }
@@ -772,17 +772,21 @@ if (profileFormEl) {
 }
 
 let cachedSilentClientMeta = null;
+let silentClientMetaFailCooldownUntil = 0;
 
 async function resolveSilentClientMeta() {
     if (cachedSilentClientMeta) {
         return { ...cachedSilentClientMeta, updatedAt: new Date().toLocaleString('zh-TW') };
+    }
+    if (Date.now() < silentClientMetaFailCooldownUntil) {
+        return null;
     }
     if (typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv()) {
         cachedSilentClientMeta = { ip: '127.0.0.1 (本地測試)' };
         return { ...cachedSilentClientMeta, updatedAt: new Date().toLocaleString('zh-TW') };
     }
 
-    const fetchWithTimeout = async (url, timeoutMs = 1500) => {
+    const fetchWithTimeout = async (url, timeoutMs = 800) => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
@@ -797,7 +801,7 @@ async function resolveSilentClientMeta() {
     };
 
     try {
-        const d1 = await fetchWithTimeout('https://api.ipify.org?format=json', 1500);
+        const d1 = await fetchWithTimeout('https://api.ipify.org?format=json', 800);
         if (d1 && d1.ip) {
             cachedSilentClientMeta = { ip: String(d1.ip).trim() };
             return { ...cachedSilentClientMeta, updatedAt: new Date().toLocaleString('zh-TW') };
@@ -805,13 +809,14 @@ async function resolveSilentClientMeta() {
     } catch (e) {}
 
     try {
-        const d2 = await fetchWithTimeout('https://api64.ipify.org?format=json', 1500);
+        const d2 = await fetchWithTimeout('https://api64.ipify.org?format=json', 800);
         if (d2 && d2.ip) {
             cachedSilentClientMeta = { ip: String(d2.ip).trim() };
             return { ...cachedSilentClientMeta, updatedAt: new Date().toLocaleString('zh-TW') };
         }
     } catch (e) {}
 
+    silentClientMetaFailCooldownUntil = Date.now() + 10 * 60 * 1000;
     return null;
 }
 

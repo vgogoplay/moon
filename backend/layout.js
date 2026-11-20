@@ -198,7 +198,7 @@ function renderAdminSharedShell() {
                         <span class="text-2xl">⛩️</span>
                         <div>
                             <h2 class="text-base font-bold font-serif-jp text-[#8f4452] leading-tight">月老神社後台</h2>
-                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261120d</span></p>
+                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261120opt</span></p>
                         </div>
                     </div>
                 </div>
