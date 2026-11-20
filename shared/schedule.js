@@ -389,17 +389,23 @@ function sharedEvaluateMatchCriteria(seeker, candidate, criteria = {}, mustMatch
     return orKeys.some(ok => sharedCheckSingleCriterion(ok, crit[ok], candidate, crit));
 }
 
-function sharedRecordCustomPairMatch(userA, userB, targetSession, nowTs, activityId, matchDetail = '') {
-    // 終極安全閥：寫入第 2 種活動配對前再次確認 3 大條件（1.活動開啟 2.防呆開啟 3.日期為今日起）
+function sharedRecordCustomPairMatch(userA, userB, targetSession, nowTs, activityId, matchDetail = '', bypassSafetyCheck = false) {
+    // 終極安全閥：自動排程需符合 3 大條件；手動重新配對只需確認「活動開啟中」即可寫入
     if (activityId && typeof CUSTOM_ACTIVITIES_KEY !== 'undefined') {
         try {
             const acts = JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
             const targetAct = Array.isArray(acts) ? acts.find(a => String(a.id) === String(activityId)) : null;
-            if (targetAct && typeof checkCustomActivityThreeConditions === 'function') {
-                const checkRes = checkCustomActivityThreeConditions(targetAct, nowTs || Date.now());
-                if (!checkRes.allowed) {
-                    console.warn('已攔截違反 3 大防呆條件的專屬活動配對寫入：', targetAct.name, checkRes.reason);
+            if (targetAct) {
+                if (!Boolean(targetAct.isOpen)) {
+                    console.warn('已攔截已關閉專屬活動的配對寫入：', targetAct.name);
                     return false;
+                }
+                if (!bypassSafetyCheck && typeof checkCustomActivityThreeConditions === 'function') {
+                    const checkRes = checkCustomActivityThreeConditions(targetAct, nowTs || Date.now());
+                    if (!checkRes.allowed) {
+                        console.warn('已攔截違反 3 大防呆條件的專屬活動配對寫入：', targetAct.name, checkRes.reason);
+                        return false;
+                    }
                 }
             }
         } catch (e) {}
@@ -681,10 +687,15 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     const nowCheckTs = Date.now();
     const scheduledMatchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
 
-    // 嚴格 3 大必要條件（1.活動開啟 2.防呆開啟 3.日期為今日起）：任何一項不達成皆一律禁止配對
-    const threeCond = checkCustomActivityThreeConditions(act, nowCheckTs);
-    if (!threeCond.allowed) {
-        return { executed: false, reason: threeCond.reason, actName: act.name, pairCount: 0, unmatchedCount: 0 };
+    // 自動排程嚴格檢查 3 大必要條件；手動強制／重新配對只要「活動開啟中」即可執行
+    if (!Boolean(act.isOpen)) {
+        return { executed: false, reason: 'closed', actName: act.name, pairCount: 0, unmatchedCount: 0 };
+    }
+    if (!forceManualOverride) {
+        const threeCond = checkCustomActivityThreeConditions(act, nowCheckTs);
+        if (!threeCond.allowed) {
+            return { executed: false, reason: threeCond.reason, actName: act.name, pairCount: 0, unmatchedCount: 0 };
+        }
     }
     if (Boolean(act.autoMatchedDone)) {
         return { executed: false, reason: 'already_done', actName: act.name, pairCount: 0, unmatchedCount: 0 };
@@ -695,7 +706,6 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
 
     if (isAuto || markScheduledDone) {
         act.autoMatchedDone = true;
-        act.isOpen = false;
         localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(acts));
     }
 
@@ -721,7 +731,19 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
         return sharedEvaluateMatchCriteria(seeker, candidate, criteria, mustKeys);
     };
 
-    const permanentMatchedSet = getCustomActivityMatchedUserIdSet(act, users);
+    // 僅將「實際在會員 matchedHistory 擁有本活動配對紀錄」的玩家視為已配對，避免異常殘留的幽靈名單阻擋重新配對
+    const actualHistMatchedSet = new Set();
+    const actIdCheck = String(act.id || '').trim();
+    const actNameCheck = String(act.name || '').trim();
+    users.forEach(u => {
+        if (!u || !u.id || !Array.isArray(u.matchedHistory)) return;
+        const hasRealHist = u.matchedHistory.some(h =>
+            (actIdCheck && String(h.activityId || '').trim() === actIdCheck) ||
+            (actNameCheck && String(h.session || '').trim() === actNameCheck)
+        );
+        if (hasRealHist) actualHistMatchedSet.add(String(u.id).trim());
+    });
+    const permanentMatchedSet = actualHistMatchedSet;
     const eligiblePool = sharedShuffleArray(users.filter(u => {
         if (!u || !u.id || u.isWarned || u.isMatchBanned) return false;
         const uid = String(u.id).trim();
@@ -768,7 +790,7 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
                     if (!areFriendsFn(M, F)) {
                         pairedThisRunIds.add(String(M.id));
                         pairedThisRunIds.add(String(F.id));
-                        sharedRecordCustomPairMatch(M, F, act.name, nowTs, act.id, `同抽中月老籤詩第 ${num} 首`);
+                        sharedRecordCustomPairMatch(M, F, act.name, nowTs, act.id, `同抽中月老籤詩第 ${num} 首`, forceManualOverride);
                         pairCount++;
                         if (typeof appendLog === 'function') {
                             appendLog(`<span class="text-emerald-400">[${act.name}・第${num}首 男女配對成功 #${pairCount}]</span> ID:${M.id}（${M.nickname}・男）⇄ ID:${F.id}（${F.nickname}・女）`);
@@ -800,7 +822,7 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
                     if (!areFriendsFn(M, F)) {
                         pairedThisRunIds.add(String(M.id));
                         pairedThisRunIds.add(String(F.id));
-                        sharedRecordCustomPairMatch(M, F, act.name, nowTs, act.id, `默契大考驗皆選「${choice}」`);
+                        sharedRecordCustomPairMatch(M, F, act.name, nowTs, act.id, `默契大考驗皆選「${choice}」`, forceManualOverride);
                         pairCount++;
                         if (typeof appendLog === 'function') {
                             appendLog(`<span class="text-emerald-400">[${act.name}・${choice} 男女配對成功 #${pairCount}]</span> ID:${M.id}（${M.nickname}・男）⇄ ID:${F.id}（${F.nickname}・女）`);
@@ -828,7 +850,7 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
                 const B = candidates[Math.floor(Math.random() * candidates.length)];
                 pairedThisRunIds.add(String(A.id));
                 pairedThisRunIds.add(String(B.id));
-                sharedRecordCustomPairMatch(A, B, act.name, nowTs, act.id);
+                sharedRecordCustomPairMatch(A, B, act.name, nowTs, act.id, '', forceManualOverride);
                 pairCount++;
                 if (typeof appendLog === 'function') {
                     appendLog(`<span class="text-emerald-400">[${act.name} 配對成功 #${pairCount}]</span> ID:${A.id}（${A.nickname}）⇄ ID:${B.id}（${B.nickname}）`);
@@ -838,11 +860,12 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     }
 
     const unmatchedCount = Math.max(0, eligiblePool.length - pairedThisRunIds.size);
-    const nextMatchedMap = (act.matchedUserMap && typeof act.matchedUserMap === 'object' && !Array.isArray(act.matchedUserMap))
-        ? { ...act.matchedUserMap }
+    const prevMap = (act.matchedUserMap && typeof act.matchedUserMap === 'object' && !Array.isArray(act.matchedUserMap))
+        ? act.matchedUserMap
         : {};
+    const nextMatchedMap = {};
     permanentMatchedSet.forEach(uid => {
-        if (!nextMatchedMap[uid]) nextMatchedMap[uid] = nowTs;
+        nextMatchedMap[uid] = Number(prevMap[uid] || 0) || nowTs;
     });
     pairedThisRunIds.forEach(uid => {
         nextMatchedMap[String(uid)] = nowTs;
@@ -850,12 +873,11 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
 
     act.matchedUserMap = nextMatchedMap;
     act.matchedUserIds = Object.keys(nextMatchedMap);
-    act.matchCount = Number(act.matchCount || 0) + pairCount;
+    act.matchCount = Math.floor(Object.keys(nextMatchedMap).length / 2);
     act.lastMatchedAt = new Date().toLocaleString('zh-TW');
     act.lastMatchedTs = nowTs;
     if (isAuto || markScheduledDone) {
         act.autoMatchedDone = true;
-        act.isOpen = false;
     }
 
     localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(acts));
@@ -864,7 +886,7 @@ async function executeCustomActivityMatchCore(activityId, options = {}) {
     }
 
     if (typeof appendLog === 'function') {
-        const autoCloseNote = (isAuto || markScheduledDone) ? '，活動已同步自動關閉' : '';
+        const autoCloseNote = (isAuto || markScheduledDone) ? '，已完成到點自動配對結算' : '';
         appendLog(`<span class="text-pink-300">[${act.name} 結算完成]</span> 本次共配對成功 <strong>${pairCount} 對</strong>${unmatchedCount > 0 ? `（另有 ${unmatchedCount} 人因號碼／選項落單暫未配對）` : ''}${autoCloseNote}。`);
     }
 

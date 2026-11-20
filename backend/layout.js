@@ -198,7 +198,7 @@ function renderAdminSharedShell() {
                         <span class="text-2xl">⛩️</span>
                         <div>
                             <h2 class="text-base font-bold font-serif-jp text-[#8f4452] leading-tight">月老神社後台</h2>
-                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261120opt</span></p>
+                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261120snap</span></p>
                         </div>
                     </div>
                 </div>
@@ -225,6 +225,11 @@ function renderAdminSharedShell() {
                 </nav>
 
                 <div class="pt-4 mt-4 border-t border-pink-100 space-y-2">
+                    ${(typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv()) ? `
+                        <button type="button" data-sandbox-pull-btn onclick="CloudSync.pullLiveSnapshotToLocalSandbox()" class="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-xl bg-teal-50 border border-teal-300 text-teal-800 text-xs font-bold hover:bg-teal-100 transition shadow-2xs">
+                            <span>📥 單次同步正式庫快照</span>
+                        </button>
+                    ` : ''}
                     <button type="button" onclick="openAdminGitRepoWithPassword()" class="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-xl bg-pink-50 border border-pink-200 text-[#8f4452] text-xs font-semibold hover:bg-pink-100 transition">
                         <span>🐙</span>
                         <span>Git</span>

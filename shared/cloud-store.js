@@ -422,11 +422,12 @@ const CloudSync = {
         );
         if (!matchedAct) return false;
 
-        // 若該專屬活動符合任一禁止條件（1.已關閉 2.防呆關閉 3.活動日期早於今天 11/18），則此筆 11/18 配對為未重整舊分頁誤觸發，直接攔截
-        if (typeof checkCustomActivityThreeConditions === 'function') {
-            return !checkCustomActivityThreeConditions(matchedAct, matchedAtTs).allowed;
+        // 僅攔截「活動日期早於 11/18 截止日」的歷史活動誤配對；
+        // 正常活動在配對完成後可能關閉活動或防呆開關，絕不可因此清除已成立的配對紀錄！
+        if (typeof isCustomActivityBeforeAllowedDate === 'function') {
+            return isCustomActivityBeforeAllowedDate(matchedAct, matchedAtTs);
         }
-        return !Boolean(matchedAct.isOpen) || !Boolean(matchedAct.matchSafetyEnabled);
+        return false;
     },
 
     recordMatchLog(userA, userB, sessionLabel = '', matchTs = Date.now(), sourceLabel = '') {
@@ -1222,8 +1223,13 @@ const CloudSync = {
         const badge = document.getElementById('cloudStatusBadge');
         if (!badge) return;
         if (this.isLocalSandboxMode()) {
+            let snapNote = '';
+            try {
+                const snapAt = localStorage.getItem('yuelao_sandbox_last_snapshot_at') || '';
+                if (snapAt) snapNote = `｜已同步 ${snapAt} 快照`;
+            } catch (e) {}
             badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-teal-50 border border-teal-300 text-teal-800 font-bold';
-            badge.textContent = '🧪 本地測試模式（純本地儲存・不影響正式環境）';
+            badge.textContent = `🧪 本地測試模式（純本地儲存・不影響正式環境${snapNote}）`;
             return;
         }
         if (this.inFlightWrites > 0) {
@@ -2148,6 +2154,146 @@ const CloudSync = {
             return await res.json();
         } catch (e) {
             return undefined;
+        }
+    },
+
+    // 單次唯讀拉取正式庫快照至地端 localStorage（僅執行一次 GET，絕不寫入正式庫，完成後維持純本地測試模式）
+    async pullLiveSnapshotToLocalSandbox() {
+        if (!this.isLocalSandboxMode()) {
+            alert('目前已在正式連線模式，無需執行此操作。');
+            return false;
+        }
+        if (!confirm('確定要從正式 Firebase 資料庫「單次下載」最新資料覆蓋地端測試資料嗎？\n\n・僅執行單向唯讀下載，絕不會修改正式庫\n・下載完成後會立即斷開並維持「🧪 本地測試模式」，不會再自動更新')) {
+            return false;
+        }
+
+        const btns = document.querySelectorAll('[data-sandbox-pull-btn]');
+        btns.forEach(b => {
+            b.disabled = true;
+            b.dataset.origText = b.textContent;
+            b.textContent = '⏳ 正在從正式庫下載快照...';
+        });
+
+        try {
+            let token = '';
+            if (typeof yuelaoAuth !== 'undefined' && yuelaoAuth) {
+                if (yuelaoAuth.adminSession && yuelaoAuth.adminSession.idToken && Date.now() < Number(yuelaoAuth.adminSession.expiresAt || 0) - 60000) {
+                    token = yuelaoAuth.adminSession.idToken;
+                } else {
+                    if (yuelaoAuth.session && yuelaoAuth.session.refreshToken) {
+                        try {
+                            const refreshed = await yuelaoAuth.refreshSession();
+                            if (refreshed && refreshed.idToken) token = refreshed.idToken;
+                        } catch (e) {}
+                    }
+                    if (!token) {
+                        const anon = await yuelaoAuth.signInAnonymously();
+                        if (anon && anon.idToken) token = anon.idToken;
+                    }
+                }
+            }
+
+            const q = token ? `?auth=${encodeURIComponent(token)}` : '';
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 20000);
+            const res = await fetch(`${this.dbUrl}/.json${q}`, {
+                method: 'GET',
+                cache: 'no-store',
+                signal: controller.signal
+            });
+            clearTimeout(timer);
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
+            const data = await res.json();
+            if (!data || typeof data !== 'object') {
+                throw new Error('正式庫回傳資料為空');
+            }
+
+            // 清除舊的本地沙盒殘留鎖定與快取，避免舊資料覆蓋剛拉取的最新快照
+            this.pendingUsers = {};
+            this.deletedUsers = {};
+            this.unmatchedPairs = {};
+            this.etagCache = {};
+            const keysToRemove = [
+                PENDING_USERS_SYNC_KEY,
+                DELETED_USERS_SYNC_KEY,
+                UNMATCHED_PAIRS_SYNC_KEY,
+                this.ETAG_STORAGE_KEY,
+                'yuelao_player_users_cache'
+            ];
+            try {
+                for (let i = localStorage.length - 1; i >= 0; i--) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith(PLAYER_STATE_PREFIX)) {
+                        keysToRemove.push(k);
+                    }
+                }
+                keysToRemove.forEach(k => localStorage.removeItem(k));
+            } catch (e) {}
+
+            this.tree = data;
+            this.hasLoadedFullTree = true;
+            this.chatsTreeVersion++;
+            this.applyTreeToLocalStorage();
+
+            // 確保前後台聊天室快取皆同步取得完整對話紀錄
+            const rawChats = (data[CHATS_KEY] && typeof data[CHATS_KEY] === 'object') ? data[CHATS_KEY] : {};
+            const allChatsLocal = {};
+            Object.keys(rawChats).forEach(pk => {
+                const msgs = this.mapToArray(rawChats[pk]);
+                msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+                allChatsLocal[pk] = msgs.slice(-500);
+            });
+            const chatsJson = JSON.stringify(allChatsLocal);
+            this.writeLocalIfChanged(ADMIN_CHATS_KEY, chatsJson);
+            this.writeLocalIfChanged(CHATS_KEY, chatsJson);
+
+            // 確保前後台討論區索引與內文快取皆同步寫入本地
+            const forumIdxObj = (data['yuelao_forum_index'] && typeof data['yuelao_forum_index'] === 'object') ? data['yuelao_forum_index'] : {};
+            const forumPostsObj = (data['yuelao_forum_posts'] && typeof data['yuelao_forum_posts'] === 'object') ? data['yuelao_forum_posts'] : {};
+            this.writeLocalIfChanged('yuelao_forum_index', JSON.stringify(forumIdxObj));
+            this.writeLocalIfChanged('yuelao_forum_posts', JSON.stringify(forumPostsObj));
+
+            // 若本地前台存有已登入玩家 ID，從最新 yuelao_users 重新載入其最新資料
+            try {
+                const curFrontRaw = localStorage.getItem(STORAGE_KEY);
+                if (curFrontRaw && typeof Store !== 'undefined' && typeof Store.loadByPlayerId === 'function') {
+                    const curFront = JSON.parse(curFrontRaw);
+                    if (curFront && curFront.playerId) {
+                        const refreshedFront = Store.loadByPlayerId(String(curFront.playerId));
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(refreshedFront));
+                    }
+                }
+            } catch (e) {}
+
+            if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate();
+            if (typeof AdminMemoryCache !== 'undefined') AdminMemoryCache.invalidate();
+
+            const now = new Date();
+            const snapTimeStr = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            try { localStorage.setItem('yuelao_sandbox_last_snapshot_at', snapTimeStr); } catch (e) {}
+            this.refreshCloudBadge();
+
+            if (typeof renderAdminAll === 'function') renderAdminAll(true);
+            if (typeof refreshAdminForumIndex === 'function') refreshAdminForumIndex(false);
+
+            const userCount = Object.keys(data[USERS_KEY] || {}).length;
+            const forumCount = Object.keys(forumIdxObj).length;
+            const chatCount = Object.keys(allChatsLocal).length;
+            alert(`✅ 已成功從正式庫單次下載最新快照（${snapTimeStr}）！\n\n・會員資料：${userCount} 筆\n・討論區文章：${forumCount} 篇\n・配對聊天室：${chatCount} 間\n\n目前已自動斷開並維持「🧪 本地測試模式（不影響正式庫）」，後續操作皆僅留在地端，不會再自動連線更新。`);
+            return true;
+        } catch (err) {
+            console.error('[sandbox-pull] 拉取正式庫快照失敗', err);
+            alert(`❌ 下載正式庫快照失敗：${(err && err.message) || '網路連線異常'}\n請確認網路連線正常後再試一次。`);
+            return false;
+        } finally {
+            btns.forEach(b => {
+                b.disabled = false;
+                if (b.dataset.origText) b.textContent = b.dataset.origText;
+            });
         }
     },
 

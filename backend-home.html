@@ -25,6 +25,15 @@
                 <p id="adminHomeWelcomeText" class="text-xs md:text-sm text-gray-600 leading-relaxed">
                     已進入後台純文字首頁。本頁面不會自動下載會員名單、聊天紀錄或統計資料；請由左側選單或下方文字列表點選需要操作的功能頁面。
                 </p>
+                <div id="localSandboxSnapshotBox" class="hidden mt-3 p-3.5 rounded-2xl bg-teal-50/80 border border-teal-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div class="text-xs text-teal-900 space-y-0.5">
+                        <div class="font-bold">🧪 地端本地測試模式・正式庫單次快照同步</div>
+                        <p class="text-[11px] text-teal-800">若地端資料仍停留在舊日期，可點擊右側按鈕單次下載正式庫最新資料（僅唯讀下載、絕不寫入正式庫，完成後繼續維持純本地測試模式）。</p>
+                    </div>
+                    <button type="button" data-sandbox-pull-btn onclick="CloudSync.pullLiveSnapshotToLocalSandbox()" class="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow shrink-0 transition">
+                        📥 單次同步正式庫最新資料
+                    </button>
+                </div>
             </div>
 
             <div class="space-y-3 text-sm text-[#4a3b3c]">
@@ -65,13 +74,19 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261120opt"></script>
+    <script src="shared/schedule.js?v=20261120rematch2"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261120opt"></script>
-    <script src="shared/cloud-store.js?v=20261120opt"></script>
+    <script src="shared/cloud-store.js?v=20261120rematch"></script>
     <!-- 後台共用狀態模組 -->
     <script src="backend/state.js?v=20261120opt"></script>
     <!-- 渲染左側選單與登入驗證 -->
-    <script src="backend/layout.js?v=20261120opt"></script>
+    <script src="backend/layout.js?v=20261120snap"></script>
+    <script>
+        if (typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv()) {
+            const box = document.getElementById('localSandboxSnapshotBox');
+            if (box) box.classList.remove('hidden');
+        }
+    </script>
 </body>
 </html>

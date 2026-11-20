@@ -657,6 +657,47 @@ async function runCustomActivityMatch(activityId, isAuto = false) {
     }
 }
 
+async function reRunCustomActivityMatch(activityId) {
+    const list = getCustomActivities();
+    const act = list.find(a => String(a.id) === String(activityId));
+    if (!act) return;
+
+    const nowTs = Date.now();
+
+    if (!act.isOpen) {
+        alert(`🚫 活動「${act.name}」目前為【已關閉】狀態，請先開啟活動後再執行重新配對！`);
+        return;
+    }
+
+    if (!confirm(`確定要重新執行專屬活動「${act.name}」的配對嗎？\n\n・已實際配對成功的組合會完整保留，不會重複配對\n・系統將針對目前報名名單中「尚未配對成功」的玩家重新進行配對`)) {
+        return;
+    }
+
+    // 重設 autoMatchedDone 與鎖定狀態，並給予 15 分鐘保護期避免報名資料在重新配對期間被自動清除
+    act.autoMatchedDone = false;
+    act.recoveredAtTs = nowTs;
+    if (typeof unlockCustomActivityInCloudLocks === 'function') {
+        unlockCustomActivityInCloudLocks(act);
+    }
+    localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(list));
+
+    const res = await executeCustomActivityMatchCore(activityId, {
+        isAuto: false,
+        markScheduledDone: true,
+        forceManualOverride: true
+    });
+    if (!res || !res.executed) {
+        alert(`⚠️【${act.name}】重新配對未執行（${(res && res.reason) || '不符合配對條件'}）。`);
+        return;
+    }
+
+    if (res.pairCount > 0) {
+        alert(`🎉【${res.actName}】重新配對完成！\n\n本次共成功配對 ${res.pairCount} 對${res.unmatchedCount > 0 ? `（${res.unmatchedCount} 人落單未配對）` : ''}，已即時同步至雙方前台好友名單！`);
+    } else {
+        alert(`ℹ️【${res.actName}】重新配對完成，本次新增 0 對。\n\n（可能原因：剩餘未配對玩家在同號碼／同選項中的異性人數不足，或指定條件尚未遇到符合對象。）`);
+    }
+}
+
 function getArchivedRecoverableCustomRegs(act, users) {
     if (!act || !act.id) return [];
     const aid = String(act.id).trim();
@@ -698,11 +739,8 @@ async function recoverCustomActivityRegistrationsFromArchive(activityId, autoRun
     if (!act) return;
 
     if (autoRunMatchAfter) {
-        const condCheck = (typeof checkCustomActivityThreeConditions === 'function')
-            ? checkCustomActivityThreeConditions(act, Date.now())
-            : { allowed: Boolean(act.isOpen && act.matchSafetyEnabled) };
-        if (!condCheck.allowed || Boolean(act.autoMatchedDone)) {
-            alert('🚫 目前此活動未同時滿足 3 大條件（「🟢 活動開啟中」＋「🟢 防呆開關開啟」＋「活動日期為今日起」），不可執行重新配對！\n（若僅需查看統計名單，請使用「📥 僅找回名單」）');
+        if (!Boolean(act.isOpen)) {
+            alert('🚫 目前此活動為【已關閉】狀態，請先開啟活動後再執行重新配對！\n（若僅需查看統計名單，請使用「📥 僅找回名單」）');
             return;
         }
     }
@@ -733,11 +771,9 @@ async function recoverCustomActivityRegistrationsFromArchive(activityId, autoRun
         const nowRecoveryTs = Date.now();
         const restoredUsers = [];
 
-        // 1. 標記活動已還原時間戳，防止背景 1 秒定時器在 15 分鐘內再次自動清除報名紀錄
+        // 1. 標記活動已還原時間戳，防止背景定時器在 15 分鐘內再次自動清除報名紀錄，並允許重新配對
         act.recoveredAtTs = nowRecoveryTs;
-        if (!autoRunMatchAfter) {
-            act.autoMatchedDone = false;
-        }
+        act.autoMatchedDone = false;
         expandedCustomActivityCards.add(aid);
         localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(list));
 
@@ -865,17 +901,23 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                         ? `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-bold">⚖️ 第3類：二選一（${act.optionA || ''} / ${act.optionB || ''}・男女配對）</span>`
                         : `<span class="text-[11px] px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 font-bold">🎯 第1類：原本機制報名</span>`);
 
-                const permanentMatchedSet = (typeof getCustomActivityMatchedUserIdSet === 'function')
-                    ? getCustomActivityMatchedUserIdSet(act, users)
-                    : new Set();
                 const regUsers = users.filter(u => u && u.id && u.customActivityRegs && u.customActivityRegs[act.id]);
                 const recoverableArchivedList = (typeof getArchivedRecoverableCustomRegs === 'function')
                     ? getArchivedRecoverableCustomRegs(act, users)
                     : [];
+                let actualMatchedUsersCount = 0;
+                users.forEach(u => {
+                    if (!u || !u.id || !Array.isArray(u.matchedHistory)) return;
+                    if (u.matchedHistory.some(h => String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name))) {
+                        actualMatchedUsersCount++;
+                    }
+                });
+                const displayMatchedPairs = Math.floor(actualMatchedUsersCount / 2);
+
                 const regSummary = regUsers.length > 0
                     ? regUsers.map(u => {
                         const regObj = u.customActivityRegs[act.id] || {};
-                        const alreadyMatched = permanentMatchedSet.has(String(u.id).trim()) || (u.matchedHistory || []).some(h =>
+                        const alreadyMatched = (u.matchedHistory || []).some(h =>
                             String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name)
                         );
                         let pickTag = '';
@@ -892,16 +934,19 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                 const isBeforeCutoff = (typeof isCustomActivityBeforeAllowedDate === 'function')
                     ? isCustomActivityBeforeAllowedDate(act, nowRenderTs)
                     : false;
-                const canRunThisActMatch = Boolean(act.isOpen && safetyEnabled && !isBeforeCutoff && !act.autoMatchedDone);
+                const isActOpen = Boolean(act.isOpen);
+                const canConfigureOrRematch = isActOpen;
+                const canRunThisActMatch = Boolean(isActOpen && safetyEnabled && !isBeforeCutoff && !act.autoMatchedDone);
+                const canReRunThisActMatch = Boolean(isActOpen && act.autoMatchedDone);
                 let matchBtnLabel = `💘 執行【${act.name}】配對`;
-                if (!act.isOpen) {
+                if (!isActOpen) {
                     matchBtnLabel = '⚪ 活動已關閉（不可配對）';
+                } else if (act.autoMatchedDone) {
+                    matchBtnLabel = `🔄 重新配對【${act.name}】`;
                 } else if (!safetyEnabled) {
                     matchBtnLabel = '🔒 防呆開關已關閉（不可配對）';
                 } else if (isBeforeCutoff) {
                     matchBtnLabel = '🚫 11/18 之前活動不可配對';
-                } else if (act.autoMatchedDone) {
-                    matchBtnLabel = '✅ 已完成配對（不可重複配對）';
                 }
 
                 // 檢查是否有在 11/18 00:00 之後誤產生的配對紀錄（供管理員一鍵清除誤配對，保留 11/15 原本紀錄）
@@ -940,7 +985,7 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                             <div class="flex flex-wrap items-center gap-2">
                                 ${typeBadgeHtml}
                                 <span class="text-[11px] px-2 py-0.5 rounded-full bg-pink-50 border border-pink-200 text-[#c96a7b] font-semibold">
-                                    累計配對 ${act.matchCount || 0} 對
+                                    實際配對 ${displayMatchedPairs} 對
                                 </span>
                             </div>
                             ${scheduleBadgeHtml}
@@ -952,7 +997,7 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                         </div>
                         <div class="flex flex-col items-stretch lg:items-end justify-center gap-2 shrink-0 p-3 rounded-xl bg-amber-50/35 border border-amber-200 w-full lg:w-auto">
                             ${recoverableArchivedList.length > 0 ? `
-                                ${canRunThisActMatch ? `
+                                ${canConfigureOrRematch ? `
                                     <button type="button" onclick="recoverCustomActivityRegistrationsFromArchive('${act.id}', true)"
                                         class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow hover:opacity-95 transition">
                                         🔄 找回名單（${recoverableArchivedList.length}人）並重新配對
@@ -969,9 +1014,15 @@ function renderActivitiesPageSection(users, batch, maxDisplayBatch) {
                             <button type="button" onclick="toggleCustomActivityOpen('${act.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${act.isOpen ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-emerald-600 text-white hover:bg-emerald-700'}">
                                 ${act.isOpen ? '切換為「關閉」' : '開啟活動（前台顯示）'}
                             </button>
-                            <button type="button" onclick="runCustomActivityMatch('${act.id}')" ${canRunThisActMatch ? '' : 'disabled'} class="px-4 py-2 rounded-xl text-xs font-bold transition ${canRunThisActMatch ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white shadow hover:opacity-95' : 'bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed'}">
-                                ${matchBtnLabel}
-                            </button>
+                            ${canReRunThisActMatch ? `
+                                <button type="button" onclick="reRunCustomActivityMatch('${act.id}')" class="px-4 py-2 rounded-xl text-xs font-bold transition bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow hover:opacity-95">
+                                    ${matchBtnLabel}
+                                </button>
+                            ` : `
+                                <button type="button" onclick="runCustomActivityMatch('${act.id}')" ${canRunThisActMatch ? '' : 'disabled'} class="px-4 py-2 rounded-xl text-xs font-bold transition ${canRunThisActMatch ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] text-white shadow hover:opacity-95' : 'bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed'}">
+                                    ${matchBtnLabel}
+                                </button>
+                            `}
                             ${lateRogueUsers.length > 0 ? `
                                 <button type="button" onclick="purgeLateRogueCustomActivityMatches('${act.id}')" class="px-3.5 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold shadow hover:bg-rose-700 transition">
                                     🧹 清除今日誤配對紀錄（${lateRogueUsers.length}人）
@@ -1100,3 +1151,5 @@ window.recoverCustomActivityRegistrationsFromArchive = recoverCustomActivityRegi
 window.toggleCustomActivityMatchSafety = toggleCustomActivityMatchSafety;
 window.syncNewCustomActAutoMatchTime = syncNewCustomActAutoMatchTime;
 window.syncEditCustomActAutoMatchTime = syncEditCustomActAutoMatchTime;
+
+window.reRunCustomActivityMatch = reRunCustomActivityMatch;
