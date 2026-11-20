@@ -379,6 +379,14 @@ function toggleCustomActivityMatchSafety(activityId) {
     act.matchSafetyEnabled = nextVal;
     if (!nextVal && typeof lockCustomActivityInCloudLocks === 'function') {
         lockCustomActivityInCloudLocks(act);
+    } else if (nextVal) {
+        const mTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+        if (Number(act.matchCount || 0) === 0 && (mTs === 0 || Date.now() < mTs)) {
+            act.autoMatchedDone = false;
+        }
+        if (typeof unlockCustomActivityInCloudLocks === 'function') {
+            unlockCustomActivityInCloudLocks(act);
+        }
     }
     saveCustomActivities(list);
     if (typeof CloudSync !== 'undefined') {
@@ -399,6 +407,14 @@ async function toggleCustomActivityOpen(activityId) {
     act.isOpen = !act.isOpen;
     if (!act.isOpen && typeof lockCustomActivityInCloudLocks === 'function') {
         lockCustomActivityInCloudLocks(act);
+    } else if (act.isOpen) {
+        const mTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+        if (Number(act.matchCount || 0) === 0 && (mTs === 0 || Date.now() < mTs)) {
+            act.autoMatchedDone = false;
+        }
+        if (typeof unlockCustomActivityInCloudLocks === 'function') {
+            unlockCustomActivityInCloudLocks(act);
+        }
     }
     saveCustomActivities(list);
     CloudSync.putNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, act);

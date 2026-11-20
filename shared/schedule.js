@@ -537,6 +537,44 @@ function lockCustomActivityInCloudLocks(act) {
     });
 }
 
+function unlockCustomActivityInCloudLocks(act) {
+    if (!act || !act.id) return;
+    const aid = String(act.id).trim();
+    const candidateTsList = new Set([0]);
+    const mTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+    const eTs = parseLocalDateTimeTs(act.endTime || act.endTimeTs);
+    if (mTs > 0) candidateTsList.add(mTs);
+    if (eTs > 0) candidateTsList.add(eTs);
+
+    candidateTsList.forEach(tsVal => {
+        const lockNodeKey = makeCustomActLockNodeKey(aid, tsVal);
+        try {
+            localStorage.removeItem(`${CUSTOM_ACT_LOCK_PREFIX}${lockNodeKey}`);
+        } catch (e) {}
+        if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+            const existingCloudLock = (CloudSync.tree && CloudSync.tree[CUSTOM_ACT_CLOUD_LOCKS_NODE])
+                ? CloudSync.tree[CUSTOM_ACT_CLOUD_LOCKS_NODE][lockNodeKey]
+                : null;
+            if (!existingCloudLock || existingCloudLock.claimedBy === 'ADMIN_LOCKED_CLOSED') {
+                CloudSync.deleteNode(`${CUSTOM_ACT_CLOUD_LOCKS_NODE}/${lockNodeKey}`);
+            }
+        }
+    });
+}
+
+function isPrematurelyLockedFutureActivity(act, nowTs = Date.now()) {
+    if (!act || typeof act !== 'object') return false;
+    if (!Boolean(act.isOpen) || !Boolean(act.autoMatchedDone)) return false;
+    if (Number(act.matchCount || 0) > 0) return false;
+    if (getCustomActivityMatchedUserIdSet(act).size > 0) return false;
+    if (isCustomActivityBeforeAllowedDate(act, nowTs)) return false;
+    const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+    const endTs = parseLocalDateTimeTs(act.endTime || act.endTimeTs);
+    if (matchTs > 0) return nowTs < matchTs;
+    if (endTs > 0) return nowTs < endTs;
+    return true;
+}
+
 function enforceClosedCustomActivityCloudLocks() {
     if (typeof CUSTOM_ACTIVITIES_KEY === 'undefined') return;
     if (typeof CloudSync === 'undefined' || !CloudSync.initialized) return;
@@ -552,8 +590,22 @@ function enforceClosedCustomActivityCloudLocks() {
     let listChanged = false;
     acts.forEach(act => {
         if (!act || !act.id) return;
-        const cond = checkCustomActivityThreeConditions(act, nowTs);
-        if (!cond.allowed) {
+
+        // 自動修復：若活動處於「開啟中」、尚未到達配對時間且尚未產生任何配對（0 對），絕不可標記為 autoMatchedDone（避免前台誤顯示「活動已結束」）
+        if (isPrematurelyLockedFutureActivity(act, nowTs)) {
+            act.autoMatchedDone = false;
+            listChanged = true;
+            unlockCustomActivityInCloudLocks(act);
+            CloudSync.patchNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, { autoMatchedDone: false });
+            return;
+        }
+
+        const isBeforeCutoff = isCustomActivityBeforeAllowedDate(act, nowTs);
+        const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
+        const isClosedAndPastOrDone = !Boolean(act.isOpen) && (Boolean(act.autoMatchedDone) || (matchTs > 0 && nowTs >= matchTs));
+
+        // 僅針對「早於今日日期的歷史活動」或「已關閉且已過配對時間的活動」寫入永久鎖定，不影響開啟中且尚未到期的新活動
+        if (isBeforeCutoff || isClosedAndPastOrDone) {
             lockCustomActivityInCloudLocks(act);
             if (!act.autoMatchedDone) {
                 act.autoMatchedDone = true;
@@ -565,6 +617,7 @@ function enforceClosedCustomActivityCloudLocks() {
     if (listChanged) {
         try {
             localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(acts));
+            if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(CUSTOM_ACTIVITIES_KEY);
         } catch (e) {}
     }
 }
@@ -896,7 +949,8 @@ async function claimAndRunScheduledCustomActivity(activityId, matchTs, lockKey, 
             const remoteLock = await lockRes.json();
 
             // 若雲端活動違反 3 大條件（關閉 / 防呆關閉 / 早於今日日期）、已標記 autoMatchedDone，或已有其他裝置搶先寫入雲端鎖，立即停止不再執行第二次
-            if (!remoteAct || !checkCustomActivityThreeConditions(remoteAct, Date.now()).allowed || remoteAct.autoMatchedDone || (remoteLock && remoteLock.claimedBy)) {
+            const hasActiveClaimLock = Boolean(remoteLock && remoteLock.claimedBy && remoteLock.claimedBy !== 'ADMIN_LOCKED_CLOSED');
+            if (!remoteAct || !checkCustomActivityThreeConditions(remoteAct, Date.now()).allowed || remoteAct.autoMatchedDone || hasActiveClaimLock) {
                 claimedSuccessfully = true;
                 try { localStorage.setItem(lockKey, `DONE_${Date.now()}`); } catch (e) {}
                 if (remoteAct && typeof remoteAct === 'object') {
@@ -986,9 +1040,19 @@ function checkScheduledCustomActivities(isFrontendCaller = false) {
 
     const nowTs = Date.now();
     let triggeredAny = false;
+    let repairedAny = false;
 
     acts.forEach(act => {
-        if (!act || !act.id || act.autoMatchedDone) return;
+        if (!act || !act.id) return;
+        if (isPrematurelyLockedFutureActivity(act, nowTs)) {
+            act.autoMatchedDone = false;
+            repairedAny = true;
+            unlockCustomActivityInCloudLocks(act);
+            if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+                CloudSync.patchNode(`${CUSTOM_ACTIVITIES_KEY}/${act.id}`, { autoMatchedDone: false });
+            }
+        }
+        if (act.autoMatchedDone) return;
         if (!checkCustomActivityThreeConditions(act, nowTs).allowed) return;
         const matchTs = parseLocalDateTimeTs(act.matchTime || act.matchTimeTs);
         if (!matchTs || nowTs < matchTs) return;
@@ -1013,7 +1077,14 @@ function checkScheduledCustomActivities(isFrontendCaller = false) {
         triggeredAny = true;
     });
 
-    return triggeredAny;
+    if (repairedAny) {
+        try {
+            localStorage.setItem(CUSTOM_ACTIVITIES_KEY, JSON.stringify(acts));
+            if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(CUSTOM_ACTIVITIES_KEY);
+        } catch (e) {}
+    }
+
+    return triggeredAny || repairedAny;
 }
 
 
