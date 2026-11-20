@@ -195,8 +195,8 @@ function renderForumList() {
 
     if (currentForumFilter === '熱門' || totalPages <= 1) {
         const noteText = currentForumFilter === '公告'
-            ? `共 ${filtered.length} 則官方公告（後台公告保存時間不限制）`
-            : `共 ${filtered.length} 篇文章（一般文章保留 ${FORUM_RETENTION_DAYS} 天自動刪除）`;
+            ? `共 ${filtered.length} 則`
+            : `共 ${filtered.length} 篇（僅保留 ${FORUM_RETENTION_DAYS} 天自動刪除）`;
         pagBar.innerHTML = `<span class="text-gray-400 mt-2 ml-2 mb-2 inline-block">${noteText}</span>`;
     } else {
         const pageBtns = [];
