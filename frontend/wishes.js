@@ -14,7 +14,7 @@ let wishPastHistoryPage = 1;
 let wishPublicGenderFilter = 'ALL';
 const WISH_PUBLIC_PER_PAGE = 5;
 const WISH_PAST_PER_PAGE = 5;
-const WISH_PAST_MAX_RECORDS = 10;
+const WISH_PAST_MAX_RECORDS = 5;
 const WISH_MIN_OPEN_DAYS = 3;
 const WISH_MAX_OPEN_DAYS = 7;
 const WISH_MAX_EXTRA_QUESTIONS = 4;
@@ -1612,7 +1612,7 @@ function renderWishWallTab(forceRender = false) {
 
             pastHistoryBox.innerHTML = `
                 <div class="flex items-center justify-between px-1">
-                    <h3 class="text-sm font-bold font-serif-jp text-gray-500">📜 近期已結束的祈願紀錄（近 ${totalPastCount} 筆）</h3>
+                    <h3 class="text-sm font-bold font-serif-jp text-gray-500">📜 近期已結束的祈願紀錄（僅保留近 5 筆）</h3>
                 </div>
                 <div class="space-y-2">
                     ${pageEndedWishes.map(w => {

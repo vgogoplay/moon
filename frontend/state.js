@@ -138,7 +138,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('storage', (e) => {
         const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
         const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
-        if ([USERS_LOCAL_KEY, SYSTEM_STATE_KEY, CUSTOM_ACTIVITIES_KEY, BANNED_RULES_KEY, MAILBOX_KEY, REPORTS_KEY, CHATS_KEY, fwKey, wwKey, 'yuelao_test_event'].includes(e.key)) {
+        if ([USERS_LOCAL_KEY, SYSTEM_STATE_KEY, CUSTOM_ACTIVITIES_KEY, BANNED_RULES_KEY, MAILBOX_KEY, REPORTS_KEY, CHATS_KEY, fwKey, wwKey, 'yuelao_forum_index', 'yuelao_test_event'].includes(e.key)) {
+            if (e.key === 'yuelao_forum_index' && typeof refreshForum === 'function') {
+                refreshForum();
+            }
             if (e.key === fwKey && typeof renderHomeFateWall === 'function') {
                 renderHomeFateWall(true);
             }
@@ -836,6 +839,10 @@ function switchTab(tabName) {
 
     if (tabName === 'home' && typeof renderHomeStatsCharts === 'function') {
         renderHomeStatsCharts(true);
+    }
+
+    if (tabName === 'forum' && typeof refreshForum === 'function') {
+        refreshForum();
     }
 
     if (tabName === 'wishes' && typeof renderWishWallTab === 'function') {

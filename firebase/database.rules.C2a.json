@@ -12,6 +12,8 @@
     "yuelao_pair_ig":               { ".write": "auth != null" },
     "yuelao_wish_wall":             { ".write": "auth != null" },
     "yuelao_fate_wall":             { ".write": "auth != null" },
+    "yuelao_forum_index":           { ".write": "auth != null" },
+    "yuelao_forum_posts":           { ".write": "auth != null" },
     "yuelao_mailbox":               { ".write": "auth != null" },
     "yuelao_reports":               { ".write": "auth != null" },
     "yuelao_chats":                 { ".write": "auth != null" },

@@ -1634,6 +1634,7 @@ const CloudSync = {
             if (p.includes('backend-home')) return 'home';
             if (p.includes('backend-activities')) return 'activities';
             if (p.includes('backend-chats')) return 'chats';
+            if (p.includes('backend-forum')) return 'forum';
             if (p.includes('backend-ops')) return 'ops';
             if (p.includes('backend-logs')) return 'logs';
         }
@@ -1644,6 +1645,9 @@ const CloudSync = {
         const key = pageKey || this.getBackendPageKey();
         if (key === 'home') {
             return []; // 純文字首頁：0 資料庫讀取，完全不下載會員或聊天資料
+        }
+        if (key === 'forum') {
+            return []; // 討論區管理頁：不下載全站會員資料，改由討論區模組按需讀取輕量索引
         }
         if (key === 'member') {
             return [USERS_KEY, SYSTEM_STATE_KEY, FORCE_KEY, UNMATCHED_PAIRS_CLOUD_NODE, ID_COUNTER_KEY, CUSTOM_ACTIVITIES_KEY];
@@ -2067,6 +2071,20 @@ const CloudSync = {
     },
 
     // ===== 流量修復：精準單節點讀取（嚴禁前台請求根節點 /.json）=====
+    syncSandboxForumPath(path) {
+        if (!this.isLocalSandboxMode()) return;
+        const clean = String(path || '').replace(/^\/+|\/+$/g, '');
+        const topNode = clean.split('/')[0];
+        if (topNode === 'yuelao_forum_index' || topNode === 'yuelao_forum_posts') {
+            try {
+                const nodeData = (this.tree && this.tree[topNode] && typeof this.tree[topNode] === 'object')
+                    ? this.tree[topNode]
+                    : {};
+                localStorage.setItem(topNode, JSON.stringify(nodeData));
+            } catch (e) {}
+        }
+    },
+
     async getNodeOnce(path) {
         if (this.isLocalSandboxMode()) {
             const clean = String(path || '').replace(/^\/+|\/+$/g, '');
@@ -2076,6 +2094,21 @@ const CloudSync = {
                     const arr = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
                     const found = Array.isArray(arr) ? arr.find(u => u && String(u.id).trim() === parts[1]) : null;
                     return found ? { ...found } : null;
+                } catch (e) {
+                    return null;
+                }
+            }
+            if (parts[0] === 'yuelao_forum_index' || parts[0] === 'yuelao_forum_posts') {
+                try {
+                    const mapObj = JSON.parse(localStorage.getItem(parts[0]) || '{}');
+                    if (!mapObj || typeof mapObj !== 'object') return null;
+                    if (!parts[1]) return { ...mapObj };
+                    let curr = mapObj;
+                    for (let i = 1; i < parts.length; i++) {
+                        if (!curr || typeof curr !== 'object' || curr[parts[i]] === undefined) return null;
+                        curr = curr[parts[i]];
+                    }
+                    return (curr && typeof curr === 'object') ? JSON.parse(JSON.stringify(curr)) : curr;
                 } catch (e) {
                     return null;
                 }
@@ -2251,7 +2284,10 @@ const CloudSync = {
         this.invalidateNodeReadCache(path);
         this.invalidatePersistedEtag(path);
         this.applyStreamPatch(path, value);
-        if (this.isLocalSandboxMode()) return true;
+        if (this.isLocalSandboxMode()) {
+            this.syncSandboxForumPath(path);
+            return true;
+        }
         this.inFlightWrites++;
         this.writeEpoch++;
         this.refreshCloudBadge();
@@ -2287,7 +2323,10 @@ const CloudSync = {
             const subPath = cleanBase ? `${cleanBase}/${k}` : k;
             this.applyStreamPatch(subPath, v);
         });
-        if (this.isLocalSandboxMode()) return true;
+        if (this.isLocalSandboxMode()) {
+            this.syncSandboxForumPath(path);
+            return true;
+        }
         this.inFlightWrites++;
         this.writeEpoch++;
         this.refreshCloudBadge();
@@ -2450,7 +2489,10 @@ const CloudSync = {
             const pid = pathParts[1];
             if (pid) this.markSharedDeletedUser(pid, 20000);
         }
-        if (this.isLocalSandboxMode()) return true;
+        if (this.isLocalSandboxMode()) {
+            this.syncSandboxForumPath(path);
+            return true;
+        }
         this.inFlightWrites++;
         this.writeEpoch++;
         this.refreshCloudBadge();

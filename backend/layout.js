@@ -38,6 +38,7 @@ function getCurrentAdminPageKey() {
     if (path.includes('backend-home')) return 'home';
     if (path.includes('backend-activities')) return 'activities';
     if (path.includes('backend-chats')) return 'chats';
+    if (path.includes('backend-forum')) return 'forum';
     if (path.includes('backend-ops')) return 'ops';
     if (path.includes('backend-logs')) return 'logs';
     return 'member';
@@ -78,6 +79,13 @@ function renderAdminSharedShell() {
             icon: '💬',
             label: '玩家聊天紀錄查詢',
             sub: '配對房間・對話內容查核'
+        },
+        {
+            key: 'forum',
+            href: 'backend-forum.html',
+            icon: '📌',
+            label: '討論區管理與公告',
+            sub: '發公告・刪文・刪留言'
         },
         {
             key: 'ops',
@@ -190,7 +198,7 @@ function renderAdminSharedShell() {
                         <span class="text-2xl">⛩️</span>
                         <div>
                             <h2 class="text-base font-bold font-serif-jp text-[#8f4452] leading-tight">月老神社後台</h2>
-                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261119c</span></p>
+                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261120d</span></p>
                         </div>
                     </div>
                 </div>

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>討論區管理與公告 📋 月老神社後台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20261118b">
+</head>
+<body data-admin-page="forum">
+    <div id="adminLayoutMount" class="space-y-6">
+        <!-- ==================== 1. 📢 發佈討論區官方公告 ==================== -->
+        <div class="card-jp rounded-2xl p-5 md:p-6 border-2 border-rose-200 bg-gradient-to-r from-white to-rose-50/40 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                    <h2 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">1. 📢 發佈討論區官方公告（前台「📌 公告」分類）</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">發佈後將出現在前台討論區「📌 公告」分頁；所有討論區文章（含公告）前後台保留 <strong>10 天</strong>後自動刪除</p>
+                </div>
+                <span id="adminForumStatusBadge" class="text-xs px-2.5 py-1 rounded-full bg-pink-100 text-[#8f4452] font-bold self-start sm:self-auto">
+                    文章索引 0 篇
+                </span>
+            </div>
+
+            <form onsubmit="submitAdminForumAnnouncement(event)" class="grid grid-cols-1 md:grid-cols-12 gap-3 items-stretch">
+                <div class="md:col-span-3 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">1. 公告署名（上限 4 字）</label>
+                    <input type="text" id="adminForumAnnounceAuthor" maxlength="4" value="月老管理" placeholder="例如：月老管理" class="w-full p-2.5 admin-input-box text-xs font-bold text-[#8f4452]" required>
+                </div>
+
+                <div class="md:col-span-3 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">2. 留言權限限制</label>
+                    <select id="adminForumAnnounceReplyLimit" class="w-full p-2.5 admin-input-box text-xs font-bold text-[#5e464a]">
+                        <option value="ALL" selected>🌍 全部人皆可留言</option>
+                        <option value="MALE">⚾ 僅限男生留言</option>
+                        <option value="FEMALE">🎀 僅限女生留言</option>
+                    </select>
+                </div>
+
+                <div class="md:col-span-6 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">3. 公告標題（上限 25 字）</label>
+                    <input type="text" id="adminForumAnnounceTitle" maxlength="25" placeholder="輸入官方公告標題..." class="w-full p-2.5 admin-input-box text-xs font-medium" required>
+                </div>
+
+                <div class="md:col-span-10 admin-field-box">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">4. 公告內文（上限 1000 字）</label>
+                    <textarea id="adminForumAnnounceContent" rows="3" maxlength="1000" placeholder="輸入公告詳細內容、板規提醒或活動通知..." class="w-full p-2.5 admin-input-box text-xs leading-relaxed resize-y" required></textarea>
+                </div>
+
+                <div class="md:col-span-2 flex items-end">
+                    <button type="submit" id="adminForumPublishBtn" class="w-full h-[46px] md:h-full min-h-[46px] px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition">
+                        📌 發佈公告
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- ==================== 2. 📋 討論區文章與留言管理（含公告名稱列表＋刪除按鈕） ==================== -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-pink-200 space-y-4">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">2. 📋 討論區文章與留言管理</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">討論區文章（含公告）前後台保留 <strong>10 天</strong>自動刪除；下方可一覽所有公告名稱並直接刪除，或點選文章檢視內文與留言</p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="admin-field-box !py-1.5 !px-3 flex items-center gap-1.5">
+                        <span class="text-[#8f4452] font-bold shrink-0">🏷️ 分類：</span>
+                        <select id="adminForumTagFilter" onchange="onAdminForumFilterChange()" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
+                            <option value="ALL" selected>全部分類</option>
+                            <option value="公告">📌 公告</option>
+                            <option value="感情">🌸 感情</option>
+                            <option value="心情">💭 心情</option>
+                            <option value="女孩">🎀 女孩</option>
+                            <option value="男孩">⚾ 男孩</option>
+                            <option value="討論">💬 討論</option>
+                            <option value="閒聊">☕ 閒聊</option>
+                            <option value="寵物">🐾 寵物</option>
+                        </select>
+                    </div>
+
+                    <div class="admin-field-box !py-1.5 !px-3 flex items-center gap-2">
+                        <span class="text-[#8f4452] font-bold shrink-0">🔍 搜尋：</span>
+                        <input type="text" id="adminForumSearchInput" oninput="onAdminForumSearchInput(this.value)" placeholder="標題、暱稱或玩家 ID..." class="w-40 sm:w-48 p-1.5 admin-input-box text-xs">
+                        <button type="button" id="clearAdminForumSearchBtn" onclick="clearAdminForumSearch()" class="hidden text-gray-400 hover:text-rose-600 font-bold px-1">✕</button>
+                    </div>
+
+                    <div class="admin-field-box !py-1.5 !px-3 flex items-center gap-1.5">
+                        <span class="text-[#8f4452] font-bold shrink-0">每頁：</span>
+                        <select id="adminForumPerPageSelect" onchange="onAdminForumPerPageChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
+                            <option value="5" selected>5 篇</option>
+                            <option value="10">10 篇</option>
+                            <option value="20">20 篇</option>
+                            <option value="50">50 篇</option>
+                        </select>
+                    </div>
+
+                    <button type="button" id="adminForumRefreshBtn" onclick="refreshAdminForumIndex(true)" class="px-3.5 py-2.5 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition">
+                        ↻ 刷新列表
+                    </button>
+                </div>
+            </div>
+
+            <!-- 📢 已發佈官方公告列表（列出公告名稱＋刪除按鈕） -->
+            <div class="p-3.5 rounded-2xl bg-rose-50/55 border border-rose-200 space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="text-xs font-bold text-[#8f4452]">📢 已發佈官方公告名稱列表（點擊公告名稱可檢視內容，或直接點擊刪除）</span>
+                    <span id="adminForumAnnouncementsCountBadge" class="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">
+                        共 0 則公告
+                    </span>
+                </div>
+                <div id="adminForumAnnouncementsList" class="space-y-1.5">
+                    <p class="text-xs text-gray-400">載入公告列表中...</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                <!-- 左側：文章索引列表 -->
+                <div class="lg:col-span-6 rounded-2xl border-2 border-pink-200 overflow-hidden bg-white">
+                    <div class="px-4 py-3 bg-pink-50/70 border-b border-pink-200 flex items-center justify-between">
+                        <span class="text-xs font-bold text-[#8f4452]">🗂️ 全部文章索引列表（保留 10 天自動刪除）</span>
+                        <span id="adminForumFilteredCountText" class="text-[11px] text-gray-500">共 0 篇</span>
+                    </div>
+                    <div id="adminForumPostList" class="divide-y divide-pink-100 bg-white min-h-[320px]">
+                        <div class="p-8 text-center text-xs text-gray-400">載入討論區索引中...</div>
+                    </div>
+                    <div id="adminForumPaginationBar" class="px-3.5 py-2.5 bg-pink-50/50 border-t border-pink-200 flex flex-wrap items-center justify-between gap-2 text-[11px]"></div>
+                </div>
+
+                <!-- 右側：選中文章內文與留言管理 -->
+                <div class="lg:col-span-6 rounded-2xl border-2 border-pink-200 overflow-hidden bg-white">
+                    <div id="adminForumDetailHeader" class="px-5 py-3.5 bg-gradient-to-r from-pink-50/80 to-rose-50/60 border-b border-pink-200 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <h3 class="text-sm font-bold text-[#8f4452]">文章內文與推文檢視視窗</h3>
+                            <p class="text-[11px] text-gray-400">點選左側任一篇文章或上方公告名稱，即可檢視完整內容、刪除文章或刪除違規留言</p>
+                        </div>
+                    </div>
+                    <div id="adminForumDetailBody" class="p-4 bg-[#fffafb] min-h-[420px] max-h-[620px] overflow-y-auto space-y-4">
+                        <div class="h-80 flex flex-col items-center justify-center text-center text-xs text-gray-400 space-y-2">
+                            <span class="text-3xl">📋</span>
+                            <p>請從左側或上方公告列表點選任一篇文章進行內容查核與留言管理</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    
+    <!-- 延長保留期限 Modal -->
+    <div id="extendRetentionModal" class="hidden fixed inset-0 bg-black/55 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border-2 border-amber-200 space-y-4">
+            <div class="flex items-center justify-between">
+                <p class="text-base font-bold text-[#8f4452]">⏳ 延長文章保留期限</p>
+                <button type="button" onclick="closeExtendRetentionModal()" class="text-gray-400 hover:text-gray-700 text-lg leading-none">✕</button>
+            </div>
+
+            <form onsubmit="submitExtendRetention(event)" class="space-y-4">
+                <div class="text-xs text-gray-600 leading-relaxed bg-amber-50/50 p-3 rounded-xl border border-amber-100">
+                    設定後，此文章將從<span class="font-bold text-rose-600">今天</span>起算重新保留指定的天數。
+                </div>
+                <input type="hidden" id="extendRetentionPostId" value="">
+                
+                <div class="admin-field-box !border-amber-200">
+                    <label class="block text-xs font-bold text-amber-900 mb-2">請選擇要延長的天數：</label>
+                    <select id="extendRetentionDaysSelect" class="w-full p-2.5 admin-input-box text-sm font-bold text-[#8f4452]">
+                        <option value="3">延長 3 天</option>
+                        <option value="7">延長 7 天</option>
+                        <option value="10" selected>重新保留 10 天</option>
+                        <option value="14">重新保留 14 天</option>
+                        <option value="30">重新保留 30 天</option>
+                        <option value="999">永久保留（設為 999 天）</option>
+                    </select>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t border-pink-100">
+                    <button type="button" onclick="closeExtendRetentionModal()" class="px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-white text-xs font-bold shadow hover:opacity-95 transition">
+                        ✅ 確認延長
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 前後台共用核心層 -->
+    <script src="shared/schedule.js?v=20261120a"></script>
+    <script src="shared/schema.js?v=20261120a"></script>
+    <script src="shared/auth.js?v=20261120a"></script>
+    <script src="shared/cloud-store.js?v=20261120e"></script>
+    <!-- 後台共用狀態與頁面模組 -->
+    <script src="backend/state.js?v=20261120a"></script>
+    <script src="backend/forum.js?v=20261120i"></script>
+    <!-- 渲染左側選單與登入驗證 -->
+    <script src="backend/layout.js?v=20261120d"></script>
+</body>
+</html>
