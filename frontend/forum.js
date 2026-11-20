@@ -376,7 +376,10 @@ async function viewForumPost(postId) {
     }
     currentViewingPostId = postId;
     const anonCb = document.getElementById('forumReplyAnonCheckbox');
-    if (anonCb) anonCb.checked = false;
+    if (anonCb) {
+        anonCb.checked = false;
+        if (anonCb.parentElement) anonCb.parentElement.classList.remove('hidden');
+    }
     document.getElementById('forumPostHeader').innerHTML = '<div class="text-center text-gray-400 py-10 text-xs">下載文章中...</div>';
     document.getElementById('forumRepliesList').innerHTML = '';
     
@@ -470,8 +473,15 @@ function renderForumPostDetail() {
     const likesMap = (viewingPostData.likes && typeof viewingPostData.likes === 'object') ? viewingPostData.likes : {};
     const hasLiked = Boolean(appState.playerId && likesMap[appState.playerId]);
     
+    const postAuthorId = !isBackendForumPost(p) ? String(p.authorId || '').trim() : '';
+    const isMyOwnPost = Boolean(postAuthorId && appState.playerId && postAuthorId === String(appState.playerId).trim());
+    const replyAnonCb = document.getElementById('forumReplyAnonCheckbox');
+    if (replyAnonCb && replyAnonCb.parentElement) {
+        replyAnonCb.parentElement.classList.toggle('hidden', isMyOwnPost);
+    }
+
     let ownerActionBtnsHtml = '';
-    if (!isBackendForumPost(p) && appState.playerId && String(p.authorId || '') === String(appState.playerId)) {
+    if (isMyOwnPost) {
         ownerActionBtnsHtml = `
             <button type="button" onclick="editMyForumPost('${yuelaoEscapeHtml(p.id)}')" class="px-2.5 py-1 rounded-xl bg-sky-50 border border-sky-200 text-sky-600 hover:bg-sky-100 text-[11px] font-bold shadow-2xs transition shrink-0 whitespace-nowrap ml-2">✏️ 編輯文章</button>
             <button type="button" onclick="deleteMyForumPost('${yuelaoEscapeHtml(p.id)}')" class="px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 text-[11px] font-bold shadow-2xs transition shrink-0 whitespace-nowrap ml-1.5">🗑️ 刪除文章</button>
@@ -513,10 +523,13 @@ function renderForumPostDetail() {
             const rTimeStr = rTs.toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
             const rType = r.type === '推' ? `<span class="text-emerald-600 font-bold w-4">推</span>` : `<span class="text-gray-500 font-bold w-4">→</span>`;
             const isMe = appState.playerId && String(r.authorId || '') === String(appState.playerId);
-            const replyAuthorName = resolveForumReplyAuthorName(r);
-            const authorTag = isMe
-                ? `<span class="text-[#8f4452] font-bold">${yuelaoEscapeHtml(replyAuthorName)}</span>`
-                : `<span class="text-gray-600 font-semibold">${yuelaoEscapeHtml(replyAuthorName)}</span>`;
+            const isOp = Boolean(postAuthorId && String(r.authorId || '').trim() === postAuthorId);
+            const replyAuthorName = isOp ? '原Po' : resolveForumReplyAuthorName(r, p);
+            const authorTag = isOp
+                ? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-[#8f4452] font-bold">原Po</span>`
+                : (isMe
+                    ? `<span class="text-[#8f4452] font-bold">${yuelaoEscapeHtml(replyAuthorName)}</span>`
+                    : `<span class="text-gray-600 font-semibold">${yuelaoEscapeHtml(replyAuthorName)}</span>`);
             let editReplyHtml = '';
             const editedReplyTag = r.isEdited ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-gray-500 font-semibold ml-1.5">已編輯</span>` : '';
             if (isMe && r.id) {
@@ -571,18 +584,21 @@ async function submitForumReply() {
     const nowTs = Date.now();
     const replyId = 'r_' + nowTs + '_' + Math.random().toString(36).substr(2, 4);
     
+    const postAuthorId = !isBackendForumPost(viewingPostData) ? String(viewingPostData.authorId || '').trim() : '';
+    const isPostAuthor = Boolean(postAuthorId && String(appState.playerId || '').trim() === postAuthorId);
     const anonCheckboxEl = document.getElementById('forumReplyAnonCheckbox');
-    const isAnon = Boolean(anonCheckboxEl && anonCheckboxEl.checked);
+    const isAnon = isPostAuthor ? false : Boolean(anonCheckboxEl && anonCheckboxEl.checked);
     const genderLabel = String((appState.profile && appState.profile.gender) || '').trim() || '?';
     const rawNickname = String((appState.profile && appState.profile.nickname) || '').trim();
-    const replyAuthorName = isAnon
-        ? `匿名.${genderLabel}`
-        : (rawNickname || `匿名.${genderLabel}`);
+    const replyAuthorName = isPostAuthor
+        ? '原Po'
+        : (isAnon ? `匿名.${genderLabel}` : (rawNickname || `匿名.${genderLabel}`));
     const replyData = {
         id: replyId,
         authorId: appState.playerId,
         authorName: replyAuthorName,
         isAnonymous: isAnon,
+        isOp: isPostAuthor,
         gender: genderLabel,
         type: type,
         content: content,
@@ -621,8 +637,13 @@ async function submitForumReply() {
     }
 }
 
-function resolveForumReplyAuthorName(replyObj) {
+function resolveForumReplyAuthorName(replyObj, postObj = null) {
     if (!replyObj || typeof replyObj !== 'object') return '匿名';
+    const targetPost = postObj || viewingPostData;
+    const postAuthorId = (targetPost && !isBackendForumPost(targetPost)) ? String(targetPost.authorId || '').trim() : '';
+    if (replyObj.isOp === true || (postAuthorId && String(replyObj.authorId || '').trim() === postAuthorId)) {
+        return '原Po';
+    }
     const storedName = String(replyObj.authorName || '').trim();
     const genderLabel = String(replyObj.gender || '').trim() || '?';
     if (replyObj.isAnonymous === true || storedName.startsWith('匿名')) {
