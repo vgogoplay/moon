@@ -1,4 +1,4 @@
-/* backend/forum.js - 後台討論區管理（發佈官方公告、公告名稱列表刪除、14天自動刪除、省流量分離讀取索引／內文、刪文、刪留言） */
+/* backend/forum.js - 後台討論區管理（發佈官方公告、公告名稱列表編輯／刪除、後台文章保存時間不限制、一般文章10天自動刪除、省流量分離讀取索引／內文、刪文、刪留言） */
 
 const ADMIN_FORUM_INDEX_KEY = 'yuelao_forum_index';
 const ADMIN_FORUM_POSTS_KEY = 'yuelao_forum_posts';
@@ -49,8 +49,26 @@ function formatAdminForumTime(ts) {
     });
 }
 
+function isBackendForumPostAdmin(post) {
+    if (!post || typeof post !== 'object') return false;
+    return Boolean(
+        post.isAdminPost ||
+        post.tag === '公告' ||
+        String(post.authorId || '').trim() === 'ADMIN'
+    );
+}
+
+function isUnlimitedForumPostAdmin(post) {
+    if (!post || typeof post !== 'object') return false;
+    return Boolean(
+        post.unlimitedRetention ||
+        isBackendForumPostAdmin(post) ||
+        Number(post.customRetentionDays) === -1
+    );
+}
+
 function getPostRetentionMs(post) {
-    if (post && post.customRetentionDays) {
+    if (post && post.customRetentionDays && Number(post.customRetentionDays) > 0) {
         return Number(post.customRetentionDays) * 24 * 60 * 60 * 1000;
     }
     return ADMIN_FORUM_RETENTION_MS;
@@ -58,12 +76,14 @@ function getPostRetentionMs(post) {
 
 function isAdminForumPostExpired(post, nowTs = Date.now()) {
     if (!post || typeof post !== 'object') return true;
+    if (isUnlimitedForumPostAdmin(post)) return false; // 後台發佈的文章保存時間不限制
     const createdTs = Number(post.createdAt || 0);
     if (!createdTs || Number.isNaN(createdTs)) return false;
     return (nowTs - createdTs) >= getPostRetentionMs(post);
 }
 
 function calcAdminForumRemainingDays(post, nowTs = Date.now()) {
+    if (isUnlimitedForumPostAdmin(post)) return Infinity;
     const createdTs = Number((post && post.createdAt) || 0);
     if (!createdTs || Number.isNaN(createdTs)) return ADMIN_FORUM_RETENTION_DAYS;
     const retentionMs = getPostRetentionMs(post);
@@ -120,7 +140,7 @@ async function purgeExpiredAdminForumPosts(rawList) {
             ).catch(() => {});
         }
         if (typeof appendLog === 'function') {
-            appendLog(`<span class="text-amber-300">[討論區自動清理]</span> 已自動刪除 <strong>${expiredIds.length} 篇</strong>超過 ${ADMIN_FORUM_RETENTION_DAYS} 天的討論區文章。`);
+            appendLog(`<span class="text-amber-300">[討論區自動清理]</span> 已自動刪除 <strong>${expiredIds.length} 篇</strong>超過保留期限的討論區文章。`);
         }
     }
 
@@ -212,7 +232,7 @@ function clearAdminForumSearch() {
 
 function onAdminForumPerPageChange(val) {
     const parsed = parseInt(val, 10);
-    adminForumPerPage = [10, 20, 50].includes(parsed) ? parsed : 10;
+    adminForumPerPage = [5, 10, 20, 50].includes(parsed) ? parsed : 5;
     adminForumCurrentPage = 1;
     renderAdminForumList();
 }
@@ -229,7 +249,7 @@ function renderAdminForumAnnouncementsList(nowTs = Date.now()) {
     const countBadge = document.getElementById('adminForumAnnouncementsCountBadge');
     if (!boxEl) return;
 
-    const announcements = adminForumIndexList.filter(p => p && p.tag === '公告' && !isAdminForumPostExpired(p, nowTs));
+    const announcements = adminForumIndexList.filter(p => p && isBackendForumPostAdmin(p) && !isAdminForumPostExpired(p, nowTs));
     if (countBadge) {
         countBadge.textContent = `共 ${announcements.length} 則公告`;
     }
@@ -242,7 +262,6 @@ function renderAdminForumAnnouncementsList(nowTs = Date.now()) {
     boxEl.innerHTML = announcements.map(a => {
         const pid = String(a.id);
         const isSelected = pid === String(selectedAdminForumPostId);
-        const remainDays = calcAdminForumRemainingDays(a, nowTs);
         const replies = Number(a.replyCount || 0);
         const likes = Number(a.pushCount || 0);
 
@@ -250,13 +269,16 @@ function renderAdminForumAnnouncementsList(nowTs = Date.now()) {
             <div onclick="selectAdminForumPost('${escapeForumAdminHtml(pid)}')" class="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${isSelected ? 'bg-rose-100/85 border-[#c96a7b] shadow-2xs' : 'bg-white border-rose-200 hover:bg-rose-50/70'}">
                 <div class="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
                     <span class="px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-300 text-[10px] font-bold shrink-0">📌 公告</span>
-                    <strong class="text-[#8f4452] truncate">${escapeForumAdminHtml(a.title || '(無標題公告)')}</strong>${a.isEdited ? '<span class="px-1.5 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-bold shrink-0">✏️ 已編輯</span>' : ''}
+                    <strong class="text-[#8f4452] truncate">${escapeForumAdminHtml(a.title || '(無標題公告)')}</strong>
                     <span class="text-[11px] text-gray-500">（署名：${escapeForumAdminHtml(a.authorName || '月老管理')}）</span>
                     <span class="text-[10px] text-gray-400">• ${formatAdminForumTime(a.createdAt)}</span>
-                    <span role="button" tabindex="0" onclick="event.stopPropagation(); openExtendRetentionModal('${escapeForumAdminHtml(pid)}')" title="點擊延長保留期限" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 font-semibold hover:bg-amber-100 hover:border-amber-400 transition cursor-pointer">剩 ${remainDays} 天</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold">♾️ 不限時間</span>
                     <span class="text-[10px] text-gray-400">❤️ ${likes} 💬 ${replies}</span>
                 </div>
-                <div class="flex items-center gap-2 shrink-0">
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <button type="button" onclick="event.stopPropagation(); openAdminEditForumPostModal('${escapeForumAdminHtml(pid)}')" class="px-2.5 py-1 rounded-lg bg-sky-600 text-white hover:bg-sky-700 text-[11px] font-bold shadow-2xs transition">
+                        ✏️ 編輯
+                    </button>
                     <button type="button" onclick="event.stopPropagation(); deleteAdminForumPost('${escapeForumAdminHtml(pid)}')" class="px-2.5 py-1 rounded-lg bg-rose-600 text-white hover:bg-rose-700 text-[11px] font-bold shadow-2xs transition">
                         🗑️ 刪除
                     </button>
@@ -282,7 +304,7 @@ function renderAdminForumList() {
 
     renderAdminForumAnnouncementsList(nowTs);
 
-    const announceCount = activePosts.filter(p => p && p.tag === '公告').length;
+    const announceCount = activePosts.filter(p => p && isBackendForumPostAdmin(p)).length;
     if (statusBadge) {
         statusBadge.textContent = `文章索引 ${activePosts.length} 篇（公告 ${announceCount} 篇）`;
     }
@@ -313,11 +335,21 @@ function renderAdminForumList() {
         listEl.innerHTML = pageItems.map(p => {
             const pid = String(p.id);
             const isSelected = pid === String(selectedAdminForumPostId);
+            const isBackendPost = isBackendForumPostAdmin(p);
+            const isUnlimited = isUnlimitedForumPostAdmin(p);
             const meta = ADMIN_FORUM_TAG_META[p.tag] || { icon: '📌', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200' };
             const likes = Number(p.pushCount || 0);
             const replies = Number(p.replyCount || 0);
             const authorIdLabel = p.authorId ? `ID:${escapeForumAdminHtml(p.authorId)}` : 'ID:未知';
             const remainDays = calcAdminForumRemainingDays(p, nowTs);
+
+            const retentionBadgeHtml = isUnlimited
+                ? `<span class="text-[10px] text-emerald-700 font-bold">• ♾️ 不限時間</span>`
+                : `<span role="button" tabindex="0" onclick="event.stopPropagation(); openExtendRetentionModal('${escapeForumAdminHtml(pid)}')" title="點擊延長保留期限" class="text-[10px] text-amber-700 font-semibold hover:text-amber-900 cursor-pointer transition">• 剩 ${remainDays} 天</span>`;
+
+            const editBtnHtml = isBackendPost
+                ? `<button type="button" onclick="event.stopPropagation(); openAdminEditForumPostModal('${escapeForumAdminHtml(pid)}')" class="px-2.5 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-600 hover:bg-sky-100 text-[11px] font-bold shrink-0 transition">✏️ 編輯</button>`
+                : '';
 
             return `
                 <div onclick="selectAdminForumPost('${escapeForumAdminHtml(pid)}')" class="p-3.5 cursor-pointer transition flex items-start justify-between gap-3 ${isSelected ? 'bg-rose-50/90 border-l-4 border-l-[#c96a7b]' : 'hover:bg-pink-50/40'}">
@@ -326,19 +358,22 @@ function renderAdminForumList() {
                             <span class="px-2 py-0.5 rounded border text-[10px] font-bold ${meta.badgeClass}">
                                 ${meta.icon} ${escapeForumAdminHtml(p.tag || '討論')}
                             </span>
-                            <span class="text-xs font-bold text-[#5e464a] truncate">${escapeForumAdminHtml(p.title || '(無標題)')}</span>${p.isEdited ? '<span class="px-1.5 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-bold shrink-0">✏️ 已編輯</span>' : ''}
+                            <span class="text-xs font-bold text-[#5e464a] truncate">${escapeForumAdminHtml(p.title || '(無標題)')}</span>${(p.isEdited && !isBackendPost) ? '<span class="px-1.5 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-bold shrink-0">✏️ 已編輯</span>' : ''}
                         </div>
                         <div class="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
                             <span class="font-semibold text-gray-700">${escapeForumAdminHtml(p.authorName || '匿名')}</span>
                             <span class="font-mono text-[10px] text-gray-400">(${authorIdLabel})</span>
                             <span>• ${formatAdminForumTime(p.createdAt)}</span>
-                            <span role="button" tabindex="0" onclick="event.stopPropagation(); openExtendRetentionModal('${escapeForumAdminHtml(pid)}')" title="點擊延長保留期限" class="text-[10px] text-amber-700 font-semibold hover:text-amber-900 cursor-pointer transition">• 剩 ${remainDays} 天</span>
+                            ${retentionBadgeHtml}
                             <span>• ❤️ ${likes} 💬 ${replies}</span>
                         </div>
                     </div>
-                    <button type="button" onclick="event.stopPropagation(); deleteAdminForumPost('${escapeForumAdminHtml(pid)}')" class="px-2.5 py-1.5 rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px] font-bold shrink-0 transition">
-                        🗑️ 刪除
-                    </button>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        ${editBtnHtml}
+                        <button type="button" onclick="event.stopPropagation(); deleteAdminForumPost('${escapeForumAdminHtml(pid)}')" class="px-2.5 py-1.5 rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px] font-bold shrink-0 transition">
+                            🗑️ 刪除
+                        </button>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -408,11 +443,11 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
     if (expiredDeleted) {
         headerEl.innerHTML = `
             <div>
-                <h3 class="text-sm font-bold text-amber-700">⏳ 此文章已超過 14 天保留期限</h3>
+                <h3 class="text-sm font-bold text-amber-700">⏳ 此文章已超過保留期限</h3>
                 <p class="text-[11px] text-gray-500">系統已自動將此文章從前後台資料庫刪除</p>
             </div>
         `;
-        bodyEl.innerHTML = `<div class="p-8 text-center text-xs text-amber-700 font-bold">此討論區文章已超過 ${ADMIN_FORUM_RETENTION_DAYS} 天保留期限並自動刪除。</div>`;
+        bodyEl.innerHTML = `<div class="p-8 text-center text-xs text-amber-700 font-bold">此討論區文章已超過保留期限並自動刪除。</div>`;
         return;
     }
 
@@ -420,7 +455,7 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
         headerEl.innerHTML = `
             <div>
                 <h3 class="text-sm font-bold text-[#8f4452]">文章內文與推文檢視視窗</h3>
-                <p class="text-[11px] text-gray-400">點選左側任一篇文章或上方公告名稱，即可檢視完整內容、刪除文章或刪除違規留言</p>
+                <p class="text-[11px] text-gray-400">點選左側任一篇文章或上方公告名稱，即可檢視完整內容、編輯後台文章、刪除文章或刪除違規留言</p>
             </div>
         `;
         bodyEl.innerHTML = `
@@ -447,6 +482,8 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
 
     const p = selectedAdminForumPostDetail;
     const pid = String(p.id);
+    const isBackendPost = isBackendForumPostAdmin(p);
+    const isUnlimited = isUnlimitedForumPostAdmin(p);
     const meta = ADMIN_FORUM_TAG_META[p.tag] || { icon: '📌', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200' };
     const limitLabel = p.whoCanReply === 'MALE' ? '⚾ 僅限男生留言' : (p.whoCanReply === 'FEMALE' ? '🎀 僅限女生留言' : '🌍 全部人可留言');
     const formattedContent = escapeForumAdminHtml(p.content || '').replace(/\n/g, '<br>');
@@ -455,7 +492,7 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
     const postEditHistoryArr = Array.isArray(p.editHistory)
         ? p.editHistory.filter(item => item && typeof item === 'object')
         : (p.editHistory && typeof p.editHistory === 'object' ? Object.values(p.editHistory).filter(Boolean) : []);
-    const isPostEdited = Boolean(p.isEdited || postEditHistoryArr.length > 0);
+    const isPostEdited = Boolean(!isBackendPost && (p.isEdited || postEditHistoryArr.length > 0));
     const postEditedBadgeHtml = isPostEdited
         ? `<button type="button" onclick="toggleAdminForumPostEditHistory()" class="px-2 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800 hover:bg-amber-200 text-[10px] font-bold transition cursor-pointer">✏️ 已編輯（點擊查看編輯前／後）</button>`
         : '';
@@ -480,6 +517,14 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
         </div>
     ` : '';
 
+    const retentionDetailBadgeHtml = isUnlimited
+        ? `<span class="text-[10px] px-2 py-0.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-800 font-bold">保存時間：♾️ 不限時間</span>`
+        : `<span role="button" tabindex="0" onclick="openExtendRetentionModal('${escapeForumAdminHtml(pid)}')" title="點擊延長保留期限" class="text-[10px] px-2 py-0.5 rounded bg-amber-50 border border-amber-300 text-amber-800 font-bold hover:bg-amber-200 transition cursor-pointer shadow-2xs">保留期限：剩 ${remainDays} 天</span>`;
+
+    const editDetailBtnHtml = isBackendPost
+        ? `<button type="button" onclick="openAdminEditForumPostModal('${escapeForumAdminHtml(pid)}')" class="px-3 py-1.5 rounded-xl bg-sky-600 text-white text-xs font-bold shadow hover:bg-sky-700">✏️ 編輯文章</button>`
+        : '';
+
     const repliesRaw = p.replies || {};
     const repliesArr = Array.isArray(repliesRaw)
         ? repliesRaw.filter(r => r && typeof r === 'object')
@@ -494,13 +539,14 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
         <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-1.5">
                 <span class="px-2 py-0.5 rounded border text-[10px] font-bold ${meta.badgeClass}">${meta.icon} ${escapeForumAdminHtml(p.tag || '討論')}</span>
-                <span role="button" tabindex="0" onclick="openExtendRetentionModal('${escapeForumAdminHtml(pid)}')" title="點擊延長保留期限" class="text-[10px] px-2 py-0.5 rounded bg-amber-50 border border-amber-300 text-amber-800 font-bold hover:bg-amber-200 transition cursor-pointer shadow-2xs">保留期限：剩 ${remainDays} 天</span>
+                ${retentionDetailBadgeHtml}
                 ${postEditedBadgeHtml}
                 <span class="text-[11px] font-mono text-gray-500">${escapeForumAdminHtml(pid)}</span>
             </div>
             <h3 class="text-sm font-bold text-[#8f4452] mt-1 truncate">${escapeForumAdminHtml(p.title || '(無標題)')}</h3>
         </div>
         <div class="flex items-center gap-2 shrink-0">
+            ${editDetailBtnHtml}
             <button type="button" onclick="selectAdminForumPost('${escapeForumAdminHtml(pid)}')" class="px-3 py-1.5 rounded-xl bg-white border border-pink-300 text-[#8f4452] text-xs font-semibold hover:bg-pink-50">
                 ↻ 重讀內文
             </button>
@@ -603,7 +649,7 @@ async function submitAdminForumAnnouncement(e) {
     const contentEl = document.getElementById('adminForumAnnounceContent');
     const btn = document.getElementById('adminForumPublishBtn');
 
-    const authorName = ((authorEl && authorEl.value.trim()) || '月老管理').substring(0, 4);
+    const authorName = (authorEl && authorEl.value.trim()) || '月老管理';
     const whoCanReply = (limitEl && limitEl.value) ? limitEl.value : 'ALL';
     const title = titleEl ? titleEl.value.trim() : '';
     const content = contentEl ? contentEl.value.trim() : '';
@@ -620,6 +666,8 @@ async function submitAdminForumAnnouncement(e) {
         id: postId,
         title,
         tag: '公告',
+        isAdminPost: true,
+        unlimitedRetention: true,
         whoCanReply,
         authorName,
         authorGender: '管理員',
@@ -662,9 +710,9 @@ async function submitAdminForumAnnouncement(e) {
         await selectAdminForumPost(postId);
 
         if (typeof appendLog === 'function') {
-            appendLog(`<span class="text-pink-300">[討論區公告]</span> 已發佈官方公告「<strong>${escapeForumAdminHtml(title)}</strong>」`);
+            appendLog(`<span class="text-pink-300">[討論區公告]</span> 已發佈官方公告「<strong>${escapeForumAdminHtml(title)}</strong>」（保存時間不限制）`);
         }
-        alert('📌 官方公告已成功發佈至前台討論區！');
+        alert('📌 官方公告已成功發佈至前台討論區（「📌 公告」與「✨ 最新」分類，保存時間不限制）！');
     } catch (err) {
         console.error('[admin-forum] 發佈公告失敗', err);
         alert('❌ 發佈公告失敗，請檢查 Firebase 權限規則或網路連線後再試。');
@@ -672,6 +720,124 @@ async function submitAdminForumAnnouncement(e) {
         if (btn) {
             btn.disabled = false;
             btn.textContent = '📌 發佈公告';
+        }
+    }
+}
+
+async function openAdminEditForumPostModal(postId) {
+    const pid = String(postId || '').trim();
+    if (!pid) return;
+
+    const indexRec = adminForumIndexList.find(p => String(p.id) === pid);
+    let fullPost = (selectedAdminForumPostDetail && String(selectedAdminForumPostDetail.id) === pid)
+        ? selectedAdminForumPostDetail
+        : null;
+
+    if (!fullPost) {
+        const fetched = await fetchForumNodeAdmin(`${ADMIN_FORUM_POSTS_KEY}/${pid}`);
+        if (fetched && typeof fetched === 'object') {
+            fullPost = { ...fetched, id: pid };
+        }
+    }
+
+    const base = fullPost || indexRec;
+    if (!base) {
+        alert('⚠️ 找不到此文章資料，請刷新列表後再試。');
+        return;
+    }
+
+    document.getElementById('adminEditPostId').value = pid;
+    document.getElementById('adminEditPostAuthor').value = String(base.authorName || '月老管理');
+    document.getElementById('adminEditPostReplyLimit').value = base.whoCanReply || 'ALL';
+    document.getElementById('adminEditPostTitle').value = base.title || '';
+    document.getElementById('adminEditPostContent').value = base.content || '';
+
+    document.getElementById('adminEditForumPostModal').classList.remove('hidden');
+}
+
+function closeAdminEditForumPostModal() {
+    document.getElementById('adminEditPostId').value = '';
+    document.getElementById('adminEditForumPostModal').classList.add('hidden');
+}
+
+async function submitAdminEditForumPost(e) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    const pid = String(document.getElementById('adminEditPostId').value || '').trim();
+    const authorEl = document.getElementById('adminEditPostAuthor');
+    const limitEl = document.getElementById('adminEditPostReplyLimit');
+    const titleEl = document.getElementById('adminEditPostTitle');
+    const contentEl = document.getElementById('adminEditPostContent');
+    const saveBtn = document.getElementById('adminEditPostSaveBtn');
+
+    if (!pid) return;
+
+    const authorName = (authorEl && authorEl.value.trim()) || '月老管理';
+    const whoCanReply = (limitEl && limitEl.value) ? limitEl.value : 'ALL';
+    const title = titleEl ? titleEl.value.trim() : '';
+    const content = contentEl ? contentEl.value.trim() : '';
+
+    if (!title || !content) {
+        alert('請填寫公告標題與內文！');
+        return;
+    }
+
+    const nowTs = Date.now();
+    const indexPatch = {
+        title,
+        authorName,
+        whoCanReply,
+        isAdminPost: true,
+        unlimitedRetention: true,
+        lastUpdatedAt: nowTs
+    };
+    const fullPatch = {
+        ...indexPatch,
+        content
+    };
+
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '儲存中...';
+    }
+
+    try {
+        if (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode()) {
+            const idxMap = getSandboxForumStore(ADMIN_FORUM_INDEX_KEY);
+            const postsMap = getSandboxForumStore(ADMIN_FORUM_POSTS_KEY);
+            if (idxMap[pid]) Object.assign(idxMap[pid], indexPatch);
+            if (postsMap[pid]) Object.assign(postsMap[pid], fullPatch);
+            setSandboxForumStore(ADMIN_FORUM_INDEX_KEY, idxMap);
+            setSandboxForumStore(ADMIN_FORUM_POSTS_KEY, postsMap);
+        } else if (typeof CloudSync !== 'undefined') {
+            await Promise.all([
+                CloudSync.patchNode(`${ADMIN_FORUM_INDEX_KEY}/${pid}`, indexPatch, { throwOnError: true }),
+                CloudSync.patchNode(`${ADMIN_FORUM_POSTS_KEY}/${pid}`, fullPatch, { throwOnError: true })
+            ]);
+        }
+
+        const idxItem = adminForumIndexList.find(p => String(p.id) === pid);
+        if (idxItem) {
+            Object.assign(idxItem, indexPatch);
+        }
+        if (selectedAdminForumPostDetail && String(selectedAdminForumPostDetail.id) === pid) {
+            Object.assign(selectedAdminForumPostDetail, fullPatch);
+            renderAdminForumDetail(false, false);
+        }
+
+        renderAdminForumList();
+        closeAdminEditForumPostModal();
+
+        if (typeof appendLog === 'function') {
+            appendLog(`<span class="text-sky-300">[編輯討論區公告]</span> 已更新後台文章「<strong>${escapeForumAdminHtml(title)}</strong>」`);
+        }
+        alert('✅ 後台文章已成功更新！');
+    } catch (err) {
+        console.error('[admin-forum] 編輯後台文章失敗', err);
+        alert('❌ 儲存修改失敗，請檢查網路連線或 Firebase 權限後再試。');
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = '💾 儲存修改';
         }
     }
 }
@@ -787,18 +953,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 200);
 });
 
-window.refreshAdminForumIndex = refreshAdminForumIndex;
-window.onAdminForumFilterChange = onAdminForumFilterChange;
-window.onAdminForumSearchInput = onAdminForumSearchInput;
-window.clearAdminForumSearch = clearAdminForumSearch;
-window.onAdminForumPerPageChange = onAdminForumPerPageChange;
-window.goToAdminForumPage = goToAdminForumPage;
-window.selectAdminForumPost = selectAdminForumPost;
-window.submitAdminForumAnnouncement = submitAdminForumAnnouncement;
-window.deleteAdminForumPost = deleteAdminForumPost;
-window.deleteAdminForumReply = deleteAdminForumReply;
-
-
 function toggleAdminForumPostEditHistory() {
     const box = document.getElementById('adminForumPostEditHistoryBox');
     if (box) box.classList.toggle('hidden');
@@ -808,10 +962,6 @@ function toggleAdminForumReplyEditHistory(replyId) {
     const box = document.getElementById(`adminForumReplyEditHistory_${replyId}`);
     if (box) box.classList.toggle('hidden');
 }
-
-window.toggleAdminForumPostEditHistory = toggleAdminForumPostEditHistory;
-window.toggleAdminForumReplyEditHistory = toggleAdminForumReplyEditHistory;
-
 
 function openExtendRetentionModal(postId) {
     const pid = String(postId || '').trim();
@@ -833,6 +983,7 @@ async function submitExtendRetention(e) {
     
     if (!pid || !daysSel) return;
     const extendDays = Number(daysSel.value);
+    const isSetUnlimited = extendDays === -1;
     
     const targetPost = adminForumIndexList.find(p => String(p.id) === pid);
     if (!targetPost) {
@@ -841,13 +992,15 @@ async function submitExtendRetention(e) {
     }
     
     const nowTs = Date.now();
-    // Update both createdAt to now and set custom retention days
-    targetPost.createdAt = nowTs;
-    targetPost.customRetentionDays = extendDays;
+    const patchData = {
+        createdAt: nowTs,
+        customRetentionDays: extendDays,
+        unlimitedRetention: isSetUnlimited
+    };
+    Object.assign(targetPost, patchData);
     
     if (selectedAdminForumPostDetail && String(selectedAdminForumPostDetail.id) === pid) {
-        selectedAdminForumPostDetail.createdAt = nowTs;
-        selectedAdminForumPostDetail.customRetentionDays = extendDays;
+        Object.assign(selectedAdminForumPostDetail, patchData);
         renderAdminForumDetail(false, false);
     }
 
@@ -855,26 +1008,14 @@ async function submitExtendRetention(e) {
         if (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode()) {
             const idxMap = getSandboxForumStore(ADMIN_FORUM_INDEX_KEY);
             const postsMap = getSandboxForumStore(ADMIN_FORUM_POSTS_KEY);
-            if (idxMap[pid]) {
-                idxMap[pid].createdAt = nowTs;
-                idxMap[pid].customRetentionDays = extendDays;
-            }
-            if (postsMap[pid]) {
-                postsMap[pid].createdAt = nowTs;
-                postsMap[pid].customRetentionDays = extendDays;
-            }
+            if (idxMap[pid]) Object.assign(idxMap[pid], patchData);
+            if (postsMap[pid]) Object.assign(postsMap[pid], patchData);
             setSandboxForumStore(ADMIN_FORUM_INDEX_KEY, idxMap);
             setSandboxForumStore(ADMIN_FORUM_POSTS_KEY, postsMap);
         } else if (typeof CloudSync !== 'undefined') {
             await Promise.all([
-                CloudSync.patchNode(`${ADMIN_FORUM_INDEX_KEY}/${pid}`, { 
-                    createdAt: nowTs, 
-                    customRetentionDays: extendDays 
-                }),
-                CloudSync.patchNode(`${ADMIN_FORUM_POSTS_KEY}/${pid}`, { 
-                    createdAt: nowTs, 
-                    customRetentionDays: extendDays 
-                })
+                CloudSync.patchNode(`${ADMIN_FORUM_INDEX_KEY}/${pid}`, patchData),
+                CloudSync.patchNode(`${ADMIN_FORUM_POSTS_KEY}/${pid}`, patchData)
             ]);
         }
         
@@ -882,10 +1023,12 @@ async function submitExtendRetention(e) {
         closeExtendRetentionModal();
         
         if (typeof appendLog === 'function') {
-            const dayStr = extendDays > 300 ? '永久' : `${extendDays} 天`;
+            const dayStr = isSetUnlimited ? '不限時間（永久）' : `${extendDays} 天`;
             appendLog(`<span class="text-amber-300">[延長文章期限]</span> 已將文章 ${escapeForumAdminHtml(targetPost.title || pid)} 從今日起重新保留 ${dayStr}。`);
         }
-        alert(`✅ 已將該文章從今天起算，重新保留 ${extendDays > 300 ? '999 (永久)' : extendDays} 天！`);
+        alert(isSetUnlimited
+            ? '✅ 已將該文章設為「不限時間（永久保留）」！'
+            : `✅ 已將該文章從今天起算，重新保留 ${extendDays} 天！`);
         
     } catch (err) {
         console.error('延長期限失敗', err);
@@ -893,6 +1036,21 @@ async function submitExtendRetention(e) {
     }
 }
 
+window.refreshAdminForumIndex = refreshAdminForumIndex;
+window.onAdminForumFilterChange = onAdminForumFilterChange;
+window.onAdminForumSearchInput = onAdminForumSearchInput;
+window.clearAdminForumSearch = clearAdminForumSearch;
+window.onAdminForumPerPageChange = onAdminForumPerPageChange;
+window.goToAdminForumPage = goToAdminForumPage;
+window.selectAdminForumPost = selectAdminForumPost;
+window.submitAdminForumAnnouncement = submitAdminForumAnnouncement;
+window.openAdminEditForumPostModal = openAdminEditForumPostModal;
+window.closeAdminEditForumPostModal = closeAdminEditForumPostModal;
+window.submitAdminEditForumPost = submitAdminEditForumPost;
+window.deleteAdminForumPost = deleteAdminForumPost;
+window.deleteAdminForumReply = deleteAdminForumReply;
+window.toggleAdminForumPostEditHistory = toggleAdminForumPostEditHistory;
+window.toggleAdminForumReplyEditHistory = toggleAdminForumReplyEditHistory;
 window.openExtendRetentionModal = openExtendRetentionModal;
 window.closeExtendRetentionModal = closeExtendRetentionModal;
 window.submitExtendRetention = submitExtendRetention;

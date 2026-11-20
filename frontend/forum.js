@@ -1,4 +1,4 @@
-// ==================== 📋 月老粉嫩風 PTT 討論區 (緊湊列表版・10天自動刪除) ====================
+// ==================== 📋 月老粉嫩風 PTT 討論區 (緊湊列表版・一般文章10天自動刪除・後台公告不限時間) ====================
 let forumPosts = [];
 let currentForumFilter = '公告';
 let currentViewingPostId = null;
@@ -12,11 +12,37 @@ const FORUM_RETENTION_MS = FORUM_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const FORUM_POSTS_PER_PAGE = 5;
 let forumCurrentPage = 1;
 
+function isBackendForumPost(post) {
+    if (!post || typeof post !== 'object') return false;
+    return Boolean(
+        post.isAdminPost ||
+        post.tag === '公告' ||
+        String(post.authorId || '').trim() === 'ADMIN'
+    );
+}
+
+function isUnlimitedForumPostFrontend(post) {
+    if (!post || typeof post !== 'object') return false;
+    return Boolean(
+        post.unlimitedRetention ||
+        isBackendForumPost(post) ||
+        Number(post.customRetentionDays) === -1
+    );
+}
+
+function getForumPostRetentionMsFrontend(post) {
+    if (post && post.customRetentionDays && Number(post.customRetentionDays) > 0) {
+        return Number(post.customRetentionDays) * 24 * 60 * 60 * 1000;
+    }
+    return FORUM_RETENTION_MS;
+}
+
 function isForumPostExpiredFrontend(post, nowTs = Date.now()) {
     if (!post || typeof post !== 'object') return true;
+    if (isUnlimitedForumPostFrontend(post)) return false; // 後台發佈的文章／官方公告保存時間不限制
     const createdTs = Number(post.createdAt || 0);
     if (!createdTs || Number.isNaN(createdTs)) return false;
-    return (nowTs - createdTs) >= FORUM_RETENTION_MS;
+    return (nowTs - createdTs) >= getForumPostRetentionMsFrontend(post);
 }
 
 function purgeExpiredForumPostsFrontend(rawPosts) {
@@ -58,35 +84,41 @@ function renderForumList() {
         ? String(appState.playerId).trim()
         : '';
 
-    // Sort & Filter logic
-    if (currentForumFilter === '自己') {
-        if (!myPid) {
-            filtered = [];
-        } else {
-            filtered = activePosts.filter(p => String(p.authorId || '').trim() === myPid);
-            filtered.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
-        }
+    // Sort & Filter logic:
+    // 從後台發佈的文章只會顯示在「公告」跟「最新」的類別，不會出現在「熱門」或其他玩家分類
+    if (currentForumFilter === '公告') {
+        filtered = activePosts.filter(p => isBackendForumPost(p));
+        filtered.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    } else if (currentForumFilter === '最新') {
+        filtered = activePosts.slice();
+        filtered.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     } else if (currentForumFilter === '熱門') {
         const cutoffTs = Date.now() - 4 * 24 * 60 * 60 * 1000; // 近3天內 (放寬涵蓋到第4天午夜)
-        filtered = activePosts.filter(p => Number(p.createdAt || 0) >= cutoffTs).sort((a, b) => {
+        filtered = activePosts.filter(p => !isBackendForumPost(p) && Number(p.createdAt || 0) >= cutoffTs).sort((a, b) => {
             const scoreA = Number(a.pushCount || 0) + Number(a.replyCount || 0);
             const scoreB = Number(b.pushCount || 0) + Number(b.replyCount || 0);
             if (scoreB !== scoreA) return scoreB - scoreA;
             return Number(b.createdAt || 0) - Number(a.createdAt || 0);
         });
         filtered = filtered.slice(0, 5); // 只顯示近 5 則
-    } else if (currentForumFilter === '最新') {
-        filtered = activePosts.filter(p => p.tag !== '公告');
-        filtered.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    } else if (currentForumFilter === '自己') {
+        if (!myPid) {
+            filtered = [];
+        } else {
+            filtered = activePosts.filter(p => !isBackendForumPost(p) && String(p.authorId || '').trim() === myPid);
+            filtered.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+        }
     } else {
-        // Specific tags
-        filtered = activePosts.filter(p => p.tag === currentForumFilter);
+        // Specific player tags (感情 / 心情 / 女孩 / 男孩 / 討論 / 閒聊 / 寵物)
+        filtered = activePosts.filter(p => !isBackendForumPost(p) && p.tag === currentForumFilter);
         filtered.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     }
 
     if (filtered.length === 0) {
         let emptyMsg = '目前還沒有文章，來當第一個發文的人吧！';
-        if (currentForumFilter === '自己') {
+        if (currentForumFilter === '公告') {
+            emptyMsg = '目前尚無官方公告。';
+        } else if (currentForumFilter === '自己') {
             emptyMsg = !myPid
                 ? '請先完成個人資料儲存，即可查看自己發表的文章喔！'
                 : '你目前還沒有發表過文章喔，點擊右上角「➕ 發文」分享想法吧！';
@@ -130,26 +162,28 @@ function renderForumList() {
             '閒聊': 'text-emerald-500',
             '寵物': 'text-orange-500'
         };
-        const colorClass = colors[p.tag] || 'text-gray-500';
-        const tagIcon = icons[p.tag] || '📌';
-        const tagBadge = `<span class="${colorClass} text-[10px] font-bold shrink-0">${tagIcon}[${p.tag}]</span>`;
+        const displayTag = isBackendForumPost(p) ? '公告' : (p.tag || '討論');
+        const colorClass = colors[displayTag] || 'text-gray-500';
+        const tagIcon = icons[displayTag] || '📌';
+        const tagBadge = `<span class="${colorClass} text-[10px] font-bold shrink-0">${tagIcon}[${displayTag}]</span>`;
 
         let authorName = p.authorName || `匿名.${p.authorGender || '?'}`;
-        if (authorName.length > 4 && !authorName.startsWith('匿名')) {
-            authorName = authorName.substring(0, 4);
-        }
-        
-        const dateAuthorStr = `${dateStr}${authorName}`;
+        // 已移除發文者暱稱 4 字限制，完整顯示
+        const dateAuthorStr = `${dateStr} ${authorName}`;
         const likes = Number(p.pushCount || 0);
         const replies = Number(p.replyCount || 0);
-        const statsHtml = `<div class="flex items-center gap-1.5 text-gray-400 text-[10px] shrink-0 justify-end w-14">❤️${likes} 💬${replies}</div>`;
+        const statsHtml = `<div class="flex items-center gap-2 text-gray-400 text-[11px] shrink-0"><span>❤️${likes}</span><span>💬${replies}</span></div>`;
 
         return `
-            <div onclick="viewForumPost('${yuelaoEscapeHtml(p.id)}')" class="px-3 py-2.5 flex items-center gap-1.5 hover:bg-pink-50/70 cursor-pointer transition">
-                ${tagBadge}
-                <div class="flex-1 text-[#5e464a] text-[13px] font-bold truncate">${yuelaoEscapeHtml(p.title)}</div>
-                <div class="text-gray-400 text-[10px] font-medium shrink-0 truncate">${dateAuthorStr}</div>
-                ${statsHtml}
+            <div onclick="viewForumPost('${yuelaoEscapeHtml(p.id)}')" class="px-3.5 py-2.5 flex flex-col gap-1 hover:bg-pink-50/70 cursor-pointer transition">
+                <div class="flex items-center gap-1.5 min-w-0">
+                    ${tagBadge}
+                    <div class="flex-1 min-w-0 text-[#5e464a] text-[13px] font-bold truncate">${yuelaoEscapeHtml(p.title)}</div>
+                </div>
+                <div class="flex items-center gap-3 text-gray-400 text-[11px] font-medium">
+                    <span class="truncate">${dateAuthorStr}</span>
+                    ${statsHtml}
+                </div>
             </div>
         `;
     }).join('');
@@ -160,7 +194,10 @@ function renderForumList() {
     if (!pagBar) return;
 
     if (currentForumFilter === '熱門' || totalPages <= 1) {
-        pagBar.innerHTML = `<span class="text-gray-400 mt-2 ml-2 mb-2 inline-block">共 ${filtered.length} 篇文章（文章保留 ${FORUM_RETENTION_DAYS} 天自動刪除）</span>`;
+        const noteText = currentForumFilter === '公告'
+            ? `共 ${filtered.length} 則官方公告（後台公告保存時間不限制）`
+            : `共 ${filtered.length} 篇文章（一般文章保留 ${FORUM_RETENTION_DAYS} 天自動刪除）`;
+        pagBar.innerHTML = `<span class="text-gray-400 mt-2 ml-2 mb-2 inline-block">${noteText}</span>`;
     } else {
         const pageBtns = [];
         for (let p = 1; p <= totalPages; p++) {
@@ -236,7 +273,7 @@ function openForumPostModal() {
         return;
     }
     const gender = appState.profile.gender || '?';
-    const nick = (appState.profile.nickname || '未命名').substring(0, 4);
+    const nick = (appState.profile.nickname || '未命名');
     const anonEl = document.getElementById('forumPostIdentityAnon');
     const nickEl = document.getElementById('forumPostIdentityNick');
     if (anonEl) anonEl.textContent = `匿名.${gender}`;
@@ -276,7 +313,7 @@ async function submitForumPost() {
     const whoCanReply = replyLimitEl ? replyLimitEl.value : 'ALL';
     const idTypeEl = document.querySelector('input[name="forumPostIdentity"]:checked');
     const idType = idTypeEl ? idTypeEl.value : 'anon';
-    const authorName = idType === 'nickname' ? (appState.profile.nickname || '未命名').substring(0, 4) : `匿名.${appState.profile.gender || '?'}`;
+    const authorName = idType === 'nickname' ? (appState.profile.nickname || '未命名') : `匿名.${appState.profile.gender || '?'}`;
     
     const nowTs = Date.now();
     const postId = 'post_' + nowTs + '_' + Math.random().toString(36).substr(2, 5);
@@ -391,10 +428,11 @@ function renderForumPostDetail() {
         '閒聊': 'text-emerald-500 border-emerald-300',
         '寵物': 'text-orange-500 border-orange-300'
     };
-    const colorClass = colors[p.tag] || 'text-gray-500 border-gray-300';
-    const tagBadge = `<span class="${colorClass}">📌${p.tag}</span>`;
+    const displayTag = isBackendForumPost(p) ? '公告' : (p.tag || '討論');
+    const colorClass = colors[displayTag] || 'text-gray-500 border-gray-300';
+    const tagBadge = `<span class="${colorClass}">📌${displayTag}</span>`;
 
-    const editedTag = p.isEdited
+    const editedTag = (!isBackendForumPost(p) && p.isEdited)
         ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-gray-500 font-semibold ml-2 align-middle">已編輯</span>`
         : '';
     const formattedContent = yuelaoEscapeHtml(p.content || '').replace(/\n/g, '<br>');
@@ -404,14 +442,11 @@ function renderForumPostDetail() {
     else if (p.whoCanReply === 'FEMALE') limitBadge = `<span class="px-2 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200 text-[10px] ml-1">限女生留言</span>`;
 
     let authorDisplay = p.authorName || `匿名.${p.authorGender || '?'}`;
-    if (authorDisplay.length > 4 && !authorDisplay.startsWith('匿名')) {
-        authorDisplay = authorDisplay.substring(0, 4);
-    }
     
     const hasLiked = viewingPostData.likes && appState.playerId && viewingPostData.likes[appState.playerId];
     
     let ownerActionBtnsHtml = '';
-    if (appState.playerId && String(p.authorId || '') === String(appState.playerId)) {
+    if (!isBackendForumPost(p) && appState.playerId && String(p.authorId || '') === String(appState.playerId)) {
         ownerActionBtnsHtml = `
             <button type="button" onclick="editMyForumPost('${yuelaoEscapeHtml(p.id)}')" class="px-2.5 py-1 rounded-xl bg-sky-50 border border-sky-200 text-sky-600 hover:bg-sky-100 text-[11px] font-bold shadow-2xs transition shrink-0 whitespace-nowrap ml-2">✏️ 編輯文章</button>
             <button type="button" onclick="deleteMyForumPost('${yuelaoEscapeHtml(p.id)}')" class="px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 text-[11px] font-bold shadow-2xs transition shrink-0 whitespace-nowrap ml-1.5">🗑️ 刪除文章</button>
