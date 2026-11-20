@@ -414,6 +414,15 @@ async function refreshForumPost(forceId = null) {
                     return;
                 }
                 viewingPostData = { ...res, id: res.id || pid };
+                if (viewingPostData.likes && typeof viewingPostData.likes === 'object') {
+                    const actualLikesCount = Object.keys(viewingPostData.likes).filter(k => Boolean(viewingPostData.likes[k])).length;
+                    viewingPostData.pushCount = actualLikesCount;
+                    const idxPost = forumPosts.find(p => String(p.id) === String(pid));
+                    if (idxPost && Number(idxPost.pushCount || 0) !== actualLikesCount) {
+                        idxPost.pushCount = actualLikesCount;
+                        renderForumList();
+                    }
+                }
                 renderForumPostDetail();
             } else {
                 document.getElementById('forumPostHeader').innerHTML = '<div class="text-center text-rose-500 font-bold py-10">此文章不存在或已被刪除。</div>';
@@ -456,7 +465,8 @@ function renderForumPostDetail() {
 
     let authorDisplay = p.authorName || `匿名.${p.authorGender || '?'}`;
     
-    const hasLiked = viewingPostData.likes && appState.playerId && viewingPostData.likes[appState.playerId];
+    const likesMap = (viewingPostData.likes && typeof viewingPostData.likes === 'object') ? viewingPostData.likes : {};
+    const hasLiked = Boolean(appState.playerId && likesMap[appState.playerId]);
     
     let ownerActionBtnsHtml = '';
     if (!isBackendForumPost(p) && appState.playerId && String(p.authorId || '') === String(appState.playerId)) {
@@ -466,7 +476,7 @@ function renderForumPostDetail() {
         `;
     }
 
-    const likeBtnHtml = `<button onclick="likeForumPost()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full ${hasLiked ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-500 hover:bg-rose-50'} text-xs font-bold transition">❤️ ${Number(p.pushCount || 0)}</button>`;
+    const likeBtnHtml = `<button type="button" onclick="likeForumPost()" aria-pressed="${hasLiked ? 'true' : 'false'}" title="${hasLiked ? '已按愛心（點擊可取消）' : '按愛心支持'}" class="inline-flex items-center justify-center w-9 h-9 rounded-full border ${hasLiked ? 'bg-rose-100 border-rose-300 text-rose-600 shadow-2xs scale-105' : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-500'} text-sm font-bold transition active:scale-95">${hasLiked ? '❤️' : '🤍'}</button>`;
 
     headerEl.innerHTML = `
         <div class="flex items-center gap-2 mb-3">
@@ -501,7 +511,10 @@ function renderForumPostDetail() {
             const rTimeStr = rTs.toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
             const rType = r.type === '推' ? `<span class="text-emerald-600 font-bold w-4">推</span>` : `<span class="text-gray-500 font-bold w-4">→</span>`;
             const isMe = appState.playerId && String(r.authorId || '') === String(appState.playerId);
-            const authorTag = isMe ? `<span class="text-[#8f4452] font-bold">我</span>` : `<span class="text-gray-500 font-medium">匿名(${r.gender || '?'})</span>`;
+            const replyAuthorName = resolveForumReplyAuthorName(r);
+            const authorTag = isMe
+                ? `<span class="text-[#8f4452] font-bold">我</span>`
+                : `<span class="text-gray-600 font-semibold">${yuelaoEscapeHtml(replyAuthorName)}</span>`;
             let editReplyHtml = '';
             const editedReplyTag = r.isEdited ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-gray-500 font-semibold ml-1.5">已編輯</span>` : '';
             if (isMe && r.id) {
@@ -511,7 +524,7 @@ function renderForumPostDetail() {
             return `
                 <div class="flex gap-2 text-xs py-1.5 border-b border-pink-200 hover:bg-white transition px-2 rounded">
                     <div class="shrink-0 pt-0.5">${rType}</div>
-                    <div class="shrink-0 pt-0.5 w-16">${authorTag}</div>
+                    <div class="shrink-0 pt-0.5 min-w-[4rem] max-w-[7rem] truncate" title="${yuelaoEscapeHtml(isMe ? '我' : replyAuthorName)}">${authorTag}</div>
                     <div class="flex-1 text-gray-800 break-words leading-relaxed">${yuelaoEscapeHtml(r.content)}${editedReplyTag}</div>
                     <div class="shrink-0 text-gray-400 text-[10px] pt-0.5 flex flex-col items-end gap-1">${rTimeStr}${editReplyHtml}</div>
                 </div>
@@ -556,9 +569,11 @@ async function submitForumReply() {
     const nowTs = Date.now();
     const replyId = 'r_' + nowTs + '_' + Math.random().toString(36).substr(2, 4);
     
+    const replyNickname = String((appState.profile && appState.profile.nickname) || '').trim() || `匿名(${appState.profile.gender || '?'})`;
     const replyData = {
         id: replyId,
         authorId: appState.playerId,
+        authorName: replyNickname,
         gender: appState.profile.gender || '男',
         type: type,
         content: content,
@@ -597,6 +612,27 @@ async function submitForumReply() {
     }
 }
 
+function resolveForumReplyAuthorName(replyObj) {
+    if (!replyObj || typeof replyObj !== 'object') return '匿名';
+    const aid = String(replyObj.authorId || '').trim();
+    if (aid) {
+        const usersArr = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function')
+            ? Store.getUsersArray()
+            : [];
+        const foundUser = usersArr.find(u => u && String(u.id || '').trim() === aid);
+        if (foundUser && String(foundUser.nickname || '').trim()) {
+            return String(foundUser.nickname).trim();
+        }
+        if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USER_INDEX_KEY] && CloudSync.tree[USER_INDEX_KEY][aid]) {
+            const idxNick = String(CloudSync.tree[USER_INDEX_KEY][aid].nickname || '').trim();
+            if (idxNick) return idxNick;
+        }
+    }
+    const storedName = String(replyObj.authorName || '').trim();
+    if (storedName) return storedName;
+    return `匿名(${replyObj.gender || '?'})`;
+}
+
 async function likeForumPost() {
     if (!currentViewingPostId || !viewingPostData) return;
     if (!appState.playerId) {
@@ -604,8 +640,16 @@ async function likeForumPost() {
         return;
     }
 
-    if (!viewingPostData.likes) viewingPostData.likes = {};
-    const hasLiked = !!viewingPostData.likes[appState.playerId];
+    if (!viewingPostData.likes || typeof viewingPostData.likes !== 'object' || Array.isArray(viewingPostData.likes)) {
+        const normalizedLikes = {};
+        if (Array.isArray(viewingPostData.likes)) {
+            viewingPostData.likes.forEach((val, idx) => {
+                if (val) normalizedLikes[String(idx)] = true;
+            });
+        }
+        viewingPostData.likes = normalizedLikes;
+    }
+    const hasLiked = Boolean(viewingPostData.likes[appState.playerId]);
     
     // Toggle
     if (hasLiked) {
@@ -615,10 +659,15 @@ async function likeForumPost() {
     }
     
     // Recalculate pushes
-    const newPushCount = Object.keys(viewingPostData.likes).length;
+    const newPushCount = Object.keys(viewingPostData.likes).filter(k => Boolean(viewingPostData.likes[k])).length;
     viewingPostData.pushCount = newPushCount;
     
-    // Optimistic UI update
+    // Optimistic UI update (detail heart button + outer forum list count)
+    const idxPost = forumPosts.find(p => String(p.id) === String(currentViewingPostId));
+    if (idxPost) {
+        idxPost.pushCount = newPushCount;
+        renderForumList();
+    }
     renderForumPostDetail();
 
     try {
@@ -631,12 +680,6 @@ async function likeForumPost() {
             await CloudSync.patchNode(`${FORUM_INDEX_KEY}/${currentViewingPostId}`, { 
                 pushCount: newPushCount
             });
-            // Update local index cache
-            const idxPost = forumPosts.find(p => p.id === currentViewingPostId);
-            if (idxPost) {
-                idxPost.pushCount = newPushCount;
-                renderForumList();
-            }
         }
     } catch (e) {}
 }

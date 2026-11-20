@@ -563,7 +563,10 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
             const typeBadge = r.type === '推'
                 ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold text-[10px]">推</span>`
                 : `<span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-bold text-[10px]">→</span>`;
-            const authorInfo = `匿名(${escapeForumAdminHtml(r.gender || '?')}) ・ ID:${escapeForumAdminHtml(r.authorId || '未知')}`;
+            const replyNick = String(r.authorName || '').trim();
+            const authorInfo = replyNick
+                ? `${escapeForumAdminHtml(replyNick)}（${escapeForumAdminHtml(r.gender || '?')}）・ ID:${escapeForumAdminHtml(r.authorId || '未知')}`
+                : `匿名(${escapeForumAdminHtml(r.gender || '?')}) ・ ID:${escapeForumAdminHtml(r.authorId || '未知')}`;
 
             const replyHistArr = Array.isArray(r.editHistory)
                 ? r.editHistory.filter(item => item && typeof item === 'object')
