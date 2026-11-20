@@ -375,6 +375,8 @@ async function viewForumPost(postId) {
         return;
     }
     currentViewingPostId = postId;
+    const anonCb = document.getElementById('forumReplyAnonCheckbox');
+    if (anonCb) anonCb.checked = false;
     document.getElementById('forumPostHeader').innerHTML = '<div class="text-center text-gray-400 py-10 text-xs">下載文章中...</div>';
     document.getElementById('forumRepliesList').innerHTML = '';
     
@@ -513,20 +515,20 @@ function renderForumPostDetail() {
             const isMe = appState.playerId && String(r.authorId || '') === String(appState.playerId);
             const replyAuthorName = resolveForumReplyAuthorName(r);
             const authorTag = isMe
-                ? `<span class="text-[#8f4452] font-bold">我</span>`
+                ? `<span class="text-[#8f4452] font-bold">${yuelaoEscapeHtml(replyAuthorName)}</span>`
                 : `<span class="text-gray-600 font-semibold">${yuelaoEscapeHtml(replyAuthorName)}</span>`;
             let editReplyHtml = '';
             const editedReplyTag = r.isEdited ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-gray-500 font-semibold ml-1.5">已編輯</span>` : '';
             if (isMe && r.id) {
-                editReplyHtml = `<button type="button" onclick="editMyForumReply('${yuelaoEscapeHtml(p.id)}', '${yuelaoEscapeHtml(r.id)}')" class="px-2 py-0.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-600 hover:bg-sky-100 text-[10px] font-bold shrink-0 transition ml-2">✏️ 編輯</button>`;
+                editReplyHtml = `<button type="button" onclick="editMyForumReply('${yuelaoEscapeHtml(p.id)}', '${yuelaoEscapeHtml(r.id)}')" class="px-2 py-0.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-600 hover:bg-sky-100 text-[10px] font-bold shrink-0 transition whitespace-nowrap">✏️ 編輯</button>`;
             }
 
             return `
                 <div class="flex gap-2 text-xs py-1.5 border-b border-pink-200 hover:bg-white transition px-2 rounded">
                     <div class="shrink-0 pt-0.5">${rType}</div>
-                    <div class="shrink-0 pt-0.5 min-w-[4rem] max-w-[7rem] truncate" title="${yuelaoEscapeHtml(isMe ? '我' : replyAuthorName)}">${authorTag}</div>
-                    <div class="flex-1 text-gray-800 break-words leading-relaxed">${yuelaoEscapeHtml(r.content)}${editedReplyTag}</div>
-                    <div class="shrink-0 text-gray-400 text-[10px] pt-0.5 flex flex-col items-end gap-1">${rTimeStr}${editReplyHtml}</div>
+                    <div class="shrink-0 pt-0.5 min-w-[4rem] max-w-[7rem] truncate" title="${yuelaoEscapeHtml(replyAuthorName)}">${authorTag}</div>
+                    <div class="flex-1 min-w-0 text-gray-800 break-words leading-relaxed">${yuelaoEscapeHtml(r.content)}${editedReplyTag}</div>
+                    <div class="shrink-0 text-gray-400 text-[10px] pt-0.5 flex items-center gap-1.5 whitespace-nowrap">${editReplyHtml}<span>${rTimeStr}</span></div>
                 </div>
             `;
         }).join('');
@@ -569,12 +571,19 @@ async function submitForumReply() {
     const nowTs = Date.now();
     const replyId = 'r_' + nowTs + '_' + Math.random().toString(36).substr(2, 4);
     
-    const replyNickname = String((appState.profile && appState.profile.nickname) || '').trim() || `匿名(${appState.profile.gender || '?'})`;
+    const anonCheckboxEl = document.getElementById('forumReplyAnonCheckbox');
+    const isAnon = Boolean(anonCheckboxEl && anonCheckboxEl.checked);
+    const genderLabel = String((appState.profile && appState.profile.gender) || '').trim() || '?';
+    const rawNickname = String((appState.profile && appState.profile.nickname) || '').trim();
+    const replyAuthorName = isAnon
+        ? `匿名.${genderLabel}`
+        : (rawNickname || `匿名.${genderLabel}`);
     const replyData = {
         id: replyId,
         authorId: appState.playerId,
-        authorName: replyNickname,
-        gender: appState.profile.gender || '男',
+        authorName: replyAuthorName,
+        isAnonymous: isAnon,
+        gender: genderLabel,
         type: type,
         content: content,
         ts: nowTs
@@ -614,6 +623,11 @@ async function submitForumReply() {
 
 function resolveForumReplyAuthorName(replyObj) {
     if (!replyObj || typeof replyObj !== 'object') return '匿名';
+    const storedName = String(replyObj.authorName || '').trim();
+    const genderLabel = String(replyObj.gender || '').trim() || '?';
+    if (replyObj.isAnonymous === true || storedName.startsWith('匿名')) {
+        return storedName || `匿名.${genderLabel}`;
+    }
     const aid = String(replyObj.authorId || '').trim();
     if (aid) {
         const usersArr = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function')
@@ -628,9 +642,8 @@ function resolveForumReplyAuthorName(replyObj) {
             if (idxNick) return idxNick;
         }
     }
-    const storedName = String(replyObj.authorName || '').trim();
     if (storedName) return storedName;
-    return `匿名(${replyObj.gender || '?'})`;
+    return `匿名.${genderLabel}`;
 }
 
 async function likeForumPost() {

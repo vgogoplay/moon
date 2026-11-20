@@ -1019,10 +1019,13 @@
             </div>
             
             <div class="p-3 bg-white border-t border-pink-100 shrink-0">
-                <div class="flex gap-2 items-end max-w-2xl mx-auto">
-                    
-                    <textarea id="forumReplyContent" rows="1" maxlength="50" placeholder="留個言吧 (上限50字)..." class="flex-1 h-[42px] min-h-[42px] px-3 py-3 rounded-xl border border-pink-200 bg-white outline-none focus:border-pink-400 transition text-sm resize-none overflow-hidden" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'"></textarea>
-                    <button onclick="submitForumReply()" class="h-[42px] px-4 rounded-xl bg-[#8f4452] text-white text-xs font-bold shadow hover:bg-[#753541] shrink-0 transition">
+                <div class="flex gap-1.5 sm:gap-2 items-end max-w-2xl mx-auto">
+                    <textarea id="forumReplyContent" rows="1" maxlength="50" placeholder="留個言吧 (上限50字)..." class="flex-1 min-w-0 h-[42px] min-h-[42px] px-3 py-3 rounded-xl border border-pink-200 bg-white outline-none focus:border-pink-400 transition text-sm resize-none overflow-hidden" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'"></textarea>
+                    <label class="h-[42px] px-2.5 sm:px-3 rounded-xl border border-pink-200 bg-pink-50/70 hover:bg-pink-100/80 text-[#8f4452] text-xs font-bold flex items-center gap-1 cursor-pointer select-none shrink-0 transition has-[:checked]:bg-purple-600 has-[:checked]:border-purple-600 has-[:checked]:text-white" title="勾選後將以「匿名.男 / 匿名.女」顯示留言名稱">
+                        <input type="checkbox" id="forumReplyAnonCheckbox" class="w-3.5 h-3.5 accent-purple-600 rounded cursor-pointer">
+                        <span class="whitespace-nowrap">是否匿名</span>
+                    </label>
+                    <button onclick="submitForumReply()" class="h-[42px] px-3.5 sm:px-4 rounded-xl bg-[#8f4452] text-white text-xs font-bold shadow hover:bg-[#753541] shrink-0 transition whitespace-nowrap">
                         送出
                     </button>
                 </div>
@@ -1036,7 +1039,7 @@
     <script src="shared/auth.js?v=20261120opt"></script>
     <script src="shared/cloud-store.js?v=20261120rematch"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/forum.js?v=20261120p"></script>
+    <script src="frontend/forum.js?v=20261120replyrow"></script>
   <script src="frontend/state.js?v=20261120opt"></script>
     <script src="frontend/profile.js?v=20261120opt"></script>
     <script src="frontend/activities.js?v=20261120opt"></script>
