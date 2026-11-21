@@ -93,7 +93,8 @@ function collectMatchAndChatDiscrepancies() {
         const chatInfo = chatInfoByPair.get(pk) || null;
         const hasChat = Boolean(chatInfo && chatInfo.msgCount > 0);
 
-        const isConsistent = Boolean(userA && userB && aHasB && bHasA && hasChat);
+        // 正常狀態：雙方名單皆有對方，就算尚無聊天紀錄（因未登入前台）也視為正常待開聊配對
+        const isConsistent = Boolean(userA && userB && aHasB && bHasA);
         if (isConsistent) return;
 
         const nameA = userA ? (userA.nickname || `玩家_${idA}`) : `不存在/已刪除玩家_${idA}`;
@@ -104,13 +105,10 @@ function collectMatchAndChatDiscrepancies() {
         let chatStatusDesc = '';
 
         if ((aHasB || bHasA) && !hasChat) {
-            if (aHasB && bHasA) {
-                reasonBadge = '⚠️ 會員列表有配對・聊天紀錄無對話';
-                memberStatusDesc = `雙方名單皆有對方（${idA} 有 ${idB}、${idB} 有 ${idA}）`;
-            } else if (aHasB) {
+            if (aHasB && !bHasA) {
                 reasonBadge = '⚠️ 會員列表僅單方有配對・聊天紀錄無對話';
                 memberStatusDesc = `僅 ${idA} 名單有 ${idB}（${idB} 名單無 ${idA}）`;
-            } else {
+            } else if (!aHasB && bHasA) {
                 reasonBadge = '⚠️ 會員列表僅單方有配對・聊天紀錄無對話';
                 memberStatusDesc = `僅 ${idB} 名單有 ${idA}（${idA} 名單無 ${idB}）`;
             }
@@ -432,14 +430,6 @@ function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
     if (typeof generatePlayerBackupCode === 'function') {
         uA.backupCode = generatePlayerBackupCode(uA, users);
         uB.backupCode = generatePlayerBackupCode(uB, users);
-    }
-
-    if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
-        ChatStore.ensureThread(pidA, pidB, [{
-            senderId: 'system',
-            text: '🌸 月老已為你們補齊雙向紅線配對紀錄，祝聊天愉快！',
-            ts: nowTs
-        }]);
     }
 
     return { uA, uB, pidA, pidB, clearUnmatchedPromise };

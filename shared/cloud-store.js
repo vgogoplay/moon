@@ -1678,7 +1678,13 @@ const CloudSync = {
         const unique = Array.from(new Set((paths || []).filter(Boolean)));
         if (unique.length === 0) return true;
         if (!this.fetchedTopNodes) this.fetchedTopNodes = new Set();
-        const results = await Promise.all(unique.map(p => this.conditionalGetNode(p).then(r => ({ p, r }))));
+        const results = await Promise.all(unique.map(p => {
+            const top = String(p).split('/')[0];
+            // 強制檢查：若為重要節點且本地快取為空物件（曾因配額或異常清除），強迫重抓
+            const isCriticalEmpty = (top === USERS_KEY || top === CHATS_KEY) && 
+                (!this.tree[top] || Object.keys(this.tree[top]).length === 0);
+            return this.conditionalGetNode(p, { force: isCriticalEmpty }).then(r => ({ p, r }));
+        }));
         let changed = false;
         results.forEach(({ p, r }) => {
             const top = String(p).split('/')[0];
@@ -1726,13 +1732,13 @@ const CloudSync = {
             '｜ 統計開始:', s.startedAt ? new Date(s.startedAt).toLocaleTimeString() : '-');
     },
 
-    async conditionalGetNode(path) {
+    async conditionalGetNode(path, options = {}) {
         if (this.isLocalSandboxMode()) return { status: 'unchanged' };
         // 以跨頁持久化 ETag 條件式讀取：資料未變動時 Firebase 回 304 且無內容，0 位元組下載流量
         const cache = this.loadPersistedEtags();
         const epochBefore = this.writeEpoch;
         const headers = { 'X-Firebase-ETag': 'true' };
-        if (cache[path] && this.hasLocalCacheForPath(path)) {
+        if (!options.force && cache[path] && this.hasLocalCacheForPath(path)) {
             headers['If-None-Match'] = cache[path];
         }
         try {
