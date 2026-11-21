@@ -1269,7 +1269,9 @@ function recordPairMatch(userA, userB, targetSession, nowTs, activityId = null, 
     if (!userA || !userB || String(userA.id) === String(userB.id)) return false;
 
     // 嚴格 1 對 1 保護：常規週三／週六場次每人當場最多只能配對 1 人，絕不允許 1 人配對 2 人
-    if (!activityId && targetSession && !String(targetSession).includes('強制')) {
+    // 但若明確帶有「強制補齊」的標記（代表秘密強制通道等管理員介入），則允許 1 對多配對
+    const isForceMatching = String(targetSession).includes('強制') || String(matchDetail).includes('強制');
+    if (!activityId && targetSession && !isForceMatching) {
         if (hasUserMatchedInRegularSession(userA, targetSession) || hasUserMatchedInRegularSession(userB, targetSession)) {
             console.warn('已攔截同場次重複配對（每人限 1 對 1）：', userA.id, userB.id, targetSession);
             return false;
