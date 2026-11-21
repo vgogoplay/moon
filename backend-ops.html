@@ -42,31 +42,25 @@
                 </div>
 
                 <!-- 3. 男女生人數限制開關（僅限制男生上限，女生不限人數） -->
-                <div class="md:col-span-2 p-4 rounded-2xl bg-white border-2 border-pink-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                    <div class="space-y-1">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <p class="text-xs font-bold text-[#8f4452]">3. 前台男女生人數限制開關（僅限男生上限・女生不限）</p>
-                            <span id="genderQuotaLiveCount" class="text-[11px] px-2.5 py-0.5 rounded-full bg-pink-50 border border-pink-300 text-[#8f4452] font-semibold">
-                                目前玩家人數：男生 0 人 ／ 女生 0 人（女生不限）
-                            </span>
-                        </div>
-                        <p id="genderLimitSwitchDesc" class="text-[11px] text-gray-500 font-semibold">目前狀態：⚪ 未開啟（男女生皆不限制人數）</p>
-                        
+                <div class="md:col-span-2 p-4 rounded-2xl bg-white border-2 border-pink-200 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                    <div class="space-y-1 min-w-0 xl:shrink-0">
+                        <p class="text-xs font-bold text-[#8f4452]">3. 前台人數限制開關</p>
+                        <p class="text-[11px] font-semibold text-[#8f4452]">（僅限男生上限・女生不限）</p>
+                        <p id="genderLimitSwitchDesc" class="text-[11px] text-gray-500 font-semibold">目前狀態：⚪ 未開啟</p>
                     </div>
-                    <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2 shrink-0">
-                        <label for="genderLimitMaxInput" class="text-xs font-bold text-[#5e464a]">男生人數上限</label>
+                    <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2">
+                        <label for="genderLimitMaxInput" class="text-xs font-bold text-[#5e464a]">男生上限</label>
                         <input type="number" id="genderLimitMaxInput" min="1" value="30" oninput="previewGenderLimitTotalDisplay()" onchange="updateGenderLimitMax()" class="w-16 sm:w-20 p-2 admin-input-box text-xs font-mono font-bold text-center text-[#8f4452]">
                         <span class="text-xs font-semibold text-gray-600">人</span>
                         <span class="text-xs font-extrabold text-[#c96a7b]">＋</span>
-                        <label for="maleDisplayOffsetInput" class="text-xs font-bold text-[#5e464a]">固定人數</label>
+                        <label for="maleDisplayOffsetInput" class="text-xs font-bold text-[#5e464a]">固定</label>
                         <input type="number" id="maleDisplayOffsetInput" min="0" value="0" oninput="previewGenderLimitTotalDisplay()" onchange="updateMaleDisplayOffset()" class="w-16 sm:w-20 p-2 admin-input-box text-xs font-mono font-bold text-center text-[#8f4452]">
                         <span class="text-xs font-semibold text-gray-600">人</span>
                         <span id="genderLimitDisplayTotalText" class="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
                             前台顯示共 30 人
                         </span>
-                        <span class="text-xs font-semibold text-gray-500 mr-1">（女生不限）</span>
                         <button id="toggleGenderLimitBtn" onclick="toggleGenderLimitSwitch()" class="px-4 py-2 rounded-xl text-xs font-bold shadow transition bg-[#c96a7b] text-white hover:opacity-95">
-                            開啟「男生人數限制」
+                            開啟
                         </button>
                     </div>
                 </div>
@@ -536,11 +530,11 @@
     <script src="shared/schedule.js?v=20261120rematch2"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261120opt"></script>
-    <script src="shared/cloud-store.js?v=20261121idlereload"></script>
+    <script src="shared/cloud-store.js?v=20261123idlereload"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261121moffset"></script>
     <script src="backend/matching.js?v=20261121matchfix"></script>
-    <script src="backend/ops.js?v=20261121moffset"></script>
+    <script src="backend/ops.js?v=20261123opstext43"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261120snap"></script>
 </body>

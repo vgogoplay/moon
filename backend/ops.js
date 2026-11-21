@@ -167,28 +167,21 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
         const curOff = offsetInput ? Math.max(0, parseInt(offsetInput.value, 10) || 0) : maleOffset;
         displayTotalEl.textContent = `前台顯示共 ${curMax + curOff} 人`;
     }
-    const liveCountBadge = document.getElementById('genderQuotaLiveCount');
-    if (liveCountBadge) {
-        const offsetHint = maleOffset > 0 ? `（前台顯示 ${maleCount + maleOffset} 人）` : '';
-        liveCountBadge.textContent = `目前玩家人數：男生 ${maleCount} 人${offsetHint} ／ 女生 ${femaleCount} 人（女生不限）`;
-    }
     const genderLimitDesc = document.getElementById('genderLimitSwitchDesc');
     const genderLimitBtn = document.getElementById('toggleGenderLimitBtn');
     if (genderLimitDesc && genderLimitBtn) {
         if (sysCfg.genderLimitEnabled) {
             const max = sysCfg.genderLimitMax;
             const maleStatus = maleCount >= max ? '（已滿）' : '';
-            const offsetDesc = maleOffset > 0 ? `＋固定 ${maleOffset} 人，前台顯示共 ${max + maleOffset} 人` : '';
             genderLimitDesc.className = 'text-[11px] text-emerald-600 font-semibold';
-            genderLimitDesc.textContent = `目前狀態：🟢 已開啟限制（男生上限 ${max} 人${offsetDesc}${maleStatus} ／ 女生不限人數）`;
-            genderLimitBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition bg-gray-700 text-white hover:bg-gray-800';
-            genderLimitBtn.textContent = '關閉「男生人數限制」';
+            genderLimitDesc.textContent = `目前狀態：🟢 已開啟限制`;
+            genderLimitBtn.className = 'px-4 py-2 rounded-xl text-xs font-bold shadow transition bg-gray-700 text-white hover:bg-gray-800';
+            genderLimitBtn.textContent = '關閉';
         } else {
-            const offsetNote = maleOffset > 0 ? `（目前固定加成 +${maleOffset} 人，前台顯示共 ${sysCfg.genderLimitMax + maleOffset} 人）` : '';
             genderLimitDesc.className = 'text-[11px] text-gray-500 font-semibold';
-            genderLimitDesc.textContent = `目前狀態：⚪ 未開啟（男女生皆不限制人數）${offsetNote}`;
-            genderLimitBtn.className = 'px-4 py-2.5 rounded-xl text-xs font-bold shadow transition bg-[#c96a7b] text-white hover:opacity-95';
-            genderLimitBtn.textContent = '開啟「男生人數限制」';
+            genderLimitDesc.textContent = '目前狀態：⚪ 未開啟';
+            genderLimitBtn.className = 'px-4 py-2 rounded-xl text-xs font-bold shadow transition bg-[#c96a7b] text-white hover:opacity-95';
+            genderLimitBtn.textContent = '開啟';
         }
     }
 

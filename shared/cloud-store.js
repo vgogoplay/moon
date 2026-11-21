@@ -1469,6 +1469,7 @@ const CloudSync = {
                 return;
             }
             if (evt && evt.type === 'scroll') lastScrollMark = now;
+            const prevActivityAt = Number(this.lastUserActivityAt || now);
             this.lastUserActivityAt = now;
 
             if (this.isPlayerIdlePaused) {
@@ -1476,7 +1477,7 @@ const CloudSync = {
                 if (this.isBackendContext()) {
                     this.pollBackendLight();
                 } else if (this.isPlayerSyncMode()) {
-                    const idleDuration = Date.now() - Number(this.lastUserActivityAt || 0);
+                    const idleDuration = now - prevActivityAt;
                     const isEditingDraft = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft);
                     const hasForumInput = (typeof document !== 'undefined' && document.getElementById('forumPostContent') && document.getElementById('forumPostContent').value.trim());
                     const hasChatInput = (typeof document !== 'undefined' && document.getElementById('chatInput') && document.getElementById('chatInput').value.trim());
