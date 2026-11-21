@@ -593,7 +593,7 @@ function renderFriendsSection() {
                                 ` : ''}
                                 ${hasCardUnread ? `<span class="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold shrink-0">新訊息</span>` : ''}
                             </div>
-                            <p class="text-[11px] text-gray-500 truncate">${yuelaoEscapeHtml(String(friend.sessionLabel || '七日緣分').replace(/・?強制補齊/g, '').trim() || '七日緣分')} ・ ${friend.profile.region ? friend.profile.region + ' ' : ''}${friend.profile.city || '同城緣分'}</p>
+                            <p class="text-[11px] text-gray-500 truncate">${yuelaoEscapeHtml(String(friend.sessionLabel || '七日緣分').replace(/・?強制補齊/g, '').trim() || '七日緣分')}</p>
                         </div>
                     </div>
                     <div class="flex flex-col items-end gap-1.5 shrink-0">
@@ -791,12 +791,67 @@ let lastRenderedChatMeta = {
     hasOlderBanner: false
 };
 
+function getWishWallQaSummaryForFriend(friend) {
+    if (!friend || !friend.id || !appState || !appState.playerId) return '';
+    if (typeof Store === 'undefined' || typeof Store.getWishWallPosts !== 'function') return '';
+    const myPid = String(appState.playerId).trim();
+    const partnerPid = String(friend.id).trim();
+    if (!myPid || !partnerPid) return '';
+
+    const wishes = Store.getWishWallPosts();
+    const matchedWish = wishes.find(w => {
+        if (!w || !w.settled || !w.matchedResponderId) return false;
+        const aId = String(w.authorId || '').trim();
+        const rId = String(w.matchedResponderId || '').trim();
+        return (aId === myPid && rId === partnerPid) || (aId === partnerPid && rId === myPid);
+    });
+    if (!matchedWish) return '';
+
+    const responderId = String(matchedWish.matchedResponderId || '').trim();
+    const chosenResp = (matchedWish.responses || []).find(r => String(r.responderId || '').trim() === responderId);
+    if (!chosenResp) return '';
+
+    if (typeof buildWishMatchSummaryText === 'function') {
+        return buildWishMatchSummaryText(matchedWish, chosenResp);
+    }
+    const title = String(matchedWish.title || '紅線祈願牆默契問答').trim();
+    const questions = Array.isArray(matchedWish.questions) ? matchedWish.questions : [];
+    const answers = Array.isArray(chosenResp.answers) ? chosenResp.answers : [];
+    const ansByQIdx = new Map();
+    answers.forEach((a, i) => {
+        if (a && typeof a === 'object') ansByQIdx.set(Number(a.qIndex || (i + 1)), a);
+    });
+    const qLines = questions.map((q, idx) => {
+        const qNum = Number(q.qIndex || (idx + 1));
+        const ans = ansByQIdx.get(qNum);
+        const optCode = ans && ans.chosenOption ? String(ans.chosenOption).trim() : '';
+        const optText = ans && ans.chosenText ? String(ans.chosenText).trim() : (optCode === 'A' ? (q.optionA || '') : (optCode === 'B' ? (q.optionB || '') : ''));
+        return `Q${qNum}. ${String(q.question || '').trim()}\n👉 選擇答案：${optCode ? `選項 ${optCode}：${optText}` : (optText || '未作答')}`;
+    });
+    const lines = [`🏮【紅線祈願牆・默契問答紀錄】`, `📌 題目主題：${title}`, ...qLines];
+    if (String(chosenResp.note || '').trim()) {
+        lines.push(`💬 補充留言：${String(chosenResp.note).trim()}`);
+    }
+    return lines.join('\n');
+}
+
 function renderSingleChatBubbleHtml(m, friend) {
     if (m.senderId === 'system' || m.sender === 'system') {
+        const rawText = String(m.text || '');
+        const isMultiLineCard = rawText.includes('\n') || rawText.includes('【紅線祈願牆・默契問答紀錄】');
+        if (isMultiLineCard) {
+            return `
+                <div class="my-2 px-1">
+                    <div class="max-w-[92%] mx-auto px-4 py-3 rounded-2xl bg-gradient-to-br from-rose-50 via-pink-50/80 to-amber-50/60 border border-pink-200 text-xs text-[#6e3a43] leading-relaxed whitespace-pre-line break-words shadow-2xs text-left">
+                        ${yuelaoEscapeHtml(rawText)}
+                    </div>
+                </div>
+            `;
+        }
         return `
             <div class="text-center my-2">
                 <span class="inline-block px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-[#8f4452] leading-relaxed">
-                    ${yuelaoEscapeHtml(m.text)}
+                    ${yuelaoEscapeHtml(rawText)}
                 </span>
             </div>
         `;
@@ -1112,8 +1167,23 @@ function renderActiveFriendWorkspace() {
                 `;
             }
 
+            const hasVisibleWishQa = visibleMessages.some(m => String((m && m.text) || '').includes('【紅線祈願牆・默契問答紀錄】'));
+            let wishQaBannerHtml = '';
+            if (!hasVisibleWishQa) {
+                const wishQaText = getWishWallQaSummaryForFriend(friend);
+                if (wishQaText) {
+                    wishQaBannerHtml = `
+                        <div class="my-1.5 px-1">
+                            <div class="max-w-[92%] mx-auto px-4 py-3 rounded-2xl bg-gradient-to-br from-rose-50 via-pink-50/80 to-amber-50/60 border border-pink-200 text-xs text-[#6e3a43] leading-relaxed whitespace-pre-line break-words shadow-2xs text-left">
+                                ${yuelaoEscapeHtml(wishQaText)}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
             const bubblesHtml = visibleMessages.map(m => renderSingleChatBubbleHtml(m, friend)).join('');
-            chatBox.innerHTML = topStatusHtml + bubblesHtml;
+            chatBox.innerHTML = topStatusHtml + wishQaBannerHtml + bubblesHtml;
         }
 
         if (!shouldScrollChatToLatest) {
@@ -1148,93 +1218,107 @@ function renderActiveFriendWorkspace() {
     }
 }
 
-// ==================== 🎲 月老互動題目（彈窗單一選項＋確認發送，5 秒冷卻） ====================
+// ==================== 🎲 月老互動題目（感情 / 生活 各 30 題單身認識話題，5 秒冷卻） ====================
 const LOVE_INTERACTIVE_TOPICS = [
-    '第一次見面時，對方哪個細節最容易吸引你的注意？（眼神、談吐、穿搭還是笑容？）',
-    '在感情裡，你比較是「每天都要分享大小事」還是「各自留一點安靜空間」的人？',
-    '對你來說，另一半做過什麼小舉動會讓你瞬間覺得「就是這個人了」？',
-    '如果這週末我們要一起去約會，你會選「下午茶散步聊天」、「看電影吃晚餐」還是「去看夜景」？',
-    '你覺得曖昧期最讓人心動、小鹿亂撞的瞬間是什麼？',
-    '在戀愛關係中，你最看重對方的哪三個特質？',
-    '如果兩個人意見不合或吵架，你比較習慣當下溝通清楚，還是先冷靜一會再聊？',
-    '戀愛小測驗：你比較偏向「一見鍾情派」還是「日久生情派」？為什麼呢？',
-    '單身這段時間，你最常在週末做什麼來幫自己充電？',
-    '你心目中最理想的「下班後約會行程」是什麼樣子？',
-    '情人節或紀念日，你比較喜歡收到手寫卡片、實用小禮物，還是一起去吃頓好料？',
-    '如果可以用三個關鍵字形容「談戀愛時的自己」，你會選哪三個詞？',
-    '戀愛二選一：下雨天在家一起煮飯追劇 vs 撐傘去逛夜市吃小吃，你選哪一個？',
+    '第一次見面時，對方哪個小細節最容易吸引你的注意？（例如：笑容、眼神、談吐還是穿搭？）',
+    '在感情裡，你比較偏向「一見鍾情派」還是「慢慢相處、日久生情派」呢？',
+    '你心目中最理想的「第一次約會行程」會是什麼樣子？（喝咖啡散步、看電影吃飯還是逛市集？）',
+    '在認識新對象的階段，你通常會主動開啟話題，還是先觀察對方、慢慢熟起來？',
+    '談戀愛時，你比較是「每天都想分享生活大小事」還是「各自保有適當空間」的人？',
+    '對你來說，另一半做過或具備什麼特質，會讓你瞬間覺得「這個人好加分」？',
+    '你相信「互補的兩個人」比較適合，還是「三觀與個性相似」走得更長久？',
+    '在感情中，對你而言最有「安全感」的相處模式是什麼樣子？',
+    '如果兩個人意見不同或有小摩擦，你比較習慣當下溝通清楚，還是先冷靜一下再好好聊？',
+    '你喜歡和另一半有共同的興趣嗜好，還是各自有不同領域可以互相帶對方體驗？',
+    '在一段感情裡，你覺得「儀式感」重要嗎？哪種小儀式會讓你覺得特別暖心？',
+    '戀愛二選一：下雨天在家一起煮飯追劇 vs 撐傘去逛夜市吃小吃，你會選哪一個？',
+    '你比較喜歡「照顧對方、替對方安排好行程」，還是「被對方偏愛、偶爾依賴一下」？',
+    '如果晚上下班心情有點累，你希望喜歡的人「安靜陪在身邊」還是「講笑話帶你去吃好吃的」？',
     '你覺得兩個人在一起後，最幸福、最療癒的日常畫面是什麼？',
-    '在感情裡，你是比較主動表達喜歡的人，還是會偷偷觀察、等對方先靠近的人？',
-    '如果有機會和另一半一起規劃一趟三天兩夜小旅行，你最想去哪裡？',
-    '你比較喜歡「被照顧、被偏愛」的感覺，還是「照顧對方、替對方安排好一切」？',
-    '談戀愛時，你最無法接受另一半踩到哪一條地雷？',
-    '你覺得遠距離戀愛或忙碌工作時，最重要的是靠什麼來維持感情溫度？',
-    '如果今天月老送你一張「戀愛許願券」，你最希望在下一段感情裡實現什麼心願？',
-    '你喜歡和另一半有完全相同的興趣，還是各自有不同領域可以互相分享？',
-    '在一段感情裡，你覺得「儀式感」重要嗎？哪種小儀式會讓你特別開心？',
-    '如果晚上下班心情有點低落，你希望另一半「靜靜陪在身邊」還是「講笑話帶你去吃美食」？',
-    '你相信「互補的兩個人」比較適合，還是「三觀與個性相似的兩個人」走得更長久？',
-    '如果要在第一次約會挑一間餐廳，你會偏好安靜有氣氛的小餐館，還是熱鬧輕鬆的居酒屋／燒肉？',
-    '你覺得「好朋友變情人」比較浪漫，還是「透過月老牽線認識全新的人」更有驚喜感？',
-    '在感情中，如果對方工作很忙回訊息比較慢，你通常會怎麼調適心情？',
+    '在感情裡，如果對方工作很忙回訊息比較慢，你通常會怎麼調適或溝通？',
+    '如果要在第一次見面挑一間餐廳，你會偏好安靜好聊天的咖啡廳，還是輕鬆熱鬧的餐酒館／燒肉？',
+    '你覺得一段健康的感情裡，彼此最不能缺少的三個元素是什麼？',
+    '單身這段期間，你在感情觀上有沒有什麼新的體悟，或更確定自己想要什麼樣的伴侶？',
     '你理想中的另一半，在朋友面前和在你面前會有反差萌嗎？你喜歡哪一種反差？',
-    '如果兩個人一起養一隻寵物，你會想養貓派、狗派，還是先當彼此的小跟班就好？',
-    '回顧過去的經驗，你覺得自己現在對「幸福」的定義跟幾年前有什麼不同？',
-    '如果明天突然多出一天不用上班的戀愛假期，你最想和喜歡的人一起怎麼度過？',
-    '你覺得兩個人在一起久了，要怎麼做才能一直保持像剛認識時的心動感？',
-    '對你而言，「有安全感」的感情具體會表現在哪些日常細節裡？',
-    '如果我們之後約出來見面，你第一眼最希望給對方留下什麼樣的印象？',
-    '在愛人與被愛之間，現階段的你比較渴望哪一種？為什麼？',
-    '你睡前習慣跟另一半說聲晚安、聊幾句今天發生的事嗎？',
-    '你做過最奇怪的一個夢是什麼？',
-    '你最喜歡一看再看的電影是哪一部？',
-    '你最喜歡哪個季節是因為什麼呢?',
-    '你最近一次搜尋紀錄是什麼？（必要的話，可以替自己解釋一下。）',
-    '你最喜歡怎麼度過休假日？',
-    '在友情或愛情中，你最大的地雷是什麼？',
-    '看電影時最喜歡吃什麼零食？',
-    '你最喜歡的一個冷知識是什麼？只能選一個。',
-    '人生中發生過最不可思議的巧合是什麼？',
-    '哪一部電影讓你笑到停不下來？',
-    '哪一部電影讓你哭得最慘？',
-    '如果可以重過人生中的某一天，你會選哪一天原因呢？',
-    '有什麼奇怪的食物搭配，是你私底下很愛吃的？',
-    '你對我的第一印象是什麼？',
-    '你認為一段感情發展到什麼階段，才適合在社群媒體公開？',
-    '最容易讓你心動的特質是什麼？',
-    '最容易讓你瞬間失去好感的是什麼？',
-    '你最近傳出的一則曖昧訊息是什麼內容？',
-    '回想過去的感情，你最大的遺憾是什麼？',
-    '失戀後，你最喜歡用什麼方式療傷？',
-    '你寧願曾經深愛過卻失去，還是從來沒有愛過？',
-    '和另一半發生爭執後，你通常會主動和好，還是等對方先開口？',
-    '你通常會怎麼向喜歡的人示好或曖昧？',
-    '你覺得認識多久之後接吻，才不算太快？'
+    '紀念日或彼此生日時，你比較喜歡手寫卡片、實用小禮物，還是一起去吃頓好料？',
+    '如果有機會和未來另一半一起規劃三天兩夜的小旅行，你最想去國內或國外的哪裡？',
+    '在感情中，你最在意或最無法接受的相處地雷是什麼？',
+    '如果可以用三個關鍵字形容「談戀愛時的自己」，你會選哪三個詞？',
+    '你睡前習慣和另一半小聊幾句今天發生的事、互道晚安再睡嗎？',
+    '對你來說，從「剛認識的朋友」升溫成「心動對象」最關鍵的瞬間是什麼？',
+    '你比較嚮往「像好朋友一樣無話不談的戀愛」，還是「帶點浪漫驚喜感的戀愛」？',
+    '如果這週末我們約出來見面聊天，你第一眼最希望給對方留下什麼樣的印象？',
+    '你覺得各自忙碌時，兩個人要靠什麼小習慣來維持感情的溫度？',
+    '如果今天月老送你一張「戀愛許願券」，你最希望在下一段感情裡實現什麼心願？'
 ];
+
+const LIFE_INTERACTIVE_TOPICS = [
+    '放假沒有安排出門的時候，你最常在家怎麼度過一整天？（追劇、補眠、打電動還是看書？）',
+    '下班或下課後，你最喜歡做什麼事情來幫自己充電、轉換心情？',
+    '你平常是「早睡早起晨型人」還是「越晚精神越好的夜貓子」？',
+    '說到美食，你最近吃到最念念不忘的一道料理或餐廳是什麼？',
+    '你是「咖啡派」、「手搖飲派」還是「無糖茶／白開水派」？平常最常點哪一杯？',
+    '如果突然多出一天不用上班上課的自由假期，你最想立刻去哪裡走走？',
+    '旅遊時，你是「事前把行程排得滿滿的規劃控」，還是「睡到自然醒、走到哪逛到哪的隨性派」？',
+    '你平常有運動的習慣嗎？最喜歡哪一種運動或戶外活動？（散步、健身、羽球、爬山等）',
+    '最近有沒有哪一部電影、影集或動漫讓你一看再看，或想推薦給新朋友？',
+    '你平常喜歡聽哪一類型的音樂？有沒有最近一直在單曲循環的一首歌？',
+    '你比較喜歡「海邊看海吹風」還是「山上走走吸芬多精」？為什麼呢？',
+    '在生活裡，有什麼小習慣或小堅持是認識你之後一定會發現的？',
+    '你是「貓派」、「狗派」，還是喜歡其他小動物？如果可以養寵物最想養什麼？',
+    '平常三餐你比較常自己下廚料理，還是外食探店居多？拿手菜或最愛吃的是什麼？',
+    '逛街或網購時，哪一類東西最容易讓你忍不住下手？（美食、3C、衣服香氛還是居家小物？）',
+    '在朋友眼裡，大家通常怎麼形容你的個性？跟你自己覺得的個性一樣嗎？',
+    '休假出門時，你比較喜歡熱鬧好逛的市區百貨，還是安靜有特色的小巷咖啡廳？',
+    '你覺得自己是一個「說走就走的行動派」，還是「會先在心裡想很多再出發」的人？',
+    '一年四季（春、夏、秋、冬）裡面，你最喜歡哪一個季節？最喜歡那個季節的什麼氛圍？',
+    '如果週末下午要選一個放鬆活動，你會選「去按摩／泡湯」、「逛展覽／書店」還是「約朋友吃下午茶」？',
+    '你目前最想嘗試或正在學習的一項新興趣／新技能是什麼？',
+    '生活壓力大的時候，你通常會用什麼方式讓自己快速恢復好心情？',
+    '你平常喜歡拍照記錄生活嗎？手機相簿裡最多的是風景、美食、寵物還是自拍？',
+    '宵夜時間如果肚子餓了，你最無法抗拒的罪惡美食是哪一樣？（鹹酥雞、泡麵、滷味還是甜點？）',
+    '在台灣的縣市裡，除了目前居住的地方，你最喜歡哪一座城市的生活步調？',
+    '你覺得自己比較是「熱鬧聚會會很開心」的人，還是「一對一深度聊天更自在」的人？',
+    '如果可以擁有一個超能力來讓日常生活更方便，你最想要哪一種超能力？',
+    '最近生活中有沒有發生什麼雖然很小、但讓你開心了一整天的幸運小事？',
+    '你心目中理想的日常生活節奏是什麼樣子？（例如：忙碌充實、慢活愜意，還是工作與旅行並重？）',
+    '如果我們有機會一起去探索美食或踩點，你會想先從哪一類餐廳或景點開始？'
+];
+
+const INTERACTIVE_TOPICS_BY_CATEGORY = {
+    love: { label: '感情', topics: LOVE_INTERACTIVE_TOPICS },
+    life: { label: '生活', topics: LIFE_INTERACTIVE_TOPICS }
+};
 
 const RANDOM_TOPIC_COOLDOWN_MS = 5000;
 let randomTopicCooldownUntil = 0;
 let randomTopicCooldownTimer = null;
-const recentRandomTopicIndices = [];
-let isRandomTopicOptionSelected = false;
+const recentRandomTopicIndicesByCategory = {
+    love: [],
+    life: []
+};
+let selectedRandomTopicCategory = '';
 
-function pickNextLoveInteractiveTopic() {
-    const total = LOVE_INTERACTIVE_TOPICS.length;
+function pickNextLoveInteractiveTopic(category = 'love') {
+    const catKey = Object.prototype.hasOwnProperty.call(INTERACTIVE_TOPICS_BY_CATEGORY, category) ? category : 'love';
+    const topics = INTERACTIVE_TOPICS_BY_CATEGORY[catKey].topics;
+    const total = topics.length;
     if (total === 0) return '';
-    const maxHistory = Math.min(25, total - 1);
+    const historyArr = recentRandomTopicIndicesByCategory[catKey];
+    const maxHistory = Math.min(20, total - 1);
     const candidates = [];
     for (let i = 0; i < total; i++) {
-        if (!recentRandomTopicIndices.includes(i)) {
+        if (!historyArr.includes(i)) {
             candidates.push(i);
         }
     }
     const pool = candidates.length > 0 ? candidates : Array.from({ length: total }, (_, i) => i);
     const chosenIdx = pool[Math.floor(Math.random() * pool.length)];
-    recentRandomTopicIndices.push(chosenIdx);
-    while (recentRandomTopicIndices.length > maxHistory) {
-        recentRandomTopicIndices.shift();
+    historyArr.push(chosenIdx);
+    while (historyArr.length > maxHistory) {
+        historyArr.shift();
     }
-    return LOVE_INTERACTIVE_TOPICS[chosenIdx] || '';
+    return topics[chosenIdx] || '';
 }
 
 function updateRandomTopicButtonState() {
@@ -1284,34 +1368,44 @@ function startRandomTopicCooldown() {
 }
 
 function syncRandomTopicModalSelectionUI() {
-    const cardEl = document.getElementById('randomTopicOptionCard');
-    const radioEl = document.getElementById('randomTopicModeRadio');
     const confirmBtn = document.getElementById('confirmRandomTopicBtn');
     const hintEl = document.getElementById('randomTopicSelectHint');
+    const hasSelection = Boolean(selectedRandomTopicCategory);
 
-    if (radioEl) {
-        radioEl.checked = isRandomTopicOptionSelected;
-    }
-    if (cardEl) {
-        if (isRandomTopicOptionSelected) {
-            cardEl.classList.remove('border-pink-200', 'bg-white');
-            cardEl.classList.add('border-[#c96a7b]', 'bg-pink-50/80', 'shadow-sm');
-        } else {
-            cardEl.classList.remove('border-[#c96a7b]', 'bg-pink-50/80', 'shadow-sm');
-            cardEl.classList.add('border-pink-200', 'bg-white');
+    ['love', 'life'].forEach(cat => {
+        const cardEl = document.getElementById(`randomTopicCard_${cat}`);
+        const radioEl = document.getElementById(`randomTopicRadio_${cat}`);
+        const isSelected = selectedRandomTopicCategory === cat;
+        if (radioEl) {
+            radioEl.checked = isSelected;
         }
-    }
+        if (cardEl) {
+            if (isSelected) {
+                cardEl.classList.remove('border-pink-200', 'bg-white');
+                cardEl.classList.add('border-[#c96a7b]', 'bg-pink-50/80', 'shadow-sm');
+            } else {
+                cardEl.classList.remove('border-[#c96a7b]', 'bg-pink-50/80', 'shadow-sm');
+                cardEl.classList.add('border-pink-200', 'bg-white');
+            }
+        }
+    });
+
     if (confirmBtn) {
-        confirmBtn.classList.toggle('opacity-60', !isRandomTopicOptionSelected);
+        confirmBtn.classList.toggle('opacity-60', !hasSelection);
     }
-    if (hintEl && isRandomTopicOptionSelected) {
+    if (hintEl && hasSelection) {
         hintEl.classList.add('hidden');
     }
 }
 
-function selectRandomTopicModeOption() {
-    isRandomTopicOptionSelected = true;
+function selectRandomTopicCategory(category) {
+    if (category !== 'love' && category !== 'life') return;
+    selectedRandomTopicCategory = category;
     syncRandomTopicModalSelectionUI();
+}
+
+function selectRandomTopicModeOption() {
+    selectRandomTopicCategory('love');
 }
 
 function openRandomTopicModal() {
@@ -1336,7 +1430,7 @@ function openRandomTopicModal() {
         return;
     }
 
-    isRandomTopicOptionSelected = false;
+    selectedRandomTopicCategory = '';
     const hintEl = document.getElementById('randomTopicSelectHint');
     if (hintEl) hintEl.classList.add('hidden');
     syncRandomTopicModalSelectionUI();
@@ -1353,7 +1447,7 @@ function closeRandomTopicModal() {
 }
 
 function confirmSendRandomLoveTopic() {
-    if (!isRandomTopicOptionSelected) {
+    if (selectedRandomTopicCategory !== 'love' && selectedRandomTopicCategory !== 'life') {
         const hintEl = document.getElementById('randomTopicSelectHint');
         if (hintEl) hintEl.classList.remove('hidden');
         return;
@@ -1387,13 +1481,14 @@ function confirmSendRandomLoveTopic() {
         return;
     }
 
-    const question = pickNextLoveInteractiveTopic();
-    if (!question) {
+    const catMeta = INTERACTIVE_TOPICS_BY_CATEGORY[selectedRandomTopicCategory];
+    const question = pickNextLoveInteractiveTopic(selectedRandomTopicCategory);
+    if (!question || !catMeta) {
         closeRandomTopicModal();
         return;
     }
 
-    const topicMessageText = `🎲【月老互動題目】${question}`;
+    const topicMessageText = `🎲【月老互動・${catMeta.label}】${question}`;
     const nowStr = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
     const isMockFriend = String(friend.id).startsWith('MOCK_FRIEND_') || !appState.playerId;
 

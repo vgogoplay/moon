@@ -378,7 +378,7 @@
                     <div id="chatMessagesBox" class="flex-1 overflow-y-auto space-y-3 p-2 bg-[#fffafb] rounded-2xl border border-pink-100/60"></div>
 
                     <form id="chatSendForm" onclick="handleLockedChatClick()" class="mt-3 flex items-center gap-1.5 sm:gap-2">
-                        <button type="button" id="randomTopicBtn" onclick="openRandomTopicModal()" title="選擇感情／戀愛互動題目並發送至對話窗（發送後冷卻 5 秒）" class="px-3 sm:px-3.5 py-2.5 rounded-xl bg-pink-50 border border-pink-300 text-[#8f4452] hover:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-bold shrink-0 transition whitespace-nowrap">
+                        <button type="button" id="randomTopicBtn" onclick="openRandomTopicModal()" title="選擇「感情」或「生活」互動題目並發送至對話窗（發送後冷卻 5 秒）" class="px-3 sm:px-3.5 py-2.5 rounded-xl bg-pink-50 border border-pink-300 text-[#8f4452] hover:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-bold shrink-0 transition whitespace-nowrap">
                             🎲 互動
                         </button>
                         <input type="text" id="chatInput" class="input-jp flex-1 min-w-0" placeholder="寫下想對他說的話..." required>
@@ -819,26 +819,33 @@
         </div>
     </div>
 
-    <!-- 輕量化小視窗 5：月老互動選項視窗（單一選項：隨機互動題目） -->
+    <!-- 輕量化小視窗 5：月老互動選項視窗（感情 / 生活 各 30 題單身認識話題） -->
     <div id="randomTopicModal" class="hidden mini-window !max-w-sm space-y-4">
         <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
             <div>
                 <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🎲 月老互動</h3>
-                <p class="text-[11px] text-gray-500">請點選下方選項後，按下「確認」發送題目</p>
+                <p class="text-[11px] text-gray-500">請選擇「感情」或「生活」分類後，按下「確認」發送題目</p>
             </div>
             <button type="button" onclick="closeRandomTopicModal()" class="text-gray-400 hover:text-gray-700 text-lg leading-none">✕</button>
         </div>
 
-        <div class="space-y-2">
-            <label id="randomTopicOptionCard" onclick="selectRandomTopicModeOption()" class="flex items-center gap-3 p-3.5 rounded-2xl border-2 border-pink-200 bg-white hover:border-[#c96a7b] cursor-pointer transition select-none">
-                <input type="radio" id="randomTopicModeRadio" name="interactiveModeOption" value="random_love_topic" class="w-4 h-4 accent-[#c96a7b] shrink-0">
+        <div class="space-y-2.5">
+            <label id="randomTopicCard_love" onclick="selectRandomTopicCategory('love')" class="flex items-center gap-3 p-3.5 rounded-2xl border-2 border-pink-200 bg-white hover:border-[#c96a7b] cursor-pointer transition select-none">
+                <input type="radio" id="randomTopicRadio_love" name="interactiveTopicCategory" value="love" class="w-4 h-4 accent-[#c96a7b] shrink-0">
                 <div class="min-w-0">
-                    <div class="text-sm font-bold text-[#8f4452]">🎲 隨機互動題目</div>
-                    <p class="text-[11px] text-gray-500 mt-0.5 leading-relaxed">由月老隨機抽出一道感情／戀愛話題發送給對方</p>
+                    <div class="text-sm font-bold text-[#8f4452]">💕 感情</div>
+                    <p class="text-[11px] text-gray-500 mt-0.5 leading-relaxed">隨機抽出一道認識彼此感情觀與心動細節的話題</p>
+                </div>
+            </label>
+            <label id="randomTopicCard_life" onclick="selectRandomTopicCategory('life')" class="flex items-center gap-3 p-3.5 rounded-2xl border-2 border-pink-200 bg-white hover:border-[#c96a7b] cursor-pointer transition select-none">
+                <input type="radio" id="randomTopicRadio_life" name="interactiveTopicCategory" value="life" class="w-4 h-4 accent-[#c96a7b] shrink-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-bold text-[#8f4452]">🌿 生活</div>
+                    <p class="text-[11px] text-gray-500 mt-0.5 leading-relaxed">隨機抽出一道認識彼此日常習慣與興趣喜好的話題</p>
                 </div>
             </label>
             <p id="randomTopicSelectHint" class="hidden text-[11px] text-rose-600 font-semibold px-1">
-                ⚠️ 請先點選「🎲 隨機互動題目」選項，再按確認喔！
+                ⚠️ 請先選擇「💕 感情」或「🌿 生活」選項，再按確認喔！
             </p>
         </div>
 
@@ -1037,13 +1044,13 @@
     <script src="shared/schedule.js?v=20261120rematch2"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261120opt"></script>
-    <script src="shared/cloud-store.js?v=20261120rematch"></script>
+    <script src="shared/cloud-store.js?v=20261121hotact"></script>
     <!-- 前台功能模組 -->
     <script src="frontend/forum.js?v=20261120op"></script>
   <script src="frontend/state.js?v=20261120opt"></script>
     <script src="frontend/profile.js?v=20261120opt"></script>
     <script src="frontend/activities.js?v=20261120opt"></script>
-    <script src="frontend/friends-chat.js?v=20261120opt"></script>
-    <script src="frontend/wishes.js?v=20261120opt"></script>
+    <script src="frontend/friends-chat.js?v=20261121sess"></script>
+    <script src="frontend/wishes.js?v=20261121wishqa"></script>
 </body>
 </html>

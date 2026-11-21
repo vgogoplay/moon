@@ -761,6 +761,53 @@ async function submitWishResponse(wishId) {
 題主將於截止後檢視所有匿名答案並決定配對。`);
 }
 
+function buildWishMatchSummaryText(wishObj, respObj) {
+    if (!wishObj || !respObj) return '';
+    const title = String(wishObj.title || '紅線祈願牆默契問答').trim();
+    const questions = Array.isArray(wishObj.questions) ? wishObj.questions : [];
+    const answers = Array.isArray(respObj.answers) ? respObj.answers : [];
+    const ansByQIdx = new Map();
+    answers.forEach((a, i) => {
+        if (a && typeof a === 'object') {
+            ansByQIdx.set(Number(a.qIndex || (i + 1)), a);
+        }
+    });
+
+    const qLines = questions.map((q, idx) => {
+        const qNum = Number(q.qIndex || (idx + 1));
+        const ans = ansByQIdx.get(qNum);
+        const optCode = ans && ans.chosenOption ? String(ans.chosenOption).trim() : '';
+        const optText = ans && ans.chosenText
+            ? String(ans.chosenText).trim()
+            : (optCode === 'A' ? (q.optionA || '') : (optCode === 'B' ? (q.optionB || '') : ''));
+        const answerDisplay = optCode
+            ? `選項 ${optCode}：${optText}`
+            : (optText || '未作答');
+        return `Q${qNum}. ${String(q.question || '').trim()}\n👉 選擇答案：${answerDisplay}`;
+    });
+
+    if (qLines.length === 0 && answers.length > 0) {
+        answers.forEach((a, idx) => {
+            const qNum = Number(a.qIndex || (idx + 1));
+            const optCode = String(a.chosenOption || '').trim();
+            const optText = String(a.chosenText || '').trim();
+            qLines.push(`Q${qNum}. 題目 ${qNum}\n👉 選擇答案：${optCode ? `選項 ${optCode}：${optText}` : optText}`);
+        });
+    }
+
+    const lines = [
+        `🏮【紅線祈願牆・默契問答紀錄】`,
+        `📌 題目主題：${title}`,
+        ...qLines
+    ];
+    const noteText = String(respObj.note || '').trim();
+    if (noteText) {
+        lines.push(`💬 補充留言：${noteText}`);
+    }
+    return lines.join('\n');
+}
+window.buildWishMatchSummaryText = buildWishMatchSummaryText;
+
 // ==================== 結束後女方選擇喜歡的匿名答案並配對成好友（或選擇都不喜歡） ====================
 async function selectWishResponderAndMatch(wishId, anonNumber) {
     const wid = String(wishId || '').trim();
@@ -867,19 +914,29 @@ async function selectWishResponderAndMatch(wishId, anonNumber) {
     }
 
     if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
+        const timeNowStr = new Date(nowTs).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
         const initialThread = [
             {
                 senderId: 'system',
                 text: `🏮【紅線祈願牆】月老牽線成功！（${meUser.nickname} 選擇了匿名${targetAnonNum}號的答案）好友名單將保留 7 天，現在可以開始聊天囉！`,
-                time: new Date(nowTs).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }),
+                time: timeNowStr,
                 ts: nowTs
             }
         ];
+        const wishQaSummaryText = buildWishMatchSummaryText(targetWish, chosenResp);
+        if (wishQaSummaryText) {
+            initialThread.push({
+                senderId: 'system',
+                text: wishQaSummaryText,
+                time: timeNowStr,
+                ts: nowTs + 1
+            });
+        }
         if (meUser.oneSentence) {
-            initialThread.push({ senderId: myPid, senderName: meUser.nickname || '', text: meUser.oneSentence, time: '20:01', ts: nowTs + 1 });
+            initialThread.push({ senderId: myPid, senderName: meUser.nickname || '', text: meUser.oneSentence, time: '20:01', ts: nowTs + 2 });
         }
         if (partnerUser.oneSentence) {
-            initialThread.push({ senderId: partnerPid, senderName: partnerUser.nickname || '', text: partnerUser.oneSentence, time: '20:01', ts: nowTs + 2 });
+            initialThread.push({ senderId: partnerPid, senderName: partnerUser.nickname || '', text: partnerUser.oneSentence, time: '20:01', ts: nowTs + 3 });
         }
         ChatStore.ensureThread(myPid, partnerPid, initialThread);
     }

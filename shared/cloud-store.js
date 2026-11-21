@@ -1431,8 +1431,8 @@ const CloudSync = {
 
     // ===================== 方案 C：前後台省流混合同步（閒置降頻 + 跨頁 ETag 快取 + 後台按頁讀取） =====================
     PLAYER_SYNC_ENABLED: true,
-    PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch'],
-    PLAYER_COLD_NODES: ['yuelao_reports', 'yuelao_custom_activities', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
+    PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch', 'yuelao_custom_activities'],
+    PLAYER_COLD_NODES: ['yuelao_reports', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
     PLAYER_HOT_INTERVAL_MS: 50000,   // 熱門節點每 50 秒檢查一次（45~60 秒區間）
     PLAYER_COLD_INTERVAL_MS: 240000, // 冷門節點每 4 分鐘檢查一次（3~5 分鐘區間）
     PLAYER_IDLE_TIMEOUT_MS: 180000,  // 超過 3 分鐘無滑動／點擊／輸入即自動暫停輪詢
@@ -1968,10 +1968,14 @@ const CloudSync = {
         this.hydrateTreeFromLocalStorage();
         this.loadPersistedEtags();
         const me = this.playerSelfId();
-        // 第一階段：索引、冷門節點、本人私有記錄（好友清單需要本人記錄）
-        const earlyNodes = [USER_INDEX_KEY, 'yuelao_system_batch', WISH_WALL_KEY];
+        // 第一階段：索引、系統設定、祈願牆、專屬活動、本人私有記錄（確保手機端首屏即顯示專屬活動報名按鈕）
+        const earlyNodes = [USER_INDEX_KEY, 'yuelao_system_batch', WISH_WALL_KEY, CUSTOM_ACTIVITIES_KEY];
         if (me) earlyNodes.push(`${USERS_KEY}/${me}`);
         await this.fetchPlayerPaths(earlyNodes);
+        if (this.tree[CUSTOM_ACTIVITIES_KEY] === undefined && !this.isLocalSandboxMode()) {
+            await new Promise(r => setTimeout(r, 500));
+            await this.fetchPlayerPaths([CUSTOM_ACTIVITIES_KEY]);
+        }
         // 第二階段：其餘熱門節點與聊天室（依本人記錄的配對名單決定）
         const restHot = this.PLAYER_HOT_NODES.filter(p => !earlyNodes.includes(p));
         await this.fetchPlayerPaths([...restHot, ...this.playerDynamicPaths()]);
