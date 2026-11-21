@@ -1189,6 +1189,13 @@ const CloudSync = {
         } else if (t[WISH_WALL_KEY] === null) {
             this.writeLocalIfChanged(WISH_WALL_KEY, '[]');
         }
+
+        // 15. 討論區文章索引快取同步
+        if (t['yuelao_forum_index'] && typeof t['yuelao_forum_index'] === 'object') {
+            this.writeLocalIfChanged('yuelao_forum_index', JSON.stringify(t['yuelao_forum_index']));
+        } else if (t['yuelao_forum_index'] === null) {
+            this.writeLocalIfChanged('yuelao_forum_index', '{}');
+        }
     },
 
     applyStreamPatch(path, data) {
@@ -1614,6 +1621,9 @@ const CloudSync = {
         if (hydrateObjectDirect(UNMATCHED_PAIRS_SYNC_KEY, UNMATCHED_PAIRS_CLOUD_NODE)) {
             this.fetchedTopNodes.add(UNMATCHED_PAIRS_CLOUD_NODE);
         }
+        if (hydrateObjectDirect('yuelao_forum_index', 'yuelao_forum_index')) {
+            this.fetchedTopNodes.add('yuelao_forum_index');
+        }
     },
 
     hasLocalCacheForPath(path) {
@@ -1752,6 +1762,10 @@ const CloudSync = {
             if (res.status === 304) {
                 this.syncStats.notModified++;
                 return { status: 'unchanged' };
+            }
+            if ((res.status === 401 || res.status === 403) && !options._retriedAuth) {
+                await this.refreshAuthForRetry();
+                return this.conditionalGetNode(path, { ...options, _retriedAuth: true });
             }
             if (!res.ok) {
                 this.syncStats.errors++;
@@ -2076,29 +2090,38 @@ const CloudSync = {
         this.backendPollTimer = setInterval(() => this.pollBackendLight(), this.BACKEND_POLL_INTERVAL_MS);
     },
 
-    async init(onUpdate) {
-        this.onUpdateCallback = onUpdate || null;
-        if (typeof yuelaoAuth !== 'undefined' && yuelaoAuth && typeof yuelaoAuth.init === 'function') {
-            await yuelaoAuth.init();
-        }
-        if (this.isLocalSandboxMode()) {
-            this.initialized = true;
-            this.hasLoadedFullTree = true;
-            this.refreshCloudBadge();
-            if (typeof this.onUpdateCallback === 'function') {
-                this.onUpdateCallback();
+    _initPromise: null,
+
+    init(onUpdate) {
+        if (onUpdate) this.onUpdateCallback = onUpdate;
+        if (this._initPromise) return this._initPromise;
+        this._initPromise = (async () => {
+            if (typeof yuelaoAuth !== 'undefined' && yuelaoAuth && typeof yuelaoAuth.init === 'function') {
+                await yuelaoAuth.init();
             }
+            if (this.isLocalSandboxMode()) {
+                this.initialized = true;
+                this.hasLoadedFullTree = true;
+                this.refreshCloudBadge();
+                if (typeof this.onUpdateCallback === 'function') {
+                    this.onUpdateCallback();
+                }
+                return true;
+            }
+            if (this.isPlayerSyncMode()) return this.initPlayerScopedSync();
+            if (this.isBackendContext()) return this.initBackendScopedSync();
+            let loadedOk = await this.fetchFullTree();
+            if (!loadedOk) {
+                await new Promise(r => setTimeout(r, 400));
+                loadedOk = await this.fetchFullTree();
+            }
+            this.initialized = true;
+            this.startRealtimeStream();
             return true;
-        }
-        if (this.isPlayerSyncMode()) return this.initPlayerScopedSync();
-        if (this.isBackendContext()) return this.initBackendScopedSync();
-        let loadedOk = await this.fetchFullTree();
-        if (!loadedOk) {
-            await new Promise(r => setTimeout(r, 400));
-            loadedOk = await this.fetchFullTree();
-        }
-        this.initialized = true;
-        this.startRealtimeStream();
+        })().finally(() => {
+            this._initPromise = null;
+        });
+        return this._initPromise;
     },
 
     // 階段 C：有登入權杖時附加到請求網址（未啟用匿名登入時為空字串，行為與之前相同）

@@ -1025,8 +1025,8 @@
                 </div>
             </div>
             
-            <div class="p-3 bg-white border-t border-pink-100 shrink-0">
-                <div class="flex gap-1.5 sm:gap-2 items-end max-w-2xl mx-auto">
+            <div id="forumReplyFooter" class="p-3 bg-white border-t border-pink-100 shrink-0">
+                <div id="forumReplyInputBar" class="flex gap-1.5 sm:gap-2 items-end max-w-2xl mx-auto">
                     <textarea id="forumReplyContent" rows="1" maxlength="50" placeholder="留個言吧 (上限50字)..." class="flex-1 min-w-0 h-[42px] min-h-[42px] px-3 py-3 rounded-xl border border-pink-200 bg-white outline-none focus:border-pink-400 transition text-sm resize-none overflow-hidden" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'"></textarea>
                     <label class="h-[42px] px-2.5 sm:px-3 rounded-xl border border-pink-200 bg-pink-50/70 hover:bg-pink-100/80 text-[#8f4452] text-xs font-bold flex items-center gap-1 cursor-pointer select-none shrink-0 transition has-[:checked]:bg-purple-600 has-[:checked]:border-purple-600 has-[:checked]:text-white" title="勾選後將以「匿名.男 / 匿名.女」顯示留言名稱">
                         <input type="checkbox" id="forumReplyAnonCheckbox" class="w-3.5 h-3.5 accent-purple-600 rounded cursor-pointer">
@@ -1034,6 +1034,12 @@
                     </label>
                     <button onclick="submitForumReply()" class="h-[42px] px-3.5 sm:px-4 rounded-xl bg-[#8f4452] text-white text-xs font-bold shadow hover:bg-[#753541] shrink-0 transition whitespace-nowrap">
                         送出
+                    </button>
+                </div>
+                <div id="forumReplyGuestBar" class="hidden flex items-center justify-between gap-2 max-w-2xl mx-auto py-0.5">
+                    <span class="text-xs text-gray-500">🔒 訪客僅供瀏覽文章，建立個人資料並保存後即可留言與按愛心</span>
+                    <button type="button" onclick="closeForumViewModal(); switchTab('profile');" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow-2xs shrink-0 hover:opacity-95 transition">
+                        📝 前往建檔
                     </button>
                 </div>
             </div>
@@ -1044,10 +1050,10 @@
     <script src="shared/schedule.js?v=20261120rematch2"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261120opt"></script>
-    <script src="shared/cloud-store.js?v=20261121matchfix"></script>
+    <script src="shared/cloud-store.js?v=20261121forumfix"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/forum.js?v=20261121d30"></script>
-  <script src="frontend/state.js?v=20261120opt"></script>
+    <script src="frontend/forum.js?v=20261121guest"></script>
+  <script src="frontend/state.js?v=20261121forumfix"></script>
     <script src="frontend/profile.js?v=20261120opt"></script>
     <script src="frontend/activities.js?v=20261121moffset"></script>
     <script src="frontend/friends-chat.js?v=20261121sess"></script>

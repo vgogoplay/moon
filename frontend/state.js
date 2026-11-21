@@ -75,6 +75,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!document.getElementById('tab-wishes')?.classList.contains('hidden') && typeof renderWishWallTab === 'function') {
                 renderWishWallTab();
             }
+            if (!document.getElementById('tab-forum')?.classList.contains('hidden') && typeof refreshForum === 'function') {
+                refreshForum();
+            }
             updateMailboxBadge();
     if (typeof updateFriendUnreadDot === 'function') updateFriendUnreadDot();
     const currentReportsRaw = localStorage.getItem(REPORTS_KEY) || '[]';
@@ -106,6 +109,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (typeof renderHomeFateWall === 'function') renderHomeFateWall(true);
     if (typeof updateWishNavBadge === 'function') updateWishNavBadge();
     if (typeof renderWishWallTab === 'function') renderWishWallTab(true);
+    if (!document.getElementById('tab-forum')?.classList.contains('hidden') && typeof refreshForum === 'function') {
+        refreshForum();
+    }
     renderProfileForm();
     refreshAllUI();
     if (typeof syncAlreadyReadSingleMailsReceipts === 'function') {

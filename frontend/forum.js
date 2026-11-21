@@ -246,34 +246,105 @@ function filterForum(tag) {
     renderForumList();
 }
 
-async function refreshForum() {
-    const isSandbox = (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode());
-    if (!appState.playerId && !isSandbox) {
-        showMiniNotice('⚠️ 尚未登入', '請先完成個人資料儲存。');
-        return;
-    }
+let forumRefreshInFlight = null;
+
+function loadForumIndexFromLocalCache() {
     try {
-        if (typeof CloudSync !== 'undefined' && (CloudSync.initialized || isSandbox)) {
-            if (!isSandbox && typeof CloudSync.conditionalGetNode === 'function') {
-                const r = await CloudSync.conditionalGetNode(FORUM_INDEX_KEY);
-                if (r.status === 'changed') {
-                    CloudSync.applyStreamPatch(FORUM_INDEX_KEY, r.data);
-                    const rawArr = CloudSync.mapToArray(r.data || {});
-                    forumPosts = purgeExpiredForumPostsFrontend(rawArr);
-                } else if (r.status === 'unchanged' && forumPosts.length === 0 && CloudSync.tree && CloudSync.tree[FORUM_INDEX_KEY]) {
-                    const rawArr = CloudSync.mapToArray(CloudSync.tree[FORUM_INDEX_KEY]);
-                    forumPosts = purgeExpiredForumPostsFrontend(rawArr);
-                }
-            } else {
-                const res = await CloudSync.getNodeOnce(FORUM_INDEX_KEY);
-                if (res !== undefined) {
-                    const rawArr = CloudSync.mapToArray(res || {});
-                    forumPosts = purgeExpiredForumPostsFrontend(rawArr);
-                }
+        const raw = localStorage.getItem(FORUM_INDEX_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        const arr = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+            ? CloudSync.mapToArray(parsed)
+            : (Array.isArray(parsed) ? parsed : (parsed && typeof parsed === 'object' ? Object.values(parsed) : []));
+        return purgeExpiredForumPostsFrontend(arr);
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveForumIndexToLocalCache(postsList) {
+    try {
+        const mapObj = {};
+        (Array.isArray(postsList) ? postsList : []).forEach(p => {
+            if (p && p.id) mapObj[String(p.id)] = p;
+        });
+        localStorage.setItem(FORUM_INDEX_KEY, JSON.stringify(mapObj));
+        if (typeof LocalJsonCache !== 'undefined' && typeof LocalJsonCache.invalidate === 'function') {
+            LocalJsonCache.invalidate(FORUM_INDEX_KEY);
+        }
+    } catch (e) {}
+}
+
+async function refreshForum() {
+    if (forumRefreshInFlight) return forumRefreshInFlight;
+
+    // 1. 先立即從本地快取還原（0ms 秒開，避免每次重整都先閃現空白）
+    if (forumPosts.length === 0) {
+        const cached = loadForumIndexFromLocalCache();
+        if (cached.length > 0) {
+            forumPosts = cached;
+            renderForumList();
+        } else {
+            const container = document.getElementById('forumPostList');
+            if (container) {
+                container.innerHTML = '<div class="p-8 text-center text-gray-400 text-xs font-medium">⏳ 載入看板文章中...</div>';
             }
         }
-        renderForumList();
-    } catch (e) {}
+    }
+
+    const isSandbox = (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode());
+    forumRefreshInFlight = (async () => {
+        try {
+            if (typeof CloudSync !== 'undefined') {
+                // 若 CloudSync 仍在初始化（例如剛開網頁立刻點討論區），先等待初始化或匿名登入完成，絕不直接跳過讀取
+                if (!CloudSync.initialized && !isSandbox) {
+                    if (CloudSync._initPromise) {
+                        await Promise.race([
+                            CloudSync._initPromise.catch(() => {}),
+                            new Promise(r => setTimeout(r, 4000))
+                        ]);
+                    } else if (typeof yuelaoAuth !== 'undefined' && typeof yuelaoAuth.init === 'function') {
+                        await yuelaoAuth.init().catch(() => {});
+                    }
+                }
+
+                if (!isSandbox && typeof CloudSync.conditionalGetNode === 'function') {
+                    // 若目前記憶體與快取仍無資料，強制重新向雲端抓取（避免舊 ETag 回傳 304 導致空列表）
+                    const forceFresh = forumPosts.length === 0;
+                    let r = await CloudSync.conditionalGetNode(FORUM_INDEX_KEY, { force: forceFresh });
+                    if (r.status === 'error') {
+                        await new Promise(rDelay => setTimeout(rDelay, 350));
+                        r = await CloudSync.conditionalGetNode(FORUM_INDEX_KEY, { force: true });
+                    }
+                    if (r.status === 'changed') {
+                        CloudSync.applyStreamPatch(FORUM_INDEX_KEY, r.data);
+                        const rawArr = CloudSync.mapToArray(r.data || {});
+                        forumPosts = purgeExpiredForumPostsFrontend(rawArr);
+                        saveForumIndexToLocalCache(forumPosts);
+                    } else if (r.status === 'unchanged' && forumPosts.length === 0) {
+                        const treeArr = (CloudSync.tree && CloudSync.tree[FORUM_INDEX_KEY])
+                            ? CloudSync.mapToArray(CloudSync.tree[FORUM_INDEX_KEY])
+                            : loadForumIndexFromLocalCache();
+                        forumPosts = purgeExpiredForumPostsFrontend(treeArr);
+                    }
+                } else {
+                    const res = await CloudSync.getNodeOnce(FORUM_INDEX_KEY);
+                    if (res !== undefined) {
+                        const rawArr = CloudSync.mapToArray(res || {});
+                        forumPosts = purgeExpiredForumPostsFrontend(rawArr);
+                        if (!isSandbox) saveForumIndexToLocalCache(forumPosts);
+                    }
+                }
+            }
+            renderForumList();
+        } catch (e) {
+            renderForumList();
+        } finally {
+            forumRefreshInFlight = null;
+        }
+    })();
+
+    return forumRefreshInFlight;
 }
 
 function openForumPostModal() {
@@ -360,6 +431,7 @@ async function submitForumPost() {
             await CloudSync.putNode(`${FORUM_POSTS_KEY}/${postId}`, postFullData, { throwOnError: true });
         }
         forumPosts.unshift(postIndexData);
+        saveForumIndexToLocalCache(forumPosts);
         filterForum('最新');
         showMiniNotice('🌸 發佈成功', '文章已經成功發佈到月老看板！');
     } catch (e) {
@@ -367,14 +439,18 @@ async function submitForumPost() {
     }
 }
 
-// 觀看內文
+function syncForumReplyBarGuestState(isGuest) {
+    const inputBar = document.getElementById('forumReplyInputBar');
+    const guestBar = document.getElementById('forumReplyGuestBar');
+    if (inputBar) inputBar.classList.toggle('hidden', Boolean(isGuest));
+    if (guestBar) guestBar.classList.toggle('hidden', !isGuest);
+}
+
+// 觀看內文（訪客亦可瀏覽文章與留言，但無法按愛心與留言）
 async function viewForumPost(postId) {
-    const isSandbox = (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode());
-    if (!appState.playerId && !isSandbox) {
-        showMiniNotice('⚠️ 尚未登入', '請先完成個人資料儲存。');
-        return;
-    }
+    const isGuest = !(typeof appState !== 'undefined' && appState && appState.playerId);
     currentViewingPostId = postId;
+    syncForumReplyBarGuestState(isGuest);
     const anonCb = document.getElementById('forumReplyAnonCheckbox');
     if (anonCb) {
         anonCb.checked = false;
@@ -409,7 +485,22 @@ async function refreshForumPost(forceId = null) {
 
     try {
         if (typeof CloudSync !== 'undefined') {
-            const res = await CloudSync.getNodeOnce(`${FORUM_POSTS_KEY}/${pid}`);
+            const isSandbox = (typeof CloudSync.isLocalSandboxMode === 'function' && CloudSync.isLocalSandboxMode());
+            if (!CloudSync.initialized && !isSandbox) {
+                if (CloudSync._initPromise) {
+                    await Promise.race([
+                        CloudSync._initPromise.catch(() => {}),
+                        new Promise(r => setTimeout(r, 4000))
+                    ]);
+                } else if (typeof yuelaoAuth !== 'undefined' && typeof yuelaoAuth.init === 'function') {
+                    await yuelaoAuth.init().catch(() => {});
+                }
+            }
+            let res = await CloudSync.getNodeOnce(`${FORUM_POSTS_KEY}/${pid}`);
+            if (res === undefined && !isSandbox) {
+                await new Promise(r => setTimeout(r, 350));
+                res = await CloudSync.getNodeOnce(`${FORUM_POSTS_KEY}/${pid}`);
+            }
             if (res && typeof res === 'object') {
                 if (isForumPostExpiredFrontend(res, Date.now())) {
                     purgeExpiredForumPostsFrontend([{ ...res, id: pid }]);
@@ -470,11 +561,15 @@ function renderForumPostDetail() {
 
     let authorDisplay = p.authorName || `匿名.${p.authorGender || '?'}`;
     
+    const isGuest = !(typeof appState !== 'undefined' && appState && appState.playerId);
+    syncForumReplyBarGuestState(isGuest);
+
     const likesMap = (viewingPostData.likes && typeof viewingPostData.likes === 'object') ? viewingPostData.likes : {};
-    const hasLiked = Boolean(appState.playerId && likesMap[appState.playerId]);
+    const hasLiked = Boolean(!isGuest && likesMap[appState.playerId]);
+    const totalLikesCount = Object.keys(likesMap).filter(k => Boolean(likesMap[k])).length || Number(p.pushCount || 0);
     
     const postAuthorId = !isBackendForumPost(p) ? String(p.authorId || '').trim() : '';
-    const isMyOwnPost = Boolean(postAuthorId && appState.playerId && postAuthorId === String(appState.playerId).trim());
+    const isMyOwnPost = Boolean(postAuthorId && !isGuest && postAuthorId === String(appState.playerId).trim());
     const replyAnonCb = document.getElementById('forumReplyAnonCheckbox');
     if (replyAnonCb && replyAnonCb.parentElement) {
         replyAnonCb.parentElement.classList.toggle('hidden', isMyOwnPost);
@@ -488,7 +583,15 @@ function renderForumPostDetail() {
         `;
     }
 
-    const likeBtnHtml = `<button type="button" onclick="likeForumPost()" aria-pressed="${hasLiked ? 'true' : 'false'}" title="${hasLiked ? '已按愛心（點擊可取消）' : '按愛心支持'}" class="inline-flex items-center justify-center w-9 h-9 rounded-full border ${hasLiked ? 'bg-rose-100 border-rose-300 text-rose-600 shadow-2xs scale-105' : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-500'} text-sm font-bold transition active:scale-95">${hasLiked ? '❤️' : '🤍'}</button>`;
+    const likeBtnHtml = isGuest
+        ? `<div class="flex items-center gap-2">
+               <button type="button" disabled aria-disabled="true" title="訪客無法按愛心，請先建立個人資料" class="inline-flex items-center justify-center w-9 h-9 rounded-full border bg-gray-100 border-gray-200 text-gray-300 text-sm font-bold opacity-60 cursor-not-allowed">🤍</button>
+               <span class="text-xs text-gray-400 font-medium">${totalLikesCount} 個愛心・訪客無法按愛心與留言</span>
+           </div>`
+        : `<div class="flex items-center gap-2">
+               <button type="button" onclick="likeForumPost()" aria-pressed="${hasLiked ? 'true' : 'false'}" title="${hasLiked ? '已按愛心（點擊可取消）' : '按愛心支持'}" class="inline-flex items-center justify-center w-9 h-9 rounded-full border ${hasLiked ? 'bg-rose-100 border-rose-300 text-rose-600 shadow-2xs scale-105' : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-500'} text-sm font-bold transition active:scale-95">${hasLiked ? '❤️' : '🤍'}</button>
+               <span class="text-xs text-gray-400 font-medium">${totalLikesCount}</span>
+           </div>`;
 
     headerEl.innerHTML = `
         <div class="flex items-center gap-2 mb-3">
@@ -730,6 +833,7 @@ async function deleteMyForumPost(postId) {
         }
         
         forumPosts = forumPosts.filter(p => String(p.id) !== String(postId));
+        saveForumIndexToLocalCache(forumPosts);
         
         if (typeof CloudSync !== 'undefined' && typeof CloudSync.recordPlayerOpLog === 'function') {
             const myName = String(appState.profile.nickname || appState.playerId);
@@ -862,6 +966,7 @@ async function submitEditContent() {
                     CloudSync.recordPlayerOpLog(appState.playerId, myName, '編輯討論區文章', `文章 ID:${editTargetPostId}\n編輯前：[${oldTitleStr}] ${oldContentStr}\n編輯後：[${newTitle}] ${newContent}`);
                 }
             }
+            saveForumIndexToLocalCache(forumPosts);
             renderForumList();
             closeEditContentModal();
             showMiniNotice('✅ 編輯成功', '文章已成功更新。');
@@ -951,3 +1056,6 @@ window.closeEditContentModal = closeEditContentModal;
 window.submitEditContent = submitEditContent;
 window.editMyForumReply = editMyForumReply;
 window.editMyForumPost = editMyForumPost;
+
+forumPosts = loadForumIndexFromLocalCache();
+window.loadForumIndexFromLocalCache = loadForumIndexFromLocalCache;
