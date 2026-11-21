@@ -724,7 +724,7 @@ function confirmManualUnfriend() {
 function selectFriend(friendId) {
     appState.activeFriendId = String(friendId);
     resetChatVisibleBatch(true);
-    Store.save(appState);
+    Store.save(appState, false, true); // 優化：切換好友純本地化，不推雲端
     renderFriendsSection();
 
     if (isEveningConfessionPending()) {
@@ -1579,7 +1579,7 @@ document.getElementById('chatSendForm').addEventListener('submit', function(e) {
         friend.messages = updatedMsgs;
         input.value = '';
         shouldScrollChatToLatest = true;
-        Store.save(appState);
+        Store.save(appState, false, true); // 優化：發送訊息與個資儲存解耦，不推雲端
         renderActiveFriendWorkspace();
     } else {
         friend.messages.push({ sender: 'me', text, time: nowStr });

@@ -1961,16 +1961,7 @@ const CloudSync = {
         es.addEventListener('put', handler);
         es.addEventListener('patch', handler);
         es.onopen = () => {
-            // 連線（含重連）後補讀一次，避免斷線期間漏掉訊息
-            if (this.activeRoomEs === es) {
-                this.conditionalGetNode(roomPath).then(r => {
-                    if (r.status === 'changed') {
-                        this.applyStreamPatch(roomPath, r.data);
-                        this.applyTreeToLocalStorage();
-                        if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
-                    }
-                });
-            }
+            // 優化：移除 es.onopen 重複拉取整房的請求
         };
         this.activeRoomEs = es;
     },
@@ -2860,21 +2851,22 @@ const CloudSync = {
                 cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/matchedAt`));
             }
         }
-        if (hasInput('registeredSessions') && cleanRecord.registeredSessions.length === 0) {
+        const prevTreeUser = (this.tree && this.tree[USERS_KEY] && this.tree[USERS_KEY][pid]) ? this.tree[USERS_KEY][pid] : null;
+        if (hasInput('registeredSessions') && cleanRecord.registeredSessions.length === 0 && prevTreeUser && prevTreeUser.registeredSessions) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/registeredSessions`));
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/registeredSession`));
         }
-        if (hasInput('exactMatchCriteria') && Object.keys(cleanRecord.exactMatchCriteria).length === 0) {
+        if (hasInput('exactMatchCriteria') && Object.keys(cleanRecord.exactMatchCriteria).length === 0 && prevTreeUser && prevTreeUser.exactMatchCriteria) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/exactMatchCriteria`));
         }
-        if (hasInput('mustMatchKeys') && (!Array.isArray(cleanRecord.mustMatchKeys) || cleanRecord.mustMatchKeys.length === 0)) {
+        if (hasInput('mustMatchKeys') && (!Array.isArray(cleanRecord.mustMatchKeys) || cleanRecord.mustMatchKeys.length === 0) && prevTreeUser && prevTreeUser.mustMatchKeys) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/mustMatchKeys`));
         }
-        const prevTreeUser = (this.tree && this.tree[USERS_KEY] && this.tree[USERS_KEY][pid]) ? this.tree[USERS_KEY][pid] : null;
+        
         const prevCustomKeys = (prevTreeUser && prevTreeUser.customActivityRegs && typeof prevTreeUser.customActivityRegs === 'object')
             ? Object.keys(prevTreeUser.customActivityRegs)
             : [];
-        if (hasInput('customActivityRegs') && Object.keys(cleanRecord.customActivityRegs).length === 0) {
+        if (hasInput('customActivityRegs') && Object.keys(cleanRecord.customActivityRegs).length === 0 && prevCustomKeys.length > 0) {
             cleanupTasks.push(this.deleteNode(`${USERS_KEY}/${pid}/customActivityRegs`));
         } else {
             if (hasInput('customActivityRegs')) prevCustomKeys.forEach(oldActKey => {
