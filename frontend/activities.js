@@ -225,11 +225,16 @@ function renderHomeStatsCharts(forceRender = false) {
         }
     });
 
+    // 前台顯示：男生人數固定加 10 人，女生人數固定加 5 人
+    maleCount += 10;
+    femaleCount += 5;
+    const displayTotalCount = totalCount + 15;
+
     const genderTotal = maleCount + femaleCount;
     const malePct = genderTotal > 0 ? Math.round((maleCount / genderTotal) * 100) : 0;
     const femalePct = genderTotal > 0 ? (100 - malePct) : 0;
 
-    totalBadge.textContent = `總計 ${totalCount} 人`;
+    totalBadge.textContent = `總計 ${displayTotalCount} 人`;
     document.getElementById('genderRatioSummaryTag').textContent = `男 ${maleCount} 女 ${femaleCount}`;
     document.getElementById('statMaleText').textContent = `${maleCount} 人 (${malePct}%)`;
     document.getElementById('statFemaleText').textContent = `${femaleCount} 人 (${femalePct}%)`;
@@ -274,7 +279,7 @@ function renderHomeStatsCharts(forceRender = false) {
         </svg>
         <div class="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
             <span class="text-[10px] text-gray-400 font-medium">已登記人數</span>
-            <span class="text-lg font-bold font-serif-jp text-[#8f4452] leading-tight">${totalCount} 人</span>
+            <span class="text-lg font-bold font-serif-jp text-[#8f4452] leading-tight">${displayTotalCount} 人</span>
         </div>
     `;
 
