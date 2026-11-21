@@ -1445,6 +1445,7 @@ const CloudSync = {
     PLAYER_IDLE_TIMEOUT_MS: 180000,  // 超過 3 分鐘無滑動／點擊／輸入即自動暫停輪詢
     BACKEND_POLL_INTERVAL_MS: 30000, // 後台僅輪詢當前頁面所需節點，每 30 秒檢查一次
     BACKEND_IDLE_TIMEOUT_MS: 300000, // 後台超過 5 分鐘無操作自動暫停輪詢
+    PLAYER_LONG_IDLE_RELOAD_MS: 900000, // 前台超過 15 分鐘未操作，回來時自動重整回首頁
     ETAG_STORAGE_KEY: 'yuelao_cloud_etags_v1',
     etagCache: null,
     fetchedTopNodes: null,
@@ -1475,6 +1476,19 @@ const CloudSync = {
                 if (this.isBackendContext()) {
                     this.pollBackendLight();
                 } else if (this.isPlayerSyncMode()) {
+                    const idleDuration = Date.now() - Number(this.lastUserActivityAt || 0);
+                    const isEditingDraft = (typeof hasUnsavedProfileDraft !== 'undefined' && hasUnsavedProfileDraft);
+                    const hasForumInput = (typeof document !== 'undefined' && document.getElementById('forumPostContent') && document.getElementById('forumPostContent').value.trim());
+                    const hasChatInput = (typeof document !== 'undefined' && document.getElementById('chatInput') && document.getElementById('chatInput').value.trim());
+                    
+                    // 若超過 15 分鐘長閒置，且無未存草稿或打到一半的字，直接重整並切回首頁
+                    if (idleDuration >= this.PLAYER_LONG_IDLE_RELOAD_MS && !isEditingDraft && !hasForumInput && !hasChatInput) {
+                        if (typeof window !== 'undefined' && window.location) {
+                            window.location.href = 'index.html';
+                            return;
+                        }
+                    }
+                    
                     this.pollPlayerHot();
                     if (this._pausedRoomPath) {
                         const resumeRoom = this._pausedRoomPath;
@@ -2794,13 +2808,13 @@ const CloudSync = {
         cleanRecord.customActivityRegs = (cleanRecord.customActivityRegs && typeof cleanRecord.customActivityRegs === 'object' && !Array.isArray(cleanRecord.customActivityRegs))
             ? cleanRecord.customActivityRegs
             : {};
+        // 寫入前以雲端最新單節點為基準（玩家端）；只 PATCH 差異欄位，避免舊快取整包覆寫 matchedHistory
+        const freshBase = await this.getNodeOnce(`${USERS_KEY}/${pid}`);
+        
         const serialized = JSON.stringify(cleanRecord);
         if (!forcePush && this.lastPushedUsersJson[pid] === serialized) return;
         this.lastPushedUsersJson[pid] = serialized;
         this.setSharedPendingUser(pid, cleanRecord, 25000);
-
-        // 寫入前以雲端最新單節點為基準（玩家端）；只 PATCH 差異欄位，避免舊快取整包覆寫 matchedHistory
-        const freshBase = await this.getNodeOnce(`${USERS_KEY}/${pid}`);
         if (freshBase === undefined) {
             console.warn('[upsertUser] 無法讀取雲端最新資料，略過寫入以免覆蓋 ID:', pid);
             return;
@@ -2808,8 +2822,9 @@ const CloudSync = {
         const baseUser = (freshBase && typeof freshBase === 'object') ? freshBase : null;
         
         // 核心修復：寫入前強制將最新雲端的配對名單合併進 cleanRecord，徹底斷絕舊網頁覆蓋好友名單的問題
-        if (baseUser && !isMatchMutation) {
+        if (baseUser) {
             const latestCloudHist = this.normalizeMatchedHistoryList(baseUser.matchedHistory);
+            // 即使是 isMatchMutation (例如繼續配對延長天數)，也必須先聯集合併最新雲端名單，避免覆蓋掉單方新配對的好友
             cleanRecord.matchedHistory = this.normalizeMatchedHistoryList([...latestCloudHist, ...cleanRecord.matchedHistory])
                 .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId) && !this.isRogueCustomMatchEntry(h));
                 

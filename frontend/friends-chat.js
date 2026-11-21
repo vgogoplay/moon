@@ -1703,7 +1703,7 @@ function respondSevenDayDecision(isContinue) {
 
     if (isRealFriend) {
         const completed = recordMutualContinueVote(appState.playerId, friend.id, myNick, false);
-        Store.save(appState);
+        Store.save(appState, false, true); // 優化：繼續配對時不推送整包 appState 到雲端，避免覆蓋最新名單
         refreshAllUI();
         if (completed) {
             showMiniNotice('🌸 繼續配對成功', `你與 ${friend.nickname} 皆已按下繼續配對！\n緣分已再延後 7 天（剩餘 7 天），現在可以繼續在聊天室聊天了！`);
@@ -1715,7 +1715,7 @@ function respondSevenDayDecision(isContinue) {
 
     friend.myContinue = true;
     friend.messages.push({ sender: 'system', text: `💖 ${myNick} 已按下「繼續配對」，等待另一方也按下繼續中...` });
-    Store.save(appState);
+    Store.save(appState, false, true); // 優化：測試好友按下繼續配對，純本地存檔
     renderActiveFriendWorkspace();
 
     if (friend.partnerContinue) {
@@ -1732,7 +1732,7 @@ function completeMutualContinuation(friend) {
         sender: 'system',
         text: `🌸 雙方皆按下「繼續配對」成為好友！緣分已再延後 7 天（剩餘 7 天），聊天室已重新開放並自動解鎖彼此的 IG 帳號！`
     });
-    Store.save(appState);
+    Store.save(appState, false, true); // 優化：測試好友完成繼續配對，純本地存檔
     refreshAllUI();
 }
 
