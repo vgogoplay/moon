@@ -175,16 +175,24 @@ function renderHomeStatsCharts(forceRender = false) {
     if (!totalBadge || !donutBox || !ieDonutBox) return;
 
     const nowTs = Date.now();
-    if (!forceRender && donutBox.dataset.rendered === '1' && (nowTs - lastHomeStatsRenderTs) < HOME_STATS_COOLDOWN_MS) {
-        return;
-    }
-
+    const sysCfgForStats = (typeof Store !== 'undefined' && typeof Store.getSystemConfig === 'function')
+        ? Store.getSystemConfig()
+        : { maleDisplayOffset: 0 };
+    const maleOffset = Math.max(0, Number(sysCfgForStats.maleDisplayOffset || 0));
     const rawUsersStr = localStorage.getItem(USERS_LOCAL_KEY) || '[]';
-    if (rawUsersStr === lastUsersStatsSnapshot && donutBox.dataset.rendered === '1') {
-        lastHomeStatsRenderTs = nowTs;
-        return;
+    const statsCacheSig = `${maleOffset}|${rawUsersStr}`;
+
+    if (!forceRender && donutBox.dataset.rendered === '1') {
+        if (statsCacheSig === lastUsersStatsSnapshot) {
+            lastHomeStatsRenderTs = nowTs;
+            return;
+        }
+        const prevOffsetPart = String(lastUsersStatsSnapshot || '').split('|')[0];
+        if (prevOffsetPart === String(maleOffset) && (nowTs - lastHomeStatsRenderTs) < HOME_STATS_COOLDOWN_MS) {
+            return;
+        }
     }
-    lastUsersStatsSnapshot = rawUsersStr;
+    lastUsersStatsSnapshot = statsCacheSig;
     lastHomeStatsRenderTs = nowTs;
     donutBox.dataset.rendered = '1';
 
@@ -225,10 +233,10 @@ function renderHomeStatsCharts(forceRender = false) {
         }
     });
 
-    // 前台顯示：男生人數固定加 10 人，女生人數固定加 5 人
-    maleCount += 10;
+    // 前台顯示：男生人數依後台設定固定加成，女生人數固定加 5 人
+    maleCount += maleOffset;
     femaleCount += 5;
-    const displayTotalCount = totalCount + 15;
+    const displayTotalCount = totalCount + maleOffset + 5;
 
     const genderTotal = maleCount + femaleCount;
     const malePct = genderTotal > 0 ? Math.round((maleCount / genderTotal) * 100) : 0;

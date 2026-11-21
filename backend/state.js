@@ -154,6 +154,7 @@ function getSystemConfig() {
         profileLocked: sys.profileLocked !== undefined ? Boolean(sys.profileLocked) : false,
         genderLimitEnabled: sys.genderLimitEnabled !== undefined ? Boolean(sys.genderLimitEnabled) : false,
         genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30,
+        maleDisplayOffset: sys.maleDisplayOffset !== undefined ? Math.max(0, Number(sys.maleDisplayOffset) || 0) : 0,
         wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true
     };
 }
@@ -202,24 +203,55 @@ function toggleProfileLockSwitch() {
     renderAdminAll();
 }
 
+function previewGenderLimitTotalDisplay() {
+    const cfg = getSystemConfig();
+    const maxEl = document.getElementById('genderLimitMaxInput');
+    const offsetEl = document.getElementById('maleDisplayOffsetInput');
+    const totalEl = document.getElementById('genderLimitDisplayTotalText');
+    if (!totalEl) return;
+    const rawMax = maxEl ? parseInt(maxEl.value, 10) : NaN;
+    const validMax = (!isNaN(rawMax) && rawMax >= 1) ? rawMax : (cfg.genderLimitMax || 30);
+    const rawOffset = offsetEl ? parseInt(offsetEl.value, 10) : NaN;
+    const validOffset = (!isNaN(rawOffset) && rawOffset >= 0) ? rawOffset : (cfg.maleDisplayOffset || 0);
+    totalEl.textContent = `前台顯示共 ${validMax + validOffset} 人`;
+}
+
 function toggleGenderLimitSwitch() {
     const cfg = getSystemConfig();
     const inputVal = Math.max(1, parseInt(document.getElementById('genderLimitMaxInput').value, 10) || cfg.genderLimitMax || 30);
+    const offsetEl = document.getElementById('maleDisplayOffsetInput');
+    const rawOffset = offsetEl ? parseInt(offsetEl.value, 10) : NaN;
+    const offsetVal = (!isNaN(rawOffset) && rawOffset >= 0) ? rawOffset : (cfg.maleDisplayOffset || 0);
     const nextEnabled = !cfg.genderLimitEnabled;
-    setSystemConfig({ genderLimitEnabled: nextEnabled, genderLimitMax: inputVal });
+    setSystemConfig({ genderLimitEnabled: nextEnabled, genderLimitMax: inputVal, maleDisplayOffset: offsetVal });
+    const displaySum = inputVal + offsetVal;
     const label = nextEnabled
-        ? `🟢 已開啟男生人數限制（男生上限 ${inputVal} 人 ／ 女生不限人數）`
+        ? `🟢 已開啟男生人數限制（男生上限 ${inputVal} 人＋固定 ${offsetVal} 人，前台顯示共 ${displaySum} 人 ／ 女生不限人數）`
         : '⚪ 已關閉男生人數限制（男女生皆不限制）';
     appendLog(`<span class="text-pink-300">[男生人數限制]</span> ${label}`);
     renderAdminAll();
 }
 
 function updateGenderLimitMax() {
+    const cfg = getSystemConfig();
     const rawVal = parseInt(document.getElementById('genderLimitMaxInput').value, 10);
     const validMax = (!isNaN(rawVal) && rawVal >= 1) ? rawVal : 30;
     document.getElementById('genderLimitMaxInput').value = validMax;
     setSystemConfig({ genderLimitMax: validMax });
-    appendLog(`<span class="text-pink-300">[男生人數上限更新]</span> 男生人數上限已調整為 <strong>${validMax} 人</strong>（女生不限人數）。`);
+    const offsetVal = cfg.maleDisplayOffset || 0;
+    appendLog(`<span class="text-pink-300">[男生人數上限更新]</span> 男生人數上限已調整為 <strong>${validMax} 人</strong>（＋固定 ${offsetVal} 人，前台顯示共 <strong>${validMax + offsetVal} 人</strong>）。`);
+    renderAdminAll();
+}
+
+function updateMaleDisplayOffset() {
+    const cfg = getSystemConfig();
+    const offsetEl = document.getElementById('maleDisplayOffsetInput');
+    const rawVal = offsetEl ? parseInt(offsetEl.value, 10) : NaN;
+    const validOffset = (!isNaN(rawVal) && rawVal >= 0) ? rawVal : 0;
+    if (offsetEl) offsetEl.value = validOffset;
+    setSystemConfig({ maleDisplayOffset: validOffset });
+    const maxVal = cfg.genderLimitMax || 30;
+    appendLog(`<span class="text-pink-300">[男生固定人數更新]</span> 男生固定人數已調整為 <strong>+${validOffset} 人</strong>（男生上限 ${maxVal} 人，前台顯示共 <strong>${maxVal + validOffset} 人</strong>）。`);
     renderAdminAll();
 }
 

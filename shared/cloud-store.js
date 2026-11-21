@@ -2955,6 +2955,7 @@ const Store = {
                 profileLocked: sys.profileLocked !== undefined ? Boolean(sys.profileLocked) : false,
                 genderLimitEnabled: sys.genderLimitEnabled !== undefined ? Boolean(sys.genderLimitEnabled) : false,
                 genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30,
+                maleDisplayOffset: sys.maleDisplayOffset !== undefined ? Math.max(0, Number(sys.maleDisplayOffset) || 0) : 0,
                 wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true
             };
         } catch (e) {
@@ -2966,6 +2967,7 @@ const Store = {
                 profileLocked: false,
                 genderLimitEnabled: false,
                 genderLimitMax: 30,
+                maleDisplayOffset: 0,
                 wishEarlyCloseCanMatch: true
             };
         }
@@ -2999,15 +3001,19 @@ const Store = {
     getGenderQuotaStatus() {
         const cfg = this.getSystemConfig();
         const counts = this.getGenderCounts();
-        const limit = Math.max(1, Number(cfg.genderLimitMax || 30));
+        const realLimit = Math.max(1, Number(cfg.genderLimitMax || 30));
+        const maleOffset = Math.max(0, Number(cfg.maleDisplayOffset || 0));
         const enabled = Boolean(cfg.genderLimitEnabled);
-        const maleFull = enabled && counts.male >= limit;
+        const maleFull = enabled && counts.male >= realLimit;
         const femaleFull = false; // 女生不限制人數上限
         const bothFull = false;   // 女生不限制上限，不會出現男女皆滿鎖定
         return {
             enabled,
-            limit,
-            maleCount: counts.male,
+            limit: realLimit + maleOffset,
+            realLimit,
+            maleDisplayOffset: maleOffset,
+            realMaleCount: counts.male,
+            maleCount: counts.male + maleOffset,
             femaleCount: counts.female,
             maleFull,
             femaleFull,
