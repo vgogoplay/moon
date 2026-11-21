@@ -63,7 +63,7 @@
             <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div>
                     <h2 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">2. 📋 討論區文章與留言管理</h2>
-                    <p class="text-xs text-gray-500 mt-0.5">一般文章保留 <strong>10 天</strong>自動刪除（可點擊天數延長），後台發佈的文章<strong>保存時間不限制</strong>且可隨時自行編輯</p>
+                    <p class="text-xs text-gray-500 mt-0.5">一般文章保留 <strong>30 天</strong>自動刪除（可點擊天數延長），後台發佈的文章<strong>保存時間不限制</strong>且可隨時自行編輯</p>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -121,7 +121,7 @@
                 <!-- 左側：文章索引列表 -->
                 <div class="lg:col-span-6 rounded-2xl border-2 border-pink-200 overflow-hidden bg-white">
                     <div class="px-4 py-3 bg-pink-50/70 border-b border-pink-200 flex items-center justify-between">
-                        <span class="text-xs font-bold text-[#8f4452]">🗂️ 全部文章索引列表（一般文章保留 10 天・公告不限時間）</span>
+                        <span class="text-xs font-bold text-[#8f4452]">🗂️ 全部文章索引列表（一般文章保留 30 天・公告不限時間）</span>
                         <span id="adminForumFilteredCountText" class="text-[11px] text-gray-500">共 0 篇</span>
                     </div>
                     <div id="adminForumPostList" class="divide-y divide-pink-100 bg-white min-h-[320px]">
@@ -220,9 +220,9 @@
                     <select id="extendRetentionDaysSelect" class="w-full p-2.5 admin-input-box text-sm font-bold text-[#8f4452]">
                         <option value="3">延長 3 天</option>
                         <option value="7">延長 7 天</option>
-                        <option value="10" selected>重新保留 10 天</option>
+                        <option value="10">重新保留 10 天</option>
                         <option value="14">重新保留 14 天</option>
-                        <option value="30">重新保留 30 天</option>
+                        <option value="30" selected>重新保留 30 天</option>
                         <option value="-1">♾️ 不限時間（永久保留）</option>
                     </select>
                 </div>
@@ -246,7 +246,7 @@
     <script src="shared/cloud-store.js?v=20261120rematch"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261120opt"></script>
-    <script src="backend/forum.js?v=20261120p"></script>
+    <script src="backend/forum.js?v=20261121d30"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261120snap"></script>
 </body>

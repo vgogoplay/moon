@@ -1,8 +1,8 @@
-/* backend/forum.js - 後台討論區管理（發佈官方公告、公告名稱列表編輯／刪除、後台文章保存時間不限制、一般文章10天自動刪除、省流量分離讀取索引／內文、刪文、刪留言） */
+/* backend/forum.js - 後台討論區管理（發佈官方公告、公告名稱列表編輯／刪除、後台文章保存時間不限制、一般文章30天自動刪除、省流量分離讀取索引／內文、刪文、刪留言） */
 
 const ADMIN_FORUM_INDEX_KEY = 'yuelao_forum_index';
 const ADMIN_FORUM_POSTS_KEY = 'yuelao_forum_posts';
-const ADMIN_FORUM_RETENTION_DAYS = 10;
+const ADMIN_FORUM_RETENTION_DAYS = 30;
 const ADMIN_FORUM_RETENTION_MS = ADMIN_FORUM_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 let adminForumIndexList = [];

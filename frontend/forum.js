@@ -1,4 +1,4 @@
-// ==================== 📋 月老粉嫩風 PTT 討論區 (緊湊列表版・一般文章10天自動刪除・後台公告不限時間) ====================
+// ==================== 📋 月老粉嫩風 PTT 討論區 (緊湊列表版・一般文章30天自動刪除・後台公告不限時間) ====================
 let forumPosts = [];
 let currentForumFilter = '公告';
 let currentViewingPostId = null;
@@ -6,7 +6,7 @@ let viewingPostData = null;
 
 const FORUM_INDEX_KEY = 'yuelao_forum_index';
 const FORUM_POSTS_KEY = 'yuelao_forum_posts'; // yuelao_forum_posts/{postId} 存放完整內文與留言
-const FORUM_RETENTION_DAYS = 10;
+const FORUM_RETENTION_DAYS = 30;
 const FORUM_RETENTION_MS = FORUM_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 const FORUM_POSTS_PER_PAGE = 5;

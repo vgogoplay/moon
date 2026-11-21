@@ -1556,7 +1556,7 @@ function renderWishWallTab(forceRender = false) {
             const isPubExpanded = expandedPublicWishes.has(String(w.id));
             const isPinnedWish = Boolean(w.isPinned);
             const pinnedPillHtml = isPinnedWish
-                ? `<span class="px-2 py-0.5 rounded-full bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-[11px] font-bold shrink-0 whitespace-nowrap shadow-2xs">📌 置頂</span>`
+                ? `<span class="px-2 py-0.5 rounded-full bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-[11px] font-bold shrink-0 whitespace-nowrap shadow-2xs">📌</span>`
                 : '';
 
             return `
@@ -1565,7 +1565,7 @@ function renderWishWallTab(forceRender = false) {
                         <div class="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-x-auto">
                             ${pinnedPillHtml}
                             <h4 class="text-xs sm:text-sm font-bold font-serif-jp text-[#7a3542] truncate">🏮 ${escapeWishHtml(w.title)}</h4>
-                            <span class="px-2 py-0.5 rounded-full ${authorBadgeStyle} text-[11px] font-bold shrink-0 whitespace-nowrap">
+                            <span class="px-2 py-0.5 rounded-full ${authorBadgeStyle} text-[10px] font-bold shrink-0 whitespace-nowrap">
                                 ${authorIdentityLabel}
                             </span>
                         </div>
