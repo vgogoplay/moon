@@ -633,6 +633,15 @@ function syncFromSharedStorage() {
         }
     } else {
         if (chatsChanged) {
+            if (appState && appState.playerId && Array.isArray(appState.friends)) {
+                appState.friends.forEach(f => {
+                    if (!f || String(f.id).startsWith('MOCK_FRIEND_')) return;
+                    const sharedMsgs = ChatStore.getMessages(appState.playerId, f.id);
+                    if (sharedMsgs.length > 0) {
+                        f.messages = sharedMsgs;
+                    }
+                });
+            }
             Store.save(appState, false, true);
             if (typeof updateFriendUnreadDot === 'function') updateFriendUnreadDot();
         }

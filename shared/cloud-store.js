@@ -1458,6 +1458,7 @@ const CloudSync = {
     _hiddenRoomPath: '',
     activeRoomEs: null,
     activeRoomFallbackTimer: null,
+    _chatIndexUnsupported: false,
     playerTimersStarted: false,
     lastUserActivityAt: Date.now(),
     isPlayerIdlePaused: false,
@@ -1802,9 +1803,15 @@ const CloudSync = {
         let etagCacheKey = path;
         let chatLimitMode = 0;
         if (path.startsWith(CHATS_KEY + '/') && !this.isBackendContext()) {
-            chatLimitMode = Number(options.limit) || (path === this.activeRoomPath ? 50 : 1);
-            queryParams = `orderBy="ts"&limitToLast=${chatLimitMode}`;
-            etagCacheKey = `${path}::last${chatLimitMode}`;
+            if (!this._chatIndexUnsupported && !options._noQuery) {
+                chatLimitMode = Number(options.limit) || (path === this.activeRoomPath ? 50 : 1);
+                queryParams = `orderBy="ts"&limitToLast=${chatLimitMode}`;
+                etagCacheKey = `${path}::last${chatLimitMode}`;
+            } else {
+                chatLimitMode = 0;
+                queryParams = '';
+                etagCacheKey = path;
+            }
         }
         if (!options.force && cache[etagCacheKey] && this.hasLocalCacheForPath(path)) {
             headers['If-None-Match'] = cache[etagCacheKey];
@@ -1829,6 +1836,11 @@ const CloudSync = {
             if ((res.status === 401 || res.status === 403) && !options._retriedAuth) {
                 await this.refreshAuthForRetry();
                 return this.conditionalGetNode(path, { ...options, _retriedAuth: true });
+            }
+            if (res.status === 400 && queryParams && !options._noQuery) {
+                // Firebase 規則尚未設定 yuelao_chats 的 .indexOn: ["ts"] 時，自動改用一般 ETag 讀取整間聊天室（上限 200 則）
+                this._chatIndexUnsupported = true;
+                return this.conditionalGetNode(path, { ...options, _noQuery: true });
             }
             if (!res.ok) {
                 this.syncStats.errors++;
@@ -1994,17 +2006,22 @@ const CloudSync = {
         return hasNewOrUpdated;
     },
 
-    async fetchPlayerPaths(paths) {
+    async fetchPlayerPaths(paths, options = {}) {
         const unique = Array.from(new Set((paths || []).filter(Boolean)));
-        await Promise.all(unique.map(p => this.conditionalGetNode(p).then(r => {
-            if (r.status === 'changed') {
-                if (p.startsWith(CHATS_KEY + '/') && !this.isBackendContext()) {
-                    this.mergeChatRoomSnapshot(p, r.data, r._chatLimitMode || 1);
-                } else {
-                    this.applyStreamPatch(p, r.data);
+        await Promise.all(unique.map(p => {
+            const getOpts = (p.startsWith(CHATS_KEY + '/') && !this.isBackendContext() && options.chatLimit)
+                ? { limit: Number(options.chatLimit) }
+                : {};
+            return this.conditionalGetNode(p, getOpts).then(r => {
+                if (r.status === 'changed') {
+                    if (p.startsWith(CHATS_KEY + '/') && !this.isBackendContext()) {
+                        this.mergeChatRoomSnapshot(p, r.data, r._chatLimitMode !== undefined ? r._chatLimitMode : 1);
+                    } else {
+                        this.applyStreamPatch(p, r.data);
+                    }
                 }
-            }
-        })));
+            });
+        }));
     },
 
     async pollPlayerNodes(paths) {
@@ -2149,21 +2166,39 @@ const CloudSync = {
                 this.scheduleStreamFlush(60);
             } catch (err) {}
         };
-        const aq = this.authQuery();
-        const sep = aq ? '&' : '?';
-        const es = new EventSource(`${this.dbUrl}/${this.encodePath(roomPath)}.json${aq}${sep}orderBy="ts"&limitToLast=50`);
-        es.addEventListener('put', handler);
-        es.addEventListener('patch', handler);
-        es.onopen = () => {
-            this._stopActiveRoomFallbackPoll();
-        };
-        es.onerror = () => {
-            // 手機瀏覽器（iOS Safari / 內建瀏覽器）中斷 SSE 時，自動切換輕量 6 秒 ETag 備援輪詢（無新訊息為 304 零流量）
-            if (this.activeRoomPath === roomPath) {
+        const openRoomEventSource = (useIndexedQuery) => {
+            if (this.activeRoomPath !== roomPath) return;
+            const aq = this.authQuery();
+            const sep = aq ? '&' : '?';
+            const streamUrl = useIndexedQuery
+                ? `${this.dbUrl}/${this.encodePath(roomPath)}.json${aq}${sep}orderBy="ts"&limitToLast=50`
+                : `${this.dbUrl}/${this.encodePath(roomPath)}.json${aq}`;
+            let openedOnce = false;
+            const es = new EventSource(streamUrl);
+            es.addEventListener('put', handler);
+            es.addEventListener('patch', handler);
+            es.onopen = () => {
+                openedOnce = true;
+                this._stopActiveRoomFallbackPoll();
+            };
+            es.onerror = () => {
+                if (this.activeRoomPath !== roomPath) return;
+                if (useIndexedQuery && !openedOnce) {
+                    // 若 Firebase 規則尚未加入 .indexOn: ["ts"] 導致 SSE 回 400，立即改用無 orderBy 的即時串流
+                    this._chatIndexUnsupported = true;
+                    try { es.close(); } catch (err) {}
+                    if (this.activeRoomEs === es) {
+                        this.activeRoomEs = null;
+                        openRoomEventSource(false);
+                    }
+                    return;
+                }
+                // 手機瀏覽器（iOS Safari / 內建瀏覽器）中斷 SSE 時，自動切換輕量 6 秒 ETag 備援輪詢（無新訊息為 304 零流量）
                 this._startActiveRoomFallbackPoll(roomPath);
-            }
+            };
+            this.activeRoomEs = es;
         };
-        this.activeRoomEs = es;
+        openRoomEventSource(!this._chatIndexUnsupported);
     },
 
     closeActiveChatRoom() {
@@ -2188,9 +2223,9 @@ const CloudSync = {
             await new Promise(r => setTimeout(r, 500));
             await this.fetchPlayerPaths([CUSTOM_ACTIVITIES_KEY]);
         }
-        // 第二階段：其餘熱門節點與聊天室（依本人記錄的配對名單決定）
+        // 第二階段：其餘熱門節點與聊天室（依本人記錄的配對名單決定，重整時直接載入各房最新 50 則訊息）
         const restHot = this.PLAYER_HOT_NODES.filter(p => !earlyNodes.includes(p));
-        await this.fetchPlayerPaths([...restHot, ...this.playerDynamicPaths()]);
+        await this.fetchPlayerPaths([...restHot, ...this.playerDynamicPaths()], { chatLimit: 50 });
         this.composePlayerUsers();
         this.hasLoadedFullTree = true;
         this.initialized = true;
@@ -2225,6 +2260,7 @@ const CloudSync = {
                     this._pausedRoomPath = '';
                     if (isFriendsTabVisible && resumeRoom) {
                         this.setActiveChatRoom(resumeRoom);
+                        this.fetchActiveChatRoomNow(resumeRoom);
                     }
                     this.pollPlayerHot();
                 }
@@ -2766,8 +2802,17 @@ const CloudSync = {
 
     partnerIdsOf(record) {
         const set = new Set();
-        const hist = record && Array.isArray(record.matchedHistory) ? record.matchedHistory : [];
-        hist.forEach(h => { if (h && h.partnerId) set.add(String(h.partnerId)); });
+        const hist = record ? this.mapToArray(record.matchedHistory) : [];
+        hist.forEach(h => {
+            const pid = h && h.partnerId ? String(h.partnerId).trim() : '';
+            if (pid && (!record || !record.id || !this.isPairRecentlyUnmatched(record.id, pid))) {
+                set.add(pid);
+            }
+        });
+        const directId = record && record.matchedWithId ? String(record.matchedWithId).trim() : '';
+        if (directId && (!record || !record.id || !this.isPairRecentlyUnmatched(record.id, directId))) {
+            set.add(directId);
+        }
         return Array.from(set);
     },
 
