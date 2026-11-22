@@ -153,12 +153,13 @@ async function selectAdminChatRoom(pairKey) {
     }
 
     if (nextKey && typeof CloudSync !== 'undefined' && CloudSync.initialized) {
-        const res = await CloudSync.readNodeCached(`${CHATS_KEY}/${nextKey}`);
+        const res = await CloudSync.readNodeCached(`${CHATS_KEY}/${nextKey}`, { force: true });
         if (res && res.data && typeof res.data === 'object') {
             if (!CloudSync.tree[CHATS_KEY]) CloudSync.tree[CHATS_KEY] = {};
             CloudSync.tree[CHATS_KEY][nextKey] = res.data;
             CloudSync.chatsTreeVersion++;
             cachedAdminChatSourceRef = null;
+            if (typeof AdminMemoryCache !== 'undefined') AdminMemoryCache.invalidate('chats');
         }
     }
 
@@ -503,6 +504,20 @@ function renderChatsPageSection(users, forceRender = false) {
     }
 
     const activeRoom = allRooms.find(r => r.pairKey === selectedAdminChatPairKey) || null;
+    if (activeRoom && activeRoom.msgCount > activeRoom.messages.length && typeof CloudSync !== 'undefined' && CloudSync.initialized && !activeRoom._fetchingFullNow) {
+        activeRoom._fetchingFullNow = true;
+        CloudSync.readNodeCached(`${CHATS_KEY}/${activeRoom.pairKey}`, { force: true }).then(res => {
+            activeRoom._fetchingFullNow = false;
+            if (res && res.data && typeof res.data === 'object') {
+                if (!CloudSync.tree[CHATS_KEY]) CloudSync.tree[CHATS_KEY] = {};
+                CloudSync.tree[CHATS_KEY][activeRoom.pairKey] = res.data;
+                CloudSync.chatsTreeVersion++;
+                cachedAdminChatSourceRef = null;
+                if (typeof AdminMemoryCache !== 'undefined') AdminMemoryCache.invalidate('chats');
+                renderAdminAll(true);
+            }
+        }).catch(() => { activeRoom._fetchingFullNow = false; });
+    }
     if (!activeRoom) {
         const isCloudSyncing = (typeof CloudSync !== 'undefined' && (!CloudSync.initialized || !CloudSync.hasLoadedFullTree));
         if (selectedAdminChatPairKey && isCloudSyncing && detailMsgsBox.children.length > 0) {
@@ -692,4 +707,81 @@ function renderChatsPageSection(users, forceRender = false) {
     }
 }
 
+
+let _hasBackfilledLocalChatMetaThisSession = false;
+
+async function backfillMissingAdminChatMetaToCloud() {
+    if (_hasBackfilledLocalChatMetaThisSession) return;
+    if (typeof CloudSync === 'undefined' || !CloudSync.initialized || CloudSync.isLocalSandboxMode()) return;
+    const metaKey = (typeof CHAT_META_KEY !== 'undefined') ? CHAT_META_KEY : 'yuelao_chat_meta';
+    const cloudMeta = (CloudSync.tree && CloudSync.tree[metaKey] && typeof CloudSync.tree[metaKey] === 'object')
+        ? CloudSync.tree[metaKey]
+        : {};
+    const mergedMap = (typeof getAdminChatsMap === 'function') ? getAdminChatsMap() : {};
+    const missingPatch = {};
+    Object.keys(mergedMap).forEach(pk => {
+        if (!Object.prototype.hasOwnProperty.call(cloudMeta, pk)) {
+            const entry = mergedMap[pk];
+            if (entry && entry.lastMsg) {
+                missingPatch[pk] = {
+                    lastMsg: entry.lastMsg,
+                    lastTs: Number(entry.lastTs || entry.lastMsg.ts || 0),
+                    msgCount: Math.max(1, Number(entry.msgCount || 1))
+                };
+            }
+        }
+    });
+    _hasBackfilledLocalChatMetaThisSession = true;
+    const missingCount = Object.keys(missingPatch).length;
+    if (missingCount > 0) {
+        await CloudSync.patchNode(metaKey, missingPatch);
+        if (typeof AdminMemoryCache !== 'undefined') AdminMemoryCache.invalidate('chats');
+        cachedAdminChatSourceRef = null;
+        renderAdminAll(true);
+    }
+}
+
+async function syncAllChatMetaFromCloudNow() {
+    if (typeof CloudSync === 'undefined' || !CloudSync.initialized) return;
+    const btn = document.getElementById('syncAllChatMetaBtn');
+    const origText = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 同步全部房間索引中...';
+    }
+    try {
+        const rawAllChats = await CloudSync.getNodeOnce(CHATS_KEY);
+        if (rawAllChats && typeof rawAllChats === 'object') {
+            const metaKey = (typeof CHAT_META_KEY !== 'undefined') ? CHAT_META_KEY : 'yuelao_chat_meta';
+            const unmatchedMap = (typeof CloudSync.loadSharedUnmatchedPairs === 'function')
+                ? CloudSync.loadSharedUnmatchedPairs()
+                : {};
+            const rebuiltMeta = {};
+            Object.keys(rawAllChats).forEach(pk => {
+                if (unmatchedMap[pk]) return;
+                const sum = (typeof buildAdminChatSummaryEntry === 'function')
+                    ? buildAdminChatSummaryEntry(rawAllChats[pk])
+                    : null;
+                if (sum && sum.lastMsg) {
+                    rebuiltMeta[pk] = sum;
+                }
+            });
+            if (Object.keys(rebuiltMeta).length > 0) {
+                await CloudSync.patchNode(metaKey, rebuiltMeta);
+            }
+            if (typeof AdminMemoryCache !== 'undefined') AdminMemoryCache.invalidate('chats');
+            cachedAdminChatSourceRef = null;
+            renderAdminAll(true);
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = origText || '☁️ 同步全部索引';
+        }
+    }
+}
+
+window.backfillMissingAdminChatMetaToCloud = backfillMissingAdminChatMetaToCloud;
+window.syncAllChatMetaFromCloudNow = syncAllChatMetaFromCloudNow;
 window.onAdminChatRoomsPerPageChange = onAdminChatRoomsPerPageChange;
+

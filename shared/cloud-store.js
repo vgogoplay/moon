@@ -1011,6 +1011,13 @@ const CloudSync = {
                     }
                 });
             }
+            if (t[CHAT_META_KEY] && typeof t[CHAT_META_KEY] === 'object') {
+                Object.keys(unmatchedPairsMap).forEach(pk => {
+                    if (Object.prototype.hasOwnProperty.call(t[CHAT_META_KEY], pk)) {
+                        delete t[CHAT_META_KEY][pk];
+                    }
+                });
+            }
         }
         if (hasUsersNodeData) {
             const canPersistSymmetricRepair = Boolean(this.initialized && this.isBackendContext() && this.inFlightWrites === 0);
@@ -1593,7 +1600,9 @@ const CloudSync = {
             this.fetchedTopNodes.add(USERS_KEY);
         }
         const chatsStorageKey = this.isBackendContext() ? ADMIN_CHATS_KEY : CHATS_KEY;
-        if (hydrateObjectDirect(chatsStorageKey, CHATS_KEY)) {
+        const hydratedChats = hydrateObjectDirect(chatsStorageKey, CHATS_KEY)
+            || (this.isBackendContext() && hydrateObjectDirect(CHATS_KEY, CHATS_KEY));
+        if (hydratedChats) {
             this.fetchedTopNodes.add(CHATS_KEY);
             if (!this.isBackendContext() && this.tree[CHATS_KEY] && typeof this.tree[CHATS_KEY] === 'object') {
                 Object.keys(this.tree[CHATS_KEY]).forEach(pk => {

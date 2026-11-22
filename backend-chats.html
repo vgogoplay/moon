@@ -40,6 +40,9 @@
                             <option value="50">50 間</option>
                         </select>
                     </div>
+                    <button type="button" id="syncAllChatMetaBtn" onclick="syncAllChatMetaFromCloudNow()" title="從雲端完整重建所有配對聊天室摘要索引" class="px-3.5 py-2.5 rounded-xl bg-pink-50 border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-100 transition">
+                        ☁️ 同步全部索引
+                    </button>
                     <button type="button" onclick="renderAdminAll(true)" class="px-3.5 py-2.5 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition">
                         ↻ 重新整理
                     </button>
@@ -81,11 +84,11 @@
     <script src="shared/schedule.js?v=20261122sunbatch"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261120opt"></script>
-    <script src="shared/cloud-store.js?v=20261122p0p1p2"></script>
+    <script src="shared/cloud-store.js?v=20261122adminchats"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261122p1meta"></script>
+    <script src="backend/state.js?v=20261122adminchats"></script>
     <script src="backend/matching.js?v=20261121matchfix"></script>
-    <script src="backend/chats.js?v=20261122p1meta"></script>
+    <script src="backend/chats.js?v=20261122adminchats"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261120snap"></script>
 </body>

@@ -72,12 +72,16 @@ const AdminMemoryCache = {
             this.usersRaw = this.reportsRaw = this.systemRaw = this.mailboxRaw = this.fateWallRaw = this.bannedRulesRaw = this.forceRulesRaw = this.chatsRaw = this.regHistoryRaw = this.wishWallRaw = this.matchLogsRaw = null;
             this.users = this.reports = this.system = this.mailbox = this.fateWall = this.bannedRules = this.forceRules = this.chats = this.regHistory = this.wishWall = this.matchLogs = null;
             this.chatsTreeVersion = -1;
+            this.chatsMergedSig = '';
+            this.chatsMergedMap = null;
             return;
         }
         this[key + 'Raw'] = null;
         this[key] = null;
         if (key === 'chats') {
             this.chatsTreeVersion = -1;
+            this.chatsMergedSig = '';
+            this.chatsMergedMap = null;
         }
     }
 };
@@ -490,8 +494,59 @@ function getAdminChatsStorageKey() {
     return (typeof ADMIN_CHATS_KEY !== 'undefined') ? ADMIN_CHATS_KEY : 'yuelao_admin_chats';
 }
 
+function buildAdminChatSummaryEntry(rawThread) {
+    if (!rawThread || typeof rawThread !== 'object') return null;
+    if (rawThread.lastMsg && typeof rawThread.lastMsg === 'object') {
+        return {
+            lastMsg: rawThread.lastMsg,
+            lastTs: Number(rawThread.lastTs || rawThread.lastMsg.ts || 0),
+            msgCount: Math.max(1, Number(rawThread.msgCount || 1))
+        };
+    }
+    const msgs = Array.isArray(rawThread)
+        ? rawThread.filter(m => m && typeof m === 'object')
+        : Object.values(rawThread).filter(m => m && typeof m === 'object');
+    if (msgs.length === 0) return null;
+    msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+    const lm = msgs[msgs.length - 1];
+    return {
+        lastMsg: lm,
+        lastTs: Number(lm.ts || 0),
+        msgCount: msgs.length
+    };
+}
+
+function getLocalCachedAdminChatsMap() {
+    const adminKey = getAdminChatsStorageKey();
+    const rawAdmin = localStorage.getItem(adminKey);
+    const rawFront = localStorage.getItem(CHATS_KEY);
+    const combinedRaw = `${rawAdmin || ''}|${rawFront || ''}`;
+    if (combinedRaw === AdminMemoryCache.chatsRaw && AdminMemoryCache.chats && typeof AdminMemoryCache.chats === 'object') {
+        return AdminMemoryCache.chats;
+    }
+    const mergedLocal = {};
+    [rawFront, rawAdmin].forEach(rawStr => {
+        if (!rawStr) return;
+        try {
+            const parsed = JSON.parse(rawStr);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                Object.keys(parsed).forEach(pk => {
+                    if (parsed[pk] && typeof parsed[pk] === 'object') {
+                        mergedLocal[pk] = parsed[pk];
+                    }
+                });
+            }
+        } catch (e) {}
+    });
+    AdminMemoryCache.chatsRaw = combinedRaw;
+    AdminMemoryCache.chats = mergedLocal;
+    return mergedLocal;
+}
+
 function getAdminChatsMap() {
     const metaKey = (typeof CHAT_META_KEY !== 'undefined') ? CHAT_META_KEY : 'yuelao_chat_meta';
+    const localBaseMap = getLocalCachedAdminChatsMap();
+
     if (
         typeof CloudSync !== 'undefined' &&
         CloudSync.initialized &&
@@ -503,41 +558,70 @@ function getAdminChatsMap() {
                 ? CloudSync.chatsMapToLocal(CloudSync.tree[CHATS_KEY])
                 : CloudSync.tree[CHATS_KEY];
         }
-        if (CloudSync.tree[metaKey] && typeof CloudSync.tree[metaKey] === 'object' && Object.keys(CloudSync.tree[metaKey]).length > 0) {
+
+        const hasCloudMeta = Boolean(CloudSync.tree[metaKey] && typeof CloudSync.tree[metaKey] === 'object' && Object.keys(CloudSync.tree[metaKey]).length > 0);
+        const hasTreeChats = Boolean(CloudSync.tree[CHATS_KEY] && typeof CloudSync.tree[CHATS_KEY] === 'object' && Object.keys(CloudSync.tree[CHATS_KEY]).length > 0);
+
+        if (hasCloudMeta || hasTreeChats) {
             const ver = Number(CloudSync.chatsTreeVersion || 0);
-            if (AdminMemoryCache.chatsTreeVersion === ver && AdminMemoryCache.chats && typeof AdminMemoryCache.chats === 'object') {
-                return AdminMemoryCache.chats;
+            const cacheSig = `${ver}|${AdminMemoryCache.chatsRaw || ''}`;
+            if (AdminMemoryCache.chatsMergedSig === cacheSig && AdminMemoryCache.chatsMergedMap && typeof AdminMemoryCache.chatsMergedMap === 'object') {
+                return AdminMemoryCache.chatsMergedMap;
             }
-            const liveMap = CloudSync.tree[metaKey];
-            AdminMemoryCache.chatsTreeVersion = ver;
-            AdminMemoryCache.chats = liveMap;
-            return liveMap;
-        }
-        if (CloudSync.tree[CHATS_KEY] && typeof CloudSync.tree[CHATS_KEY] === 'object') {
-            return (typeof CloudSync.chatsMapToLocal === 'function')
-                ? CloudSync.chatsMapToLocal(CloudSync.tree[CHATS_KEY])
-                : CloudSync.tree[CHATS_KEY];
+
+            const unmatchedMap = (typeof CloudSync.loadSharedUnmatchedPairs === 'function')
+                ? CloudSync.loadSharedUnmatchedPairs()
+                : {};
+            const merged = {};
+
+            // 1. 先保留本地快取的所有歷史聊天室（避免雲端 yuelao_chat_meta 僅含近期更新的房間而遺失舊房間）
+            Object.keys(localBaseMap).forEach(pk => {
+                if (unmatchedMap[pk]) return;
+                const sum = buildAdminChatSummaryEntry(localBaseMap[pk]);
+                if (sum) merged[pk] = sum;
+            });
+
+            // 2. 合併記憶體樹中已載入的 yuelao_chats 房間
+            if (hasTreeChats) {
+                Object.keys(CloudSync.tree[CHATS_KEY]).forEach(pk => {
+                    if (unmatchedMap[pk]) return;
+                    const sum = buildAdminChatSummaryEntry(CloudSync.tree[CHATS_KEY][pk]);
+                    if (sum) {
+                        const prev = merged[pk];
+                        if (!prev || sum.msgCount >= prev.msgCount || sum.lastTs >= prev.lastTs) {
+                            merged[pk] = sum;
+                        }
+                    }
+                });
+            }
+
+            // 3. 合併雲端 yuelao_chat_meta 最新摘要
+            if (hasCloudMeta) {
+                Object.keys(CloudSync.tree[metaKey]).forEach(pk => {
+                    if (unmatchedMap[pk]) return;
+                    const metaEntry = CloudSync.tree[metaKey][pk];
+                    if (metaEntry && typeof metaEntry === 'object' && metaEntry.lastMsg) {
+                        const prev = merged[pk];
+                        const metaCount = Math.max(1, Number(metaEntry.msgCount || 1));
+                        const metaTs = Number(metaEntry.lastTs || metaEntry.lastMsg.ts || 0);
+                        if (!prev || metaCount >= prev.msgCount || metaTs >= prev.lastTs) {
+                            merged[pk] = {
+                                lastMsg: metaEntry.lastMsg,
+                                lastTs: metaTs,
+                                msgCount: metaCount
+                            };
+                        }
+                    }
+                });
+            }
+
+            AdminMemoryCache.chatsMergedSig = cacheSig;
+            AdminMemoryCache.chatsMergedMap = merged;
+            return merged;
         }
     }
 
-    const adminKey = getAdminChatsStorageKey();
-    let raw = localStorage.getItem(adminKey);
-    if (raw === null) {
-        raw = localStorage.getItem(CHATS_KEY) || '{}';
-    }
-    if (raw === AdminMemoryCache.chatsRaw && AdminMemoryCache.chats && typeof AdminMemoryCache.chats === 'object') {
-        return AdminMemoryCache.chats;
-    }
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) parsed = {};
-    } catch (e) {
-        parsed = {};
-    }
-    AdminMemoryCache.chatsRaw = raw;
-    AdminMemoryCache.chats = parsed;
-    return parsed;
+    return localBaseMap;
 }
 
 function getActivityRegHistory() {
@@ -1346,6 +1430,9 @@ async function unlockAdminUI() {
     }).then(() => {
         if (typeof checkAutoSchedule2000 === 'function') {
             checkAutoSchedule2000();
+        }
+        if (pageKey === 'chats' && typeof backfillMissingAdminChatMetaToCloud === 'function') {
+            backfillMissingAdminChatMetaToCloud();
         }
         if (pageKey === 'chats' && typeof ChatStore !== 'undefined' && typeof ChatStore.purgeInactiveRooms === 'function') {
             const purgedOnLoad = ChatStore.purgeInactiveRooms(Date.now());
