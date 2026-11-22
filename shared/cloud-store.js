@@ -1204,6 +1204,15 @@ const CloudSync = {
         const parts = cleanPath.split('/');
         if (parts[0] === CHATS_KEY || parts[0] === CHAT_META_KEY) {
             this.chatsTreeVersion++;
+            if (parts.length >= 3 && this.tree && Array.isArray(this.tree[CHATS_KEY]?.[parts[1]])) {
+                const converted = {};
+                this.tree[CHATS_KEY][parts[1]].forEach((m, idx) => {
+                    if (m && typeof m === 'object') {
+                        converted[String(m.id || `IDX_${idx}`)] = m;
+                    }
+                });
+                this.tree[CHATS_KEY][parts[1]] = converted;
+            }
         }
         let curr = this.tree;
         for (let i = 0; i < parts.length - 1; i++) {
@@ -1446,7 +1455,9 @@ const CloudSync = {
     fetchedTopNodes: null,
     activeRoomPath: '',
     _pausedRoomPath: '',
+    _hiddenRoomPath: '',
     activeRoomEs: null,
+    activeRoomFallbackTimer: null,
     playerTimersStarted: false,
     lastUserActivityAt: Date.now(),
     isPlayerIdlePaused: false,
@@ -1531,7 +1542,8 @@ const CloudSync = {
         const cache = this.loadPersistedEtags();
         let changed = false;
         Object.keys(cache).forEach(k => {
-            if (k === clean || k === topNode || k.startsWith(clean + '/') || clean.startsWith(k + '/')) {
+            const baseK = String(k).split('::')[0];
+            if (baseK === clean || baseK === topNode || baseK.startsWith(clean + '/') || clean.startsWith(baseK + '/')) {
                 delete cache[k];
                 changed = true;
             }
@@ -1582,6 +1594,20 @@ const CloudSync = {
         const chatsStorageKey = this.isBackendContext() ? ADMIN_CHATS_KEY : CHATS_KEY;
         if (hydrateObjectDirect(chatsStorageKey, CHATS_KEY)) {
             this.fetchedTopNodes.add(CHATS_KEY);
+            if (!this.isBackendContext() && this.tree[CHATS_KEY] && typeof this.tree[CHATS_KEY] === 'object') {
+                Object.keys(this.tree[CHATS_KEY]).forEach(pk => {
+                    const rawThread = this.tree[CHATS_KEY][pk];
+                    if (Array.isArray(rawThread)) {
+                        const keyedMap = {};
+                        rawThread.forEach((m, idx) => {
+                            if (m && typeof m === 'object') {
+                                keyedMap[String(m.id || `IDX_${idx}`)] = m;
+                            }
+                        });
+                        this.tree[CHATS_KEY][pk] = keyedMap;
+                    }
+                });
+            }
             if (this.isBackendContext() && !this.tree[CHAT_META_KEY] && this.tree[CHATS_KEY]) {
                 const synthesizedMeta = {};
                 Object.keys(this.tree[CHATS_KEY]).forEach(pk => {
@@ -1658,6 +1684,9 @@ const CloudSync = {
         for (let i = 1; i < parts.length; i++) {
             if (!curr || typeof curr !== 'object' || curr[parts[i]] === undefined) return false;
             curr = curr[parts[i]];
+        }
+        if (top === CHATS_KEY && parts.length === 2) {
+            if (!curr || typeof curr !== 'object' || Object.keys(curr).length === 0) return false;
         }
         return true;
     },
@@ -1770,13 +1799,15 @@ const CloudSync = {
         const epochBefore = this.writeEpoch;
         const headers = { 'X-Firebase-ETag': 'true' };
         let queryParams = '';
+        let etagCacheKey = path;
+        let chatLimitMode = 0;
         if (path.startsWith(CHATS_KEY + '/') && !this.isBackendContext()) {
-            queryParams = (path === this.activeRoomPath)
-                ? 'orderBy="ts"&limitToLast=50'
-                : 'orderBy="ts"&limitToLast=1';
+            chatLimitMode = Number(options.limit) || (path === this.activeRoomPath ? 50 : 1);
+            queryParams = `orderBy="ts"&limitToLast=${chatLimitMode}`;
+            etagCacheKey = `${path}::last${chatLimitMode}`;
         }
-        if (!options.force && cache[path] && this.hasLocalCacheForPath(path)) {
-            headers['If-None-Match'] = cache[path];
+        if (!options.force && cache[etagCacheKey] && this.hasLocalCacheForPath(path)) {
+            headers['If-None-Match'] = cache[etagCacheKey];
         }
         try {
             const aq = this.authQuery();
@@ -1809,12 +1840,12 @@ const CloudSync = {
             this.syncStats.bodyBytes += text.length;
             const data = text ? JSON.parse(text) : null;
             if (etag) {
-                cache[path] = etag;
+                cache[etagCacheKey] = etag;
             } else {
-                delete cache[path];
+                delete cache[etagCacheKey];
             }
             this.savePersistedEtags();
-            return { status: 'changed', data };
+            return { status: 'changed', data, _chatLimitMode: chatLimitMode };
         } catch (e) {
             this.syncStats.errors++;
             return { status: 'error' };
@@ -1894,10 +1925,85 @@ const CloudSync = {
         return this.syncDerivedNodesFor(me, rec, { bothSides: false });
     },
 
+    mergeChatRoomSnapshot(roomPath, data, limitMode = 50) {
+        const clean = String(roomPath || '').replace(/^\/+|\/+$/g, '');
+        const parts = clean.split('/');
+        if (parts[0] !== CHATS_KEY || !parts[1]) {
+            this.applyStreamPatch(roomPath, data);
+            return true;
+        }
+        const pairKey = parts[1];
+        if (!this.tree) this.tree = {};
+        if (!this.tree[CHATS_KEY] || typeof this.tree[CHATS_KEY] !== 'object') {
+            this.tree[CHATS_KEY] = {};
+        }
+
+        if (data === null) {
+            const hadAny = Boolean(this.tree[CHATS_KEY][pairKey] && Object.keys(this.tree[CHATS_KEY][pairKey]).length > 0);
+            this.tree[CHATS_KEY][pairKey] = {};
+            this.chatsTreeVersion++;
+            return hadAny;
+        }
+
+        if (!data || typeof data !== 'object') return false;
+
+        let existing = this.tree[CHATS_KEY][pairKey];
+        if (Array.isArray(existing)) {
+            const converted = {};
+            existing.forEach((m, idx) => {
+                if (m && typeof m === 'object') {
+                    converted[String(m.id || `IDX_${idx}`)] = m;
+                }
+            });
+            existing = converted;
+        } else if (!existing || typeof existing !== 'object') {
+            existing = {};
+        }
+
+        let hasNewOrUpdated = false;
+        Object.entries(data).forEach(([k, msgObj]) => {
+            if (!msgObj || typeof msgObj !== 'object') return;
+            const msgKey = String(msgObj.id || k);
+            const prev = existing[msgKey];
+            if (!prev || prev.text !== msgObj.text || Number(prev.ts || 0) !== Number(msgObj.ts || 0)) {
+                hasNewOrUpdated = true;
+            }
+            existing[msgKey] = msgObj;
+        });
+
+        const sortedEntries = Object.entries(existing)
+            .filter(([, m]) => m && typeof m === 'object')
+            .sort((a, b) => Number(a[1].ts || 0) - Number(b[1].ts || 0));
+        const trimmedMap = {};
+        sortedEntries.slice(-200).forEach(([k, m]) => {
+            trimmedMap[k] = m;
+        });
+        this.tree[CHATS_KEY][pairKey] = trimmedMap;
+        this.chatsTreeVersion++;
+
+        // 若背景以 limit=1 發現該聊天室有新訊息，清除 ::last50 ETag，確保玩家點開該房時必抓取完整最新 50 則
+        if (Number(limitMode) === 1 && hasNewOrUpdated) {
+            const cache = this.loadPersistedEtags();
+            const fullKey = `${clean}::last50`;
+            if (cache[fullKey]) {
+                delete cache[fullKey];
+                this.savePersistedEtags();
+            }
+        }
+
+        return hasNewOrUpdated;
+    },
+
     async fetchPlayerPaths(paths) {
         const unique = Array.from(new Set((paths || []).filter(Boolean)));
         await Promise.all(unique.map(p => this.conditionalGetNode(p).then(r => {
-            if (r.status === 'changed') this.applyStreamPatch(p, r.data);
+            if (r.status === 'changed') {
+                if (p.startsWith(CHATS_KEY + '/') && !this.isBackendContext()) {
+                    this.mergeChatRoomSnapshot(p, r.data, r._chatLimitMode || 1);
+                } else {
+                    this.applyStreamPatch(p, r.data);
+                }
+            }
         })));
     },
 
@@ -1917,8 +2023,14 @@ const CloudSync = {
         let changed = false;
         results.forEach(({ p, r }) => {
             if (r.status === 'changed') {
-                this.applyStreamPatch(p, r.data);
-                changed = true;
+                if (p.startsWith(CHATS_KEY + '/') && !this.isBackendContext()) {
+                    if (this.mergeChatRoomSnapshot(p, r.data, r._chatLimitMode || 1)) {
+                        changed = true;
+                    }
+                } else {
+                    this.applyStreamPatch(p, r.data);
+                    changed = true;
+                }
             }
         });
         if (changed) {
@@ -1967,9 +2079,40 @@ const CloudSync = {
         setInterval(() => this.pollPlayerCold(), this.PLAYER_COLD_INTERVAL_MS);
     },
 
+    async fetchActiveChatRoomNow(roomPath, options = {}) {
+        if (!roomPath || this.isLocalSandboxMode() || !this.isPlayerSyncMode()) return false;
+        if (this.inFlightWrites > 0) return false;
+        const r = await this.conditionalGetNode(roomPath, { limit: 50, force: Boolean(options.force) });
+        if (r.status === 'changed') {
+            const changed = this.mergeChatRoomSnapshot(roomPath, r.data, 50);
+            this.applyTreeToLocalStorage();
+            if (changed && typeof this.onUpdateCallback === 'function') {
+                this.onUpdateCallback();
+            }
+            return changed;
+        }
+        return false;
+    },
+
+    _startActiveRoomFallbackPoll(roomPath) {
+        if (this.activeRoomFallbackTimer) return;
+        this.activeRoomFallbackTimer = setInterval(() => {
+            if (typeof document !== 'undefined' && document.hidden) return;
+            if (this.isPlayerIdlePaused || this.activeRoomPath !== roomPath) return;
+            this.fetchActiveChatRoomNow(roomPath);
+        }, 6000);
+    },
+
+    _stopActiveRoomFallbackPoll() {
+        if (this.activeRoomFallbackTimer) {
+            clearInterval(this.activeRoomFallbackTimer);
+            this.activeRoomFallbackTimer = null;
+        }
+    },
+
     setActiveChatRoom(roomPath) {
         if (this.isLocalSandboxMode()) return;
-        // 只對「目前開啟的單一聊天室」建立 SSE；切換聊天室或分頁隱藏時關閉
+        // 只對「目前開啟的單一聊天室」建立 SSE 並立即拉取最新 50 則；切換聊天室或分頁隱藏時關閉
         if (!this.isPlayerSyncMode()) return;
         if (this.isPlayerIdlePaused) {
             this._pausedRoomPath = roomPath || '';
@@ -1977,18 +2120,30 @@ const CloudSync = {
         }
         if (roomPath === this.activeRoomPath && this.activeRoomEs) return;
         this.closeActiveChatRoom();
-        if (!roomPath || typeof EventSource === 'undefined') return;
+        if (!roomPath) return;
         this.activeRoomPath = roomPath;
+
+        // 無論手機瀏覽器 SSE 是否順暢，切入或重新進入聊天室時立即主動以 ETag 拉取最新 50 則
+        this.fetchActiveChatRoomNow(roomPath);
+
+        if (typeof EventSource === 'undefined') {
+            this._startActiveRoomFallbackPoll(roomPath);
+            return;
+        }
         const handler = (e) => {
             try {
                 const payload = JSON.parse(e.data);
                 if (!payload) return;
                 const rel = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
-                const base = rel ? `${roomPath}/${rel}` : roomPath;
-                if (e.type === 'patch' && payload.data && typeof payload.data === 'object') {
-                    Object.keys(payload.data).forEach(k => this.applyStreamPatch(`${base}/${k}`, payload.data[k]));
+                if (!rel) {
+                    this.mergeChatRoomSnapshot(roomPath, payload.data, 50);
                 } else {
-                    this.applyStreamPatch(base, payload.data);
+                    const base = `${roomPath}/${rel}`;
+                    if (e.type === 'patch' && payload.data && typeof payload.data === 'object') {
+                        Object.keys(payload.data).forEach(k => this.applyStreamPatch(`${base}/${k}`, payload.data[k]));
+                    } else {
+                        this.applyStreamPatch(base, payload.data);
+                    }
                 }
                 this.chatsTreeVersion++;
                 this.scheduleStreamFlush(60);
@@ -2000,12 +2155,19 @@ const CloudSync = {
         es.addEventListener('put', handler);
         es.addEventListener('patch', handler);
         es.onopen = () => {
-            // 優化：移除 es.onopen 重複拉取整房的請求
+            this._stopActiveRoomFallbackPoll();
+        };
+        es.onerror = () => {
+            // 手機瀏覽器（iOS Safari / 內建瀏覽器）中斷 SSE 時，自動切換輕量 6 秒 ETag 備援輪詢（無新訊息為 304 零流量）
+            if (this.activeRoomPath === roomPath) {
+                this._startActiveRoomFallbackPoll(roomPath);
+            }
         };
         this.activeRoomEs = es;
     },
 
     closeActiveChatRoom() {
+        this._stopActiveRoomFallbackPoll();
         if (this.activeRoomEs) {
             try { this.activeRoomEs.close(); } catch (e) {}
         }
@@ -2046,10 +2208,24 @@ const CloudSync = {
         if (typeof document !== 'undefined') {
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden) {
+                    if (this.activeRoomPath) {
+                        this._hiddenRoomPath = this.activeRoomPath;
+                    }
                     this.closeActiveChatRoom();
                 } else {
                     this.lastUserActivityAt = Date.now();
                     this.isPlayerIdlePaused = false;
+                    const friendsTabEl = document.getElementById('tab-friends');
+                    const isFriendsTabVisible = Boolean(friendsTabEl && !friendsTabEl.classList.contains('hidden'));
+                    let resumeRoom = this._hiddenRoomPath || this._pausedRoomPath || '';
+                    if (!resumeRoom && isFriendsTabVisible && typeof appState !== 'undefined' && appState && appState.playerId && appState.activeFriendId && typeof ChatStore !== 'undefined') {
+                        resumeRoom = `${CHATS_KEY}/${ChatStore.getPairKey(appState.playerId, appState.activeFriendId)}`;
+                    }
+                    this._hiddenRoomPath = '';
+                    this._pausedRoomPath = '';
+                    if (isFriendsTabVisible && resumeRoom) {
+                        this.setActiveChatRoom(resumeRoom);
+                    }
                     this.pollPlayerHot();
                 }
             });

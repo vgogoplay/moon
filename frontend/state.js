@@ -138,6 +138,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!document.hidden) {
             updateNextMatchCountdown();
             syncFromSharedStorage();
+            const friendsTabEl = document.getElementById('tab-friends');
+            if (friendsTabEl && !friendsTabEl.classList.contains('hidden') && typeof renderFriendsSection === 'function') {
+                renderFriendsSection();
+            }
         }
     });
     updateNextMatchCountdown();
