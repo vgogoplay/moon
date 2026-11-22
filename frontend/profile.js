@@ -1267,6 +1267,7 @@ async function restoreFromBackupCode() {
     loadedState.isWarnedAccount = Boolean(matchedUser.isWarned);
     loadedState.warningReason = matchedUser.warningReason || '';
     loadedState.isChatBanned = Boolean(matchedUser.isChatBanned);
+    loadedState.disableConfession = Boolean(matchedUser.disableConfession);
     loadedState.profile = { ...freshBase.profile, ...loadedState.profile, ...matchedUser };
     delete loadedState.profile.lastSaveIp;
     delete loadedState.profile.lastSaveIpAt;

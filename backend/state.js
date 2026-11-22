@@ -491,24 +491,33 @@ function getAdminChatsStorageKey() {
 }
 
 function getAdminChatsMap() {
+    const metaKey = (typeof CHAT_META_KEY !== 'undefined') ? CHAT_META_KEY : 'yuelao_chat_meta';
     if (
         typeof CloudSync !== 'undefined' &&
         CloudSync.initialized &&
-        CloudSync.hasLoadedFullTree &&
-        CloudSync.tree &&
-        CloudSync.tree[CHATS_KEY] &&
-        typeof CloudSync.tree[CHATS_KEY] === 'object'
+        CloudSync.tree
     ) {
-        const ver = Number(CloudSync.chatsTreeVersion || 0);
-        if (AdminMemoryCache.chatsTreeVersion === ver && AdminMemoryCache.chats && typeof AdminMemoryCache.chats === 'object') {
-            return AdminMemoryCache.chats;
+        const pageKey = (typeof CloudSync.getBackendPageKey === 'function') ? CloudSync.getBackendPageKey() : '';
+        if (pageKey !== 'chats' && CloudSync.tree[CHATS_KEY] && typeof CloudSync.tree[CHATS_KEY] === 'object' && Object.keys(CloudSync.tree[CHATS_KEY]).length > 0) {
+            return (typeof CloudSync.chatsMapToLocal === 'function')
+                ? CloudSync.chatsMapToLocal(CloudSync.tree[CHATS_KEY])
+                : CloudSync.tree[CHATS_KEY];
         }
-        const liveMap = (typeof CloudSync.chatsMapToLocal === 'function')
-            ? CloudSync.chatsMapToLocal(CloudSync.tree[CHATS_KEY])
-            : CloudSync.tree[CHATS_KEY];
-        AdminMemoryCache.chatsTreeVersion = ver;
-        AdminMemoryCache.chats = liveMap;
-        return liveMap;
+        if (CloudSync.tree[metaKey] && typeof CloudSync.tree[metaKey] === 'object' && Object.keys(CloudSync.tree[metaKey]).length > 0) {
+            const ver = Number(CloudSync.chatsTreeVersion || 0);
+            if (AdminMemoryCache.chatsTreeVersion === ver && AdminMemoryCache.chats && typeof AdminMemoryCache.chats === 'object') {
+                return AdminMemoryCache.chats;
+            }
+            const liveMap = CloudSync.tree[metaKey];
+            AdminMemoryCache.chatsTreeVersion = ver;
+            AdminMemoryCache.chats = liveMap;
+            return liveMap;
+        }
+        if (CloudSync.tree[CHATS_KEY] && typeof CloudSync.tree[CHATS_KEY] === 'object') {
+            return (typeof CloudSync.chatsMapToLocal === 'function')
+                ? CloudSync.chatsMapToLocal(CloudSync.tree[CHATS_KEY])
+                : CloudSync.tree[CHATS_KEY];
+        }
     }
 
     const adminKey = getAdminChatsStorageKey();

@@ -19,7 +19,11 @@
     "yuelao_forum_posts":           { ".write": "auth != null" },
     "yuelao_mailbox":               { ".write": "auth != null" },
     "yuelao_reports":               { ".write": "auth != null" },
-    "yuelao_chats":                 { ".write": "auth != null" },
+    "yuelao_chat_meta":             { ".write": "auth != null" },
+    "yuelao_chats":                 {
+      ".write": "auth != null",
+      "$pairKey": { ".indexOn": ["ts"] }
+    },
     "yuelao_unmatched_pairs":       { ".write": "auth != null" },
     "yuelao_activity_reg_history":  { ".write": "auth != null" },
     "yuelao_player_op_logs":        { ".write": "auth != null" },

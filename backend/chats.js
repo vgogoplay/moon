@@ -122,7 +122,20 @@ function goToAdminChatRoomsPage(pageNum) {
     renderAdminAll(true);
 }
 
-function selectAdminChatRoom(pairKey) {
+function getLoadedAdminRoomMessages(pairKey) {
+    if (!pairKey) return null;
+    if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[CHATS_KEY] && CloudSync.tree[CHATS_KEY][pairKey]) {
+        const raw = CloudSync.tree[CHATS_KEY][pairKey];
+        const arr = Array.isArray(raw)
+            ? raw.filter(m => m && typeof m === 'object')
+            : (raw && typeof raw === 'object' ? Object.values(raw).filter(m => m && typeof m === 'object') : []);
+        arr.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+        return arr;
+    }
+    return null;
+}
+
+async function selectAdminChatRoom(pairKey) {
     const nextKey = String(pairKey || '');
     selectedAdminChatPairKey = nextKey;
     activeAdminChatDetailPairKey = nextKey;
@@ -131,18 +144,36 @@ function selectAdminChatRoom(pairKey) {
     shouldScrollAdminChatToLatest = true;
     pendingPreserveAdminChatScrollOnPrepend = false;
     lastAdminChatRoomsSig = '';
+    cachedAdminChatSourceRef = null;
     resetRenderedAdminChatDomState();
+
+    const detailMsgsBox = document.getElementById('adminChatDetailMessages');
+    if (detailMsgsBox && nextKey) {
+        detailMsgsBox.innerHTML = '<div class="h-80 flex items-center justify-center text-xs text-gray-400">⏳ 正在載入對話紀錄...</div>';
+    }
+
+    if (nextKey && typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+        const res = await CloudSync.readNodeCached(`${CHATS_KEY}/${nextKey}`);
+        if (res && res.data && typeof res.data === 'object') {
+            if (!CloudSync.tree[CHATS_KEY]) CloudSync.tree[CHATS_KEY] = {};
+            CloudSync.tree[CHATS_KEY][nextKey] = res.data;
+            CloudSync.chatsTreeVersion++;
+            cachedAdminChatSourceRef = null;
+        }
+    }
+
     renderAdminAll(true);
 }
 
 function loadMoreOlderAdminChatMessages() {
+    const loadedMsgs = getLoadedAdminRoomMessages(selectedAdminChatPairKey);
     const chatsMap = typeof getAdminChatsMap === 'function'
         ? getAdminChatsMap()
         : JSON.parse(localStorage.getItem(typeof ADMIN_CHATS_KEY !== 'undefined' ? ADMIN_CHATS_KEY : CHATS_KEY) || '{}');
-    const rawThread = selectedAdminChatPairKey ? chatsMap[selectedAdminChatPairKey] : null;
+    const rawThread = loadedMsgs || (selectedAdminChatPairKey ? chatsMap[selectedAdminChatPairKey] : null);
     const totalCount = Array.isArray(rawThread)
         ? rawThread.length
-        : (rawThread && typeof rawThread === 'object' ? Object.keys(rawThread).length : 0);
+        : (rawThread && typeof rawThread === 'object' && !rawThread.lastMsg ? Object.keys(rawThread).length : 0);
     if (totalCount <= adminChatVisibleBatchLimit) return;
 
     adminChatVisibleBatchLimit = Math.min(totalCount, adminChatVisibleBatchLimit + ADMIN_CHAT_BATCH_STEP);
@@ -163,13 +194,14 @@ function ensureAdminChatDetailScrollPagination(detailMsgsBox) {
         const now = Date.now();
         if (now - lastAdminChatPrependTriggerTs < 350) return;
 
+        const loadedMsgs = getLoadedAdminRoomMessages(selectedAdminChatPairKey);
         const chatsMap = typeof getAdminChatsMap === 'function'
             ? getAdminChatsMap()
             : JSON.parse(localStorage.getItem(typeof ADMIN_CHATS_KEY !== 'undefined' ? ADMIN_CHATS_KEY : CHATS_KEY) || '{}');
-        const rawThread = selectedAdminChatPairKey ? chatsMap[selectedAdminChatPairKey] : null;
+        const rawThread = loadedMsgs || (selectedAdminChatPairKey ? chatsMap[selectedAdminChatPairKey] : null);
         const totalCount = Array.isArray(rawThread)
             ? rawThread.length
-            : (rawThread && typeof rawThread === 'object' ? Object.keys(rawThread).length : 0);
+            : (rawThread && typeof rawThread === 'object' && !rawThread.lastMsg ? Object.keys(rawThread).length : 0);
         if (adminChatVisibleBatchLimit >= totalCount) return;
 
         lastAdminChatPrependTriggerTs = now;
@@ -180,8 +212,10 @@ function ensureAdminChatDetailScrollPagination(detailMsgsBox) {
 function getIndexedAdminChatRooms(users, chatsMap) {
     const validUsers = Array.isArray(users) ? users : [];
     const usersNameSig = validUsers.map(u => (u && u.id) ? `${u.id}:${u.nickname || ''}:${u.gender || ''}` : '').join('|');
+    const loadedTreeVer = (typeof CloudSync !== 'undefined') ? Number(CloudSync.chatsTreeVersion || 0) : 0;
+    const combinedSig = `${usersNameSig}#${loadedTreeVer}#${selectedAdminChatPairKey}`;
 
-    if (chatsMap === cachedAdminChatSourceRef && usersNameSig === cachedAdminChatUsersNameSig) {
+    if (chatsMap === cachedAdminChatSourceRef && combinedSig === cachedAdminChatUsersNameSig) {
         return {
             rooms: cachedAdminChatRoomEntries,
             totalMessages: cachedAdminChatTotalMessages
@@ -197,15 +231,34 @@ function getIndexedAdminChatRooms(users, chatsMap) {
     let totalMessages = 0;
 
     Object.keys(chatsMap || {}).forEach(pairKey => {
-        const rawThread = chatsMap[pairKey];
-        const msgs = Array.isArray(rawThread)
-            ? rawThread.filter(m => m && typeof m === 'object')
-            : (rawThread && typeof rawThread === 'object'
-                ? Object.values(rawThread).filter(m => m && typeof m === 'object')
-                : []);
-        if (msgs.length === 0) return;
-        msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
-        totalMessages += msgs.length;
+        const entry = chatsMap[pairKey];
+        if (!entry || typeof entry !== 'object') return;
+
+        const loadedMsgs = getLoadedAdminRoomMessages(pairKey);
+        const isSummaryMeta = Boolean(entry.lastMsg && typeof entry.lastMsg === 'object');
+        let msgs = loadedMsgs || [];
+        let lastMsg = null;
+        let msgCount = 0;
+
+        if (isSummaryMeta) {
+            lastMsg = entry.lastMsg;
+            msgCount = Math.max(Number(entry.msgCount || 1), msgs.length);
+            if (msgs.length === 0) {
+                msgs = [lastMsg];
+            }
+        } else {
+            if (!loadedMsgs) {
+                msgs = Array.isArray(entry)
+                    ? entry.filter(m => m && typeof m === 'object')
+                    : Object.values(entry).filter(m => m && typeof m === 'object');
+                msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+            }
+            if (msgs.length === 0) return;
+            lastMsg = msgs[msgs.length - 1] || {};
+            msgCount = msgs.length;
+        }
+
+        totalMessages += msgCount;
 
         const parts = String(pairKey).split('__');
         const idA = parts[0] || '';
@@ -214,7 +267,7 @@ function getIndexedAdminChatRooms(users, chatsMap) {
         const userB = userMap.get(idB);
 
         const inferNameFromMsgs = (targetId) => {
-            const found = msgs.find(m => String(m.senderId) === String(targetId) && m.senderName);
+            const found = msgs.find(m => m && String(m.senderId) === String(targetId) && m.senderName);
             return found ? String(found.senderName) : '';
         };
 
@@ -223,9 +276,8 @@ function getIndexedAdminChatRooms(users, chatsMap) {
         const genderA = (userA && userA.gender) || (idA.startsWith('1') ? '男' : (idA.startsWith('2') ? '女' : ''));
         const genderB = (userB && userB.gender) || (idB.startsWith('1') ? '男' : (idB.startsWith('2') ? '女' : ''));
 
-        const lastMsg = msgs[msgs.length - 1] || {};
-        const lastTs = Number(lastMsg.ts || 0);
-        const msgTextsJoined = msgs.map(m => String(m.text || '')).join('\n');
+        const lastTs = Number((lastMsg && lastMsg.ts) || entry.lastTs || 0);
+        const msgTextsJoined = msgs.map(m => String((m && m.text) || '')).join('\n');
         const searchBlob = `${idA} ${idB} ${nameA} ${nameB} ${msgTextsJoined}`.toLowerCase();
 
         rooms.push({
@@ -237,7 +289,8 @@ function getIndexedAdminChatRooms(users, chatsMap) {
             genderA,
             genderB,
             messages: msgs,
-            lastMsg,
+            msgCount,
+            lastMsg: lastMsg || {},
             lastTs,
             searchBlob
         });
@@ -246,7 +299,7 @@ function getIndexedAdminChatRooms(users, chatsMap) {
     rooms.sort((a, b) => Number(b.lastTs) - Number(a.lastTs));
 
     cachedAdminChatSourceRef = chatsMap;
-    cachedAdminChatUsersNameSig = usersNameSig;
+    cachedAdminChatUsersNameSig = combinedSig;
     cachedAdminChatRoomEntries = rooms;
     cachedAdminChatTotalMessages = totalMessages;
 
@@ -402,7 +455,7 @@ function renderChatsPageSection(users, forceRender = false) {
                                 <span class="font-bold text-[#8f4452] truncate max-w-[84px]">${highlightChatKeywordHtml(r.nameB, adminChatSearchKeyword)}</span>
                             </div>
                             <span class="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-[#8f4452] font-bold shrink-0">
-                                ${r.messages.length} 則
+                                ${r.msgCount || r.messages.length} 則
                             </span>
                         </div>
                         <div class="flex items-center justify-between gap-2 mt-1.5 text-[11px] text-gray-500">

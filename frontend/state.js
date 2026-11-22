@@ -44,6 +44,7 @@ function calcRemainingDays(matchedAt, nowTs = Date.now()) {
 }
 
 function isEveningConfessionPending() {
+    if (appState.disableConfession) return false;
     const todayStr = new Date().toDateString();
     return (
         appState.friends.length >= 2 &&
@@ -120,7 +121,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateMailboxBadge();
     if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
 
-    const FRONTEND_MAIN_SYNC_INTERVAL_MS = 15000;
+    const FRONTEND_MAIN_SYNC_INTERVAL_MS = 30000;
     // 倒數計時維持每秒更新（分頁隱藏時暫停省電）；主同步改為事件驅動＋15 秒低頻時間檢查
     setInterval(() => {
         if (!document.hidden) {
@@ -192,10 +193,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function syncFromSharedStorage() {
     const rawUsersStr = localStorage.getItem(USERS_LOCAL_KEY) || '[]';
+    const currentChatsRaw = localStorage.getItem(CHATS_KEY) || '';
     const users = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function')
         ? Store.getUsersArray()
         : JSON.parse(rawUsersStr);
-    if (rawUsersStr !== lastReconciledUsersRaw) {
+    if (rawUsersStr !== lastReconciledUsersRaw || currentChatsRaw !== lastChatsSnapshot) {
         lastReconciledUsersRaw = rawUsersStr;
         if (typeof CloudSync !== 'undefined' && typeof CloudSync.reconcileSymmetricMatches === 'function') {
             if (CloudSync.reconcileSymmetricMatches(users, false)) {
@@ -282,7 +284,6 @@ function syncFromSharedStorage() {
     }
 
     let chatsChanged = false;
-    const currentChatsRaw = localStorage.getItem(CHATS_KEY) || '';
     if (currentChatsRaw !== lastChatsSnapshot) {
         lastChatsSnapshot = currentChatsRaw;
         chatsChanged = true;
@@ -345,7 +346,7 @@ function syncFromSharedStorage() {
 
             const skipSyncKeys = new Set([
                 'id', 'privacy', 'backupCode', 'isWarned', 'warningReason',
-                'isMatchBanned', 'isChatBanned', 'registeredSessions', 'registeredSession',
+                'isMatchBanned', 'isChatBanned', 'disableConfession', 'registeredSessions', 'registeredSession',
                 'exactMatchCriteria', 'customActivityRegs', 'matchedHistory', 'matchedSession',
                 'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt',
                 'forceConfessionTriggerId'
@@ -380,10 +381,15 @@ function syncFromSharedStorage() {
         }
 
         if (me) {
-            // 同步後台禁止發話狀態
+            // 同步後台禁止發話狀態與禁止心動抉擇設定
             const nextChatBanned = Boolean(me.isChatBanned);
             if (Boolean(appState.isChatBanned) !== nextChatBanned) {
                 appState.isChatBanned = nextChatBanned;
+                stateChanged = true;
+            }
+            const nextDisableConfession = Boolean(me.disableConfession);
+            if (Boolean(appState.disableConfession) !== nextDisableConfession) {
+                appState.disableConfession = nextDisableConfession;
                 stateChanged = true;
             }
 

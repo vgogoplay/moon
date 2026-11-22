@@ -23,6 +23,7 @@ const SYSTEM_STATE_KEY = 'yuelao_system_batch';
 const BANNED_RULES_KEY = 'yuelao_banned_rules';
 const MAILBOX_KEY = 'yuelao_mailbox';
 const CHATS_KEY = 'yuelao_chats';
+const CHAT_META_KEY = 'yuelao_chat_meta';
 const ADMIN_CHATS_KEY = 'yuelao_admin_chats';
 const CUSTOM_ACTIVITIES_KEY = 'yuelao_custom_activities';
 const REG_HISTORY_KEY = 'yuelao_activity_reg_history';
@@ -886,8 +887,8 @@ const CloudSync = {
             const threadRaw = raw[pairKey];
             const msgs = this.mapToArray(threadRaw);
             msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
-            // 同步雲端回本地時，也強制裁切至最近 500 則
-            result[pairKey] = msgs.slice(-500);
+            // 同步雲端回本地時，也強制裁切至最近 200 則
+            result[pairKey] = msgs.slice(-200);
         });
         return result;
     },
@@ -1044,16 +1045,10 @@ const CloudSync = {
             LocalJsonCache.invalidate(SESSION_MATCH_RESULTS_KEY);
         }
 
-        // 2. 聊天紀錄（前後台分開儲存：後台寫入完整全站聊天快取 ADMIN_CHATS_KEY，並防止未完成全庫載入的局部事件覆蓋既有房間快取）
+        // 2. 聊天紀錄（P1：後台改用記憶體快取與 yuelao_chat_meta 摘要，不寫入 localStorage 避免 5MB 容量爆滿；前台維持精簡本地快取）
         if (this.isBackendContext()) {
-            const hasCloudChatsObj = Boolean(t[CHATS_KEY] && typeof t[CHATS_KEY] === 'object');
-            if (this.hasLoadedFullTree && hasCloudChatsObj) {
-                const scopedChatsJson = JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY]));
+            if (t[CHAT_META_KEY] !== undefined || t[CHATS_KEY] !== undefined) {
                 this.chatsTreeVersion++;
-                this.writeLocalIfChanged(ADMIN_CHATS_KEY, scopedChatsJson);
-            } else if (this.hasLoadedFullTree && t[CHATS_KEY] === null) {
-                this.chatsTreeVersion++;
-                this.writeLocalIfChanged(ADMIN_CHATS_KEY, '{}');
             }
         } else {
             const scopedChatsJson = JSON.stringify(this.chatsMapToLocal(t[CHATS_KEY]));
@@ -1207,7 +1202,7 @@ const CloudSync = {
             return;
         }
         const parts = cleanPath.split('/');
-        if (parts[0] === CHATS_KEY) {
+        if (parts[0] === CHATS_KEY || parts[0] === CHAT_META_KEY) {
             this.chatsTreeVersion++;
         }
         let curr = this.tree;
@@ -1440,10 +1435,10 @@ const CloudSync = {
     PLAYER_SYNC_ENABLED: true,
     PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch', 'yuelao_custom_activities'],
     PLAYER_COLD_NODES: ['yuelao_reports', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
-    PLAYER_HOT_INTERVAL_MS: 50000,   // 熱門節點每 50 秒檢查一次（45~60 秒區間）
+    PLAYER_HOT_INTERVAL_MS: 75000,   // P2：熱門節點每 75 秒 + 隨機抖動檢查一次
     PLAYER_COLD_INTERVAL_MS: 240000, // 冷門節點每 4 分鐘檢查一次（3~5 分鐘區間）
     PLAYER_IDLE_TIMEOUT_MS: 180000,  // 超過 3 分鐘無滑動／點擊／輸入即自動暫停輪詢
-    BACKEND_POLL_INTERVAL_MS: 30000, // 後台僅輪詢當前頁面所需節點，每 30 秒檢查一次
+    BACKEND_POLL_INTERVAL_MS: 60000, // P2：後台僅輪詢當前頁面所需節點，每 60 秒檢查一次
     BACKEND_IDLE_TIMEOUT_MS: 300000, // 後台超過 5 分鐘無操作自動暫停輪詢
     PLAYER_LONG_IDLE_RELOAD_MS: 900000, // 前台超過 15 分鐘未操作，回來時自動重整回首頁
     ETAG_STORAGE_KEY: 'yuelao_cloud_etags_v1',
@@ -1587,6 +1582,17 @@ const CloudSync = {
         const chatsStorageKey = this.isBackendContext() ? ADMIN_CHATS_KEY : CHATS_KEY;
         if (hydrateObjectDirect(chatsStorageKey, CHATS_KEY)) {
             this.fetchedTopNodes.add(CHATS_KEY);
+            if (this.isBackendContext() && !this.tree[CHAT_META_KEY] && this.tree[CHATS_KEY]) {
+                const synthesizedMeta = {};
+                Object.keys(this.tree[CHATS_KEY]).forEach(pk => {
+                    const msgs = this.mapToArray(this.tree[CHATS_KEY][pk]).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+                    if (msgs.length > 0) {
+                        const lm = msgs[msgs.length - 1];
+                        synthesizedMeta[pk] = { lastMsg: lm, lastTs: Number(lm.ts || 0), msgCount: msgs.length };
+                    }
+                });
+                this.tree[CHAT_META_KEY] = synthesizedMeta;
+            }
         }
         if (hydrateObjectDirect(SYSTEM_STATE_KEY, SYSTEM_STATE_KEY)) {
             this.fetchedTopNodes.add(SYSTEM_STATE_KEY);
@@ -1687,7 +1693,7 @@ const CloudSync = {
             return [USERS_KEY, CUSTOM_ACTIVITIES_KEY, REG_HISTORY_KEY, SESSION_MATCH_RESULTS_KEY, SYSTEM_STATE_KEY, FORCE_KEY, UNMATCHED_PAIRS_CLOUD_NODE];
         }
         if (key === 'chats') {
-            return [CHATS_KEY, USER_INDEX_KEY];
+            return [CHAT_META_KEY, USER_INDEX_KEY];
         }
         if (key === 'ops') {
             return [MAILBOX_KEY, REPORTS_KEY, FATE_WALL_KEY, BANNED_RULES_KEY, SYSTEM_STATE_KEY, USER_INDEX_KEY, FORCE_KEY];
@@ -1721,7 +1727,7 @@ const CloudSync = {
                 this.fetchedTopNodes.add(top);
             }
         });
-        if (unique.includes(CHATS_KEY)) {
+        if (unique.includes(CHATS_KEY) || unique.includes(CHAT_META_KEY)) {
             this.hasLoadedFullTree = true;
         }
         if (changed) {
@@ -1763,11 +1769,22 @@ const CloudSync = {
         const cache = this.loadPersistedEtags();
         const epochBefore = this.writeEpoch;
         const headers = { 'X-Firebase-ETag': 'true' };
+        let queryParams = '';
+        if (path.startsWith(CHATS_KEY + '/') && !this.isBackendContext()) {
+            queryParams = (path === this.activeRoomPath)
+                ? 'orderBy="ts"&limitToLast=50'
+                : 'orderBy="ts"&limitToLast=1';
+        }
         if (!options.force && cache[path] && this.hasLocalCacheForPath(path)) {
             headers['If-None-Match'] = cache[path];
         }
         try {
-            const res = await fetch(`${this.dbUrl}/${this.encodePath(path)}.json${this.authQuery()}`, {
+            const aq = this.authQuery();
+            let finalUrl = `${this.dbUrl}/${this.encodePath(path)}.json`;
+            if (aq || queryParams) {
+                finalUrl += (aq ? aq : '?') + (aq && queryParams ? '&' + queryParams : queryParams);
+            }
+            const res = await fetch(finalUrl, {
                 method: 'GET',
                 headers,
                 cache: 'no-store'
@@ -1941,7 +1958,12 @@ const CloudSync = {
         this.playerTimersStarted = true;
         this.bindActivityWatchers();
         setInterval(() => this.logSyncStats(), 60000);
-        setInterval(() => this.pollPlayerHot(), this.PLAYER_HOT_INTERVAL_MS);
+        const loopHot = () => {
+            if (!this.isPlayerIdlePaused) this.pollPlayerHot();
+            const jitter = Math.floor(Math.random() * 15000);
+            setTimeout(loopHot, this.PLAYER_HOT_INTERVAL_MS + jitter);
+        };
+        setTimeout(loopHot, this.PLAYER_HOT_INTERVAL_MS);
         setInterval(() => this.pollPlayerCold(), this.PLAYER_COLD_INTERVAL_MS);
     },
 
@@ -1972,7 +1994,9 @@ const CloudSync = {
                 this.scheduleStreamFlush(60);
             } catch (err) {}
         };
-        const es = new EventSource(`${this.dbUrl}/${this.encodePath(roomPath)}.json${this.authQuery()}`);
+        const aq = this.authQuery();
+        const sep = aq ? '&' : '?';
+        const es = new EventSource(`${this.dbUrl}/${this.encodePath(roomPath)}.json${aq}${sep}orderBy="ts"&limitToLast=50`);
         es.addEventListener('put', handler);
         es.addEventListener('patch', handler);
         es.onopen = () => {
@@ -2055,7 +2079,7 @@ const CloudSync = {
                     this.fetchedTopNodes.add(top);
                 }
             });
-            if (pageNodes.includes(CHATS_KEY)) {
+            if (pageNodes.includes(CHATS_KEY) || pageNodes.includes(CHAT_META_KEY)) {
                 this.hasLoadedFullTree = true;
             }
             this.applyTreeToLocalStorage();
@@ -2284,7 +2308,7 @@ const CloudSync = {
             Object.keys(rawChats).forEach(pk => {
                 const msgs = this.mapToArray(rawChats[pk]);
                 msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
-                allChatsLocal[pk] = msgs.slice(-500);
+                allChatsLocal[pk] = msgs.slice(-200);
             });
             const chatsJson = JSON.stringify(allChatsLocal);
             this.writeLocalIfChanged(ADMIN_CHATS_KEY, chatsJson);
@@ -2426,7 +2450,7 @@ const CloudSync = {
             }
         });
         if (changed) {
-            if (paths.includes(CHATS_KEY)) this.hasLoadedFullTree = true;
+            if (paths.includes(CHATS_KEY) || paths.includes(CHAT_META_KEY)) this.hasLoadedFullTree = true;
             this.applyTreeToLocalStorage();
             if (typeof this.onUpdateCallback === 'function') this.onUpdateCallback();
         }
@@ -3182,7 +3206,8 @@ const Store = {
             multiFriendSince: null,
             confessionUnlockAt: null,
             lastConfessionDate: null,
-            lastHandledForceConfessionId: null
+            lastHandledForceConfessionId: null,
+            disableConfession: false
         };
     },
 
@@ -3229,6 +3254,7 @@ const Store = {
             ...parsed,
             version: SCHEMA_VERSION,
             isChatBanned: Boolean(parsed.isChatBanned),
+            disableConfession: Boolean(parsed.disableConfession),
             readMailIds: Array.isArray(parsed.readMailIds) ? parsed.readMailIds : [],
             profile: mergedProfile,
             privacy: mergedPrivacy,
@@ -3308,6 +3334,7 @@ const Store = {
                     isWarnedAccount: Boolean(userRec.isWarned),
                     warningReason: userRec.warningReason || '',
                     isChatBanned: Boolean(userRec.isChatBanned),
+                    disableConfession: Boolean(userRec.disableConfession),
                     profile: (() => {
                         const cleanProf = { ...userRec };
                         delete cleanProf.lastSaveIp;
@@ -3694,19 +3721,25 @@ const ChatStore = {
         };
         all[key].push(savedMsg);
         
-        // 限制每個聊天室最多保留最近 500 則訊息，避免 DOM 卡頓與超過 localStorage 容量
+        // P0：限制每個聊天室最多保留最近 200 則訊息，避免 DOM 卡頓與超過 localStorage 容量
         let removedIds = [];
-        if (all[key].length > 500) {
-            const removedMsgs = all[key].slice(0, all[key].length - 500);
+        if (all[key].length > 200) {
+            const removedMsgs = all[key].slice(0, all[key].length - 200);
             removedIds = removedMsgs.map(m => m.id).filter(Boolean);
-            all[key] = all[key].slice(-500);
+            all[key] = all[key].slice(-200);
         }
         
         this.saveAll(all);
         
         if (typeof CloudSync !== 'undefined') {
             const sendPath = `${CHATS_KEY}/${key}/${savedMsg.id}`;
-            CloudSync.putNode(sendPath, savedMsg, { throwOnError: true }).catch(() => {
+            CloudSync.putNode(sendPath, savedMsg, { throwOnError: true }).then(() => {
+                CloudSync.patchNode(`${CHAT_META_KEY}/${key}`, {
+                    lastMsg: savedMsg,
+                    lastTs: savedMsg.ts,
+                    msgCount: all[key].length
+                });
+            }).catch(() => {
                 // 寫入失敗（權杖刷新後仍失敗）：撤回樂觀顯示的假訊息，並通知畫面
                 try {
                     const cur = JSON.parse(localStorage.getItem(CHATS_KEY) || '{}');
@@ -3740,6 +3773,7 @@ const ChatStore = {
         }
         if (typeof CloudSync !== 'undefined') {
             CloudSync.deleteNode(`${CHATS_KEY}/${key}`);
+            CloudSync.deleteNode(`${CHAT_META_KEY}/${key}`);
         }
     },
 
@@ -3812,16 +3846,22 @@ const ChatStore = {
 
         Object.keys(allChats || {}).forEach(pairKey => {
             const rawThread = allChats[pairKey];
-            const msgs = Array.isArray(rawThread)
-                ? rawThread.filter(m => m && typeof m === 'object')
-                : (rawThread && typeof rawThread === 'object'
-                    ? Object.values(rawThread).filter(m => m && typeof m === 'object')
-                    : []);
-            if (msgs.length === 0) return;
-
-            msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
-            const lastMsg = msgs[msgs.length - 1] || {};
-            const lastTs = Number(lastMsg.ts || 0);
+            if (!rawThread || typeof rawThread !== 'object') return;
+            let lastTs = 0;
+            let msgCount = 0;
+            if (rawThread.lastMsg && typeof rawThread.lastMsg === 'object') {
+                lastTs = Number(rawThread.lastTs || rawThread.lastMsg.ts || 0);
+                msgCount = Number(rawThread.msgCount || 1);
+            } else {
+                const msgs = Array.isArray(rawThread)
+                    ? rawThread.filter(m => m && typeof m === 'object')
+                    : Object.values(rawThread).filter(m => m && typeof m === 'object');
+                if (msgs.length === 0) return;
+                msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+                const lastMsg = msgs[msgs.length - 1] || {};
+                lastTs = Number(lastMsg.ts || 0);
+                msgCount = msgs.length;
+            }
             if (lastTs <= 0) return;
 
             if (nowTs >= lastTs + maxInactiveMs) {
@@ -3832,7 +3872,7 @@ const ChatStore = {
                         idA: String(parts[0]).trim(),
                         idB: String(parts[1]).trim(),
                         lastTs,
-                        msgCount: msgs.length
+                        msgCount
                     });
                 }
             }

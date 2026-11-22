@@ -1,5 +1,13 @@
 /* shared/schedule.js - 前後台共用：屆數、週三／週六場次推算與日期格式化 */
 
+function getSundayOfWeek(dateObj = new Date()) {
+    const d = new Date(dateObj);
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay(); // 0 (週日) ~ 6 (週六)
+    d.setDate(d.getDate() - day);
+    return d;
+}
+
 function getMondayOfWeek(dateObj = new Date()) {
     const d = new Date(dateObj);
     d.setHours(0, 0, 0, 0);
@@ -15,15 +23,18 @@ function formatMonthDay(dateObj) {
 
 function getBatchScheduleInfo(batchNum) {
     const b = Math.max(1, Number(batchNum || 1));
-    const baseMonday = new Date(2026, 10, 9, 0, 0, 0, 0); // 2026/11/09 (一) -> 第1屆11/11(三)、第1屆11/14(六)
-    const monday = new Date(baseMonday);
-    monday.setDate(baseMonday.getDate() + (b - 1) * 7);
+    const baseSunday = new Date(2026, 10, 8, 0, 0, 0, 0); // 2026/11/08 (日) -> 第1屆11/11(三)、第1屆11/14(六)
+    const sunday = new Date(baseSunday);
+    sunday.setDate(baseSunday.getDate() + (b - 1) * 7);
 
-    const wed = new Date(monday);
-    wed.setDate(monday.getDate() + 2);
+    const monday = new Date(sunday);
+    monday.setDate(sunday.getDate() + 1);
 
-    const sat = new Date(monday);
-    sat.setDate(monday.getDate() + 5);
+    const wed = new Date(sunday);
+    wed.setDate(sunday.getDate() + 3);
+
+    const sat = new Date(sunday);
+    sat.setDate(sunday.getDate() + 6);
 
     const wedDateStr = formatMonthDay(wed);
     const satDateStr = formatMonthDay(sat);
@@ -33,6 +44,7 @@ function getBatchScheduleInfo(batchNum) {
     return {
         batch: b,
         batchPrefix: `第${b}屆`,
+        sunday,
         monday,
         wed,
         sat,
@@ -68,10 +80,10 @@ function extractBatchLabel(sessionStr) {
 }
 
 function calcAutoBatchNumber(now = new Date()) {
-    const baseMonday = new Date(2026, 10, 9, 0, 0, 0, 0);
-    const currentMonday = getMondayOfWeek(now);
+    const baseSunday = new Date(2026, 10, 8, 0, 0, 0, 0); // 2026/11/08 (日) 起算第 1 屆，每週日 00:00 自動更新為下一屆
+    const currentSunday = getSundayOfWeek(now);
     const weekMs = 7 * 24 * 60 * 60 * 1000;
-    const diffWeeks = Math.round((currentMonday.getTime() - baseMonday.getTime()) / weekMs);
+    const diffWeeks = Math.round((currentSunday.getTime() - baseSunday.getTime()) / weekMs);
     return Math.max(1, 1 + diffWeeks);
 }
 // ==================== 🎪 第 2 種自定義活動：開始～結束時間與自動配對排程引擎 ====================
