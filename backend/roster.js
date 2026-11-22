@@ -341,7 +341,22 @@ function openEditPlayerModal(playerId) {
     const privMap = u.privacy || {};
     const container = document.getElementById('adminEditPlayerFieldsBody');
 
-    container.innerHTML = ADMIN_EDIT_SECTIONS.map(sec => `
+    const adminSettingsHtml = `
+        <div class="space-y-3 p-4 rounded-2xl bg-rose-50/40 border-2 border-rose-200">
+            <h4 class="text-sm md:text-base font-bold font-serif-jp text-rose-800 border-b border-rose-200/80 pb-1.5">🛡️ 後台管理員專屬設定</h4>
+            <div class="grid grid-cols-1 gap-3.5">
+                <div class="p-3.5 rounded-xl bg-white border-2 border-rose-100 space-y-2 shadow-sm">
+                    <label class="flex items-center justify-between gap-2 cursor-pointer">
+                        <span class="text-xs font-bold text-rose-700">禁止此玩家觸發「20:00 心動抉擇」</span>
+                        <input type="checkbox" id="edit-admin-disableConfession" ${u.disableConfession ? 'checked' : ''} class="w-4 h-4 accent-rose-600">
+                    </label>
+                    <p class="text-[11px] text-gray-500">勾選後，該玩家即使擁有 2 位以上好友，也不會彈出心動抉擇視窗。</p>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const sectionsHtml = ADMIN_EDIT_SECTIONS.map(sec => `
         <div class="space-y-3 p-4 rounded-2xl bg-pink-50/40 border-2 border-pink-200">
             <h4 class="text-sm md:text-base font-bold font-serif-jp text-[#8f4452] border-b border-pink-200/80 pb-1.5">${sec.title}</h4>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -470,23 +485,12 @@ function openEditPlayerModal(playerId) {
         </div>
     `).join('');
 
-    const adminSettingsHtml = `
-        <div class="space-y-3 p-4 rounded-2xl bg-rose-50/40 border-2 border-rose-200 mt-4">
-            <h4 class="text-sm md:text-base font-bold font-serif-jp text-rose-800 border-b border-rose-200/80 pb-1.5">🛡️ 後台管理員專屬設定</h4>
-            <div class="grid grid-cols-1 gap-3.5">
-                <div class="p-3.5 rounded-xl bg-white border-2 border-rose-100 space-y-2 shadow-sm">
-                    <label class="flex items-center justify-between gap-2 cursor-pointer">
-                        <span class="text-xs font-bold text-rose-700">禁止此玩家觸發「20:00 心動抉擇」</span>
-                        <input type="checkbox" id="edit-admin-disableConfession" ${u.disableConfession ? 'checked' : ''} class="w-4 h-4 accent-rose-600">
-                    </label>
-                    <p class="text-[11px] text-gray-500">勾選後，該玩家即使擁有 2 位以上好友，也不會彈出心動抉擇視窗。</p>
-                </div>
-            </div>
-        </div>
-    `;
-    container.innerHTML += adminSettingsHtml;
+    container.innerHTML = adminSettingsHtml + sectionsHtml;
 
-    document.getElementById('editPlayerModal').classList.remove('hidden');
+    const editModalEl = document.getElementById('editPlayerModal');
+    editModalEl.classList.remove('hidden');
+    const modalScrollBox = editModalEl.firstElementChild;
+    if (modalScrollBox) modalScrollBox.scrollTop = 0;
 }
 
 function closeEditPlayerModal() {

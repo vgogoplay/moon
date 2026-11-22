@@ -372,7 +372,7 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
             } else if (isFemaleBlocked) {
                 extraGenderNoticeHtml = `<p class="text-xs font-bold text-rose-600">🚫 女生人數已滿（${quota.femaleCount}/${quota.limit} 人），女生禁止選取，性別只能選擇「男」。</p>`;
             } else if (quota.enabled && !appState.playerId && !isProfileLocked) {
-                extraGenderNoticeHtml = `<p class="text-[11px] text-[#8f4452] font-medium">📊 目前男女名額統計：男生 ${quota.maleCount}/${quota.limit} 人、女生 ${quota.femaleCount}/${quota.limit} 人</p>`;
+                extraGenderNoticeHtml = `<p class="text-[11px] text-[#8f4452] font-medium">📊 目前男生名額統計：男生 ${quota.maleCount}/${quota.limit} 人</p>`;
             }
         } else {
             const otherText = appState.profile[`${field.key}Other`] || '';
