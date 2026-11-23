@@ -285,8 +285,9 @@ function confirmAndRunSupplementaryMatch() {
     }
 }
 
-function runSupplementaryMatchForBatch(wedLabel, satLabel) {
-    openSupplementaryMatchPreviewModal([wedLabel, satLabel]);
+function runSupplementaryMatchForBatch(...sessionLabels) {
+    const labels = sessionLabels.flat().map(s => String(s || '').trim()).filter(Boolean);
+    openSupplementaryMatchPreviewModal(labels);
 }
 
 function runSupplementaryMatchForSession(sessionLabel) {
@@ -574,9 +575,12 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
             });
         });
 
+        const isLegacyTwoDayBatch = Number(bNum) <= 2;
         return {
             key: targetKey,
-            label: `${info.batchPrefix}（${info.wedDateStr}(三) + ${info.satDateStr}(六)）`,
+            label: isLegacyTwoDayBatch
+                ? `${info.batchPrefix}（${info.wedDateStr}(三) + ${info.satDateStr}(六)）`
+                : `${info.batchPrefix}（${info.tueDateStr}(二) + ${info.thuDateStr}(四) + ${info.satDateStr}(六)）`,
             typeLabel: '常規屆數（整屆）',
             regUsers: finalBatchRegUsers,
             matchedUsers,
@@ -584,7 +588,9 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
             unmatchedUsers,
             rosterDetails,
             singleSessionLabel: '',
-            batchSessions: [info.wedLabel, info.satLabel],
+            batchSessions: isLegacyTwoDayBatch
+                ? [info.wedLabel, info.satLabel]
+                : [info.tueLabel, info.thuLabel, info.satLabel],
             savedSnapshotAt: '',
             extraHtml: ''
         };
@@ -1042,12 +1048,14 @@ function renderSelectedActivityRosterDetails(activeStats) {
     let suppMatchBtnHtml = `${restoreLostPairsBtnHtml}${repairDupBtnHtml}`;
     if (activeStats.singleSessionLabel && unmatchedItems.length > 0) {
         suppMatchBtnHtml += `<button type="button" onclick="runSupplementaryMatchForSession('${escapeActStatHtml(activeStats.singleSessionLabel)}')" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow-sm hover:opacity-95 transition">💘 補跑名單(未配對)</button>`;
-    } else if (Array.isArray(activeStats.batchSessions) && activeStats.batchSessions.length === 2 && unmatchedItems.length > 0) {
-        const [wLbl, sLbl] = activeStats.batchSessions;
-        suppMatchBtnHtml = `
-            <button type="button" onclick="runSupplementaryMatchForSession('${escapeActStatHtml(wLbl)}')" class="px-3 py-1.5 rounded-xl bg-white border border-pink-300 text-[#8f4452] text-xs font-bold hover:bg-pink-50 transition">💘 補跑 ${escapeActStatHtml(wLbl)}</button>
-            <button type="button" onclick="runSupplementaryMatchForSession('${escapeActStatHtml(sLbl)}')" class="px-3 py-1.5 rounded-xl bg-white border border-pink-300 text-[#8f4452] text-xs font-bold hover:bg-pink-50 transition">💘 補跑 ${escapeActStatHtml(sLbl)}</button>
-            <button type="button" onclick="runSupplementaryMatchForBatch('${escapeActStatHtml(wLbl)}', '${escapeActStatHtml(sLbl)}')" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow-sm hover:opacity-95 transition">💘 補跑名單(未配對)</button>
+    } else if (Array.isArray(activeStats.batchSessions) && activeStats.batchSessions.length >= 2 && unmatchedItems.length > 0) {
+        const batchArgsStr = activeStats.batchSessions.map(lbl => `'${escapeActStatHtml(lbl)}'`).join(', ');
+        const perSessionBtnsHtml = activeStats.batchSessions.map(sLbl =>
+            `<button type="button" onclick="runSupplementaryMatchForSession('${escapeActStatHtml(sLbl)}')" class="px-3 py-1.5 rounded-xl bg-white border border-pink-300 text-[#8f4452] text-xs font-bold hover:bg-pink-50 transition">💘 補跑 ${escapeActStatHtml(sLbl)}</button>`
+        ).join('\n            ');
+        suppMatchBtnHtml += `
+            ${perSessionBtnsHtml}
+            <button type="button" onclick="runSupplementaryMatchForBatch(${batchArgsStr})" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow-sm hover:opacity-95 transition">💘 補跑名單(未配對)</button>
         `;
     }
 
@@ -1167,18 +1175,37 @@ function renderActivityMatchStatsPanel(users, customActsList, currentBatch, maxD
     for (let b = 1; b <= maxDisplayBatch; b++) {
         const info = getBatchScheduleInfo(b);
         const curTag = b === currentBatch ? '【目前】' : '';
-        opts.push({
-            value: `batch:${b}`,
-            label: `${curTag}${info.batchPrefix} 全部場次（${info.wedDateStr}(三) + ${info.satDateStr}(六)）`
-        });
-        opts.push({
-            value: `session:${info.wedLabel}`,
-            label: `　└ 單場：${info.wedLabel}`
-        });
-        opts.push({
-            value: `session:${info.satLabel}`,
-            label: `　└ 單場：${info.satLabel}`
-        });
+        if (b <= 2) {
+            opts.push({
+                value: `batch:${b}`,
+                label: `${curTag}${info.batchPrefix} 全部場次（${info.wedDateStr}(三) + ${info.satDateStr}(六)）`
+            });
+            opts.push({
+                value: `session:${info.wedLabel}`,
+                label: `　└ 單場：${info.wedLabel}`
+            });
+            opts.push({
+                value: `session:${info.satLabel}`,
+                label: `　└ 單場：${info.satLabel}`
+            });
+        } else {
+            opts.push({
+                value: `batch:${b}`,
+                label: `${curTag}${info.batchPrefix} 全部場次（${info.tueDateStr}(二) + ${info.thuDateStr}(四) + ${info.satDateStr}(六)）`
+            });
+            opts.push({
+                value: `session:${info.tueLabel}`,
+                label: `　└ 單場：${info.tueLabel}`
+            });
+            opts.push({
+                value: `session:${info.thuLabel}`,
+                label: `　└ 單場：${info.thuLabel}`
+            });
+            opts.push({
+                value: `session:${info.satLabel}`,
+                label: `　└ 單場：${info.satLabel}`
+            });
+        }
     }
 
     (customActsList || []).forEach(act => {

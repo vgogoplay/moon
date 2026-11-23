@@ -1653,7 +1653,7 @@ function renderAdminSharedOverview(forceUpdate = false) {
 
     const batchBadge = document.getElementById('adminCurrentBatchBadge');
     if (batchBadge) {
-        batchBadge.textContent = `目前系統：${currentSched.batchPrefix}（${currentSched.wedDateStr}(三) / ${currentSched.satDateStr}(六)）`;
+        batchBadge.textContent = `目前系統：${currentSched.batchPrefix}（${currentSched.tueDateStr}(二) / ${currentSched.thuDateStr}(四) / ${currentSched.satDateStr}(六)）`;
     }
 
     const statTotalEl = document.getElementById('statTotal');

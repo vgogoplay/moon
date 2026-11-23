@@ -193,7 +193,9 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
             const info = getBatchScheduleInfo(b);
             batchOpts.push({
                 value: info.batchPrefix,
-                label: `${info.batchPrefix}（${info.wedDateStr}(三)、${info.satDateStr}(六)）`
+                label: b <= 2
+                    ? `${info.batchPrefix}（${info.wedDateStr}(三)、${info.satDateStr}(六)）`
+                    : `${info.batchPrefix}（${info.tueDateStr}(二)、${info.thuDateStr}(四)、${info.satDateStr}(六)）`
             });
         }
         forceBatchSel.innerHTML = batchOpts.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('');
@@ -436,15 +438,22 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
         const sessionOpts = [];
         for (let b = 1; b <= maxDisplayBatch; b++) {
             const info = getBatchScheduleInfo(b);
-            sessionOpts.push(info.wedLabel, info.satLabel);
+            if (b <= 2) {
+                sessionOpts.push(info.wedLabel, info.satLabel);
+            } else {
+                sessionOpts.push(info.tueLabel, info.thuLabel, info.satLabel);
+            }
         }
         sessionSel.innerHTML = sessionOpts.map(s => `<option value="${s}">${s}</option>`).join('');
         if (sessionOpts.includes(prevSessionVal)) {
             sessionSel.value = prevSessionVal;
         } else {
             const nowObj = new Date();
-            const isAfterWed20 = (nowObj.getDay() > 3) || (nowObj.getDay() === 3 && nowObj.getHours() >= 20);
-            sessionSel.value = isAfterWed20 ? currentSched.satLabel : currentSched.wedLabel;
+            const isAfterThu20 = (nowObj.getDay() > 4) || (nowObj.getDay() === 4 && nowObj.getHours() >= 20);
+            const isAfterTue20 = (nowObj.getDay() > 2) || (nowObj.getDay() === 2 && nowObj.getHours() >= 20);
+            sessionSel.value = isAfterThu20
+                ? currentSched.satLabel
+                : (isAfterTue20 ? currentSched.thuLabel : currentSched.tueLabel);
         }
     }
 

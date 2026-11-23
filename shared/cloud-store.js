@@ -435,7 +435,7 @@ const CloudSync = {
         if (!userA || !userB || !userA.id || !userB.id) return null;
         // 僅紀錄自定義活動或強制手動配對，不紀錄常規場次
         const normSess = (typeof normalizeSessionLabel === 'function') ? normalizeSessionLabel(sessionLabel) : String(sessionLabel).trim();
-        if (/^第\s*\d+\s*屆.+\([三六]\)$/.test(normSess) && !String(sessionLabel).includes('強制')) {
+        if (/^第\s*\d+\s*屆.+\([二三四六]\)$/.test(normSess) && !String(sessionLabel).includes('強制')) {
             return null;
         }
         const tsNum = Number(matchTs) || Date.now();
@@ -635,7 +635,7 @@ const CloudSync = {
             }
         });
 
-        // 嚴格 1 對 1 場次保護：同一個常規週三／週六單一場次（無 activityId 且非強制配對）每人最多只能配對 1 位對象
+        // 嚴格 1 對 1 場次保護：同一個常規週二／週四／週六單一場次（無 activityId 且非強制配對）每人最多只能配對 1 位對象
         const dedupedList = Array.from(byPartner.values());
         dedupedList.sort((a, b) => Number(a.matchedAt || 0) - Number(b.matchedAt || 0));
         const seenRegularSessionSet = new Set();
@@ -650,7 +650,7 @@ const CloudSync = {
                 const normSess = (typeof normalizeSessionLabel === 'function')
                     ? normalizeSessionLabel(entry.session)
                     : String(entry.session).trim();
-                if (/^第\s*\d+\s*屆.+\([三六]\)$/.test(normSess)) {
+                if (/^第\s*\d+\s*屆.+\([二三四六]\)$/.test(normSess)) {
                     if (seenRegularSessionSet.has(normSess)) {
                         return;
                     }
@@ -1060,7 +1060,7 @@ const CloudSync = {
             ActivityRegArchive.mergeCloudTreeAndUsers(t[REG_HISTORY_KEY], usersArr);
         }
 
-        // 1c. 週三／週六場次配對成功與失敗名單快照同步
+        // 1c. 週二／週四／週六場次配對成功與失敗名單快照同步
         if (t[SESSION_MATCH_RESULTS_KEY] && typeof t[SESSION_MATCH_RESULTS_KEY] === 'object') {
             this.writeLocalIfChanged(SESSION_MATCH_RESULTS_KEY, JSON.stringify(t[SESSION_MATCH_RESULTS_KEY]));
         } else if (t[SESSION_MATCH_RESULTS_KEY] === null && localStorage.getItem(SESSION_MATCH_RESULTS_KEY) !== null) {

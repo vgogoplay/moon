@@ -1014,10 +1014,10 @@ function checkAutoSchedule2000() {
     let target = new Date(now);
     target.setHours(20, 0, 0, 0);
 
-    if ((target.getDay() === 3 || target.getDay() === 6) && now >= target) {
+    if ([2, 4, 6].includes(target.getDay()) && now >= target) {
         target.setDate(target.getDate() + 1);
     }
-    while (target.getDay() !== 3 && target.getDay() !== 6) {
+    while (![2, 4, 6].includes(target.getDay())) {
         target.setDate(target.getDate() + 1);
     }
 
@@ -1026,12 +1026,13 @@ function checkAutoSchedule2000() {
     const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
     const mins = Math.floor((diff / (1000 * 60)) % 60);
     const secs = Math.floor((diff / 1000) % 60);
-    const dayLabel = target.getDay() === 3 ? '週三' : '週六';
+    const dayMap = { 2: '週二', 4: '週四', 6: '週六' };
+    const dayLabel = dayMap[target.getDay()] || '週二';
     const cdEl = document.getElementById('adminCountdownText'); if (cdEl) cdEl.textContent =
         `距離下次 ${dayLabel} 20:00 自動配對：${days}天 ${String(hours).padStart(2, '0')}時 ${String(mins).padStart(2, '0')}分 ${String(secs).padStart(2, '0')}秒`;
 
     const day = now.getDay();
-    const isAutoWindow = (day === 3 || day === 6) && now.getHours() === 20 && now.getMinutes() <= 15;
+    const isAutoWindow = [2, 4, 6].includes(day) && now.getHours() === 20 && now.getMinutes() <= 15;
     if (isAutoWindow && typeof CloudSync !== 'undefined' && CloudSync.initialized && CloudSync.inFlightWrites === 0 && !sessionMatchRunInProgress) {
         const dateKey = `${now.toDateString()}_2000`;
         const executedMap = JSON.parse(localStorage.getItem(AUTO_RUN_LOG_KEY) || '{}');
@@ -1258,7 +1259,7 @@ function hasUserMatchedInRegularSession(user, targetSession) {
 function recordPairMatch(userA, userB, targetSession, nowTs, activityId = null, matchDetail = '') {
     if (!userA || !userB || String(userA.id) === String(userB.id)) return false;
 
-    // 嚴格 1 對 1 保護：常規週三／週六場次每人當場最多只能配對 1 人，絕不允許 1 人配對 2 人
+    // 嚴格 1 對 1 保護：常規週二／週四／週六場次每人當場最多只能配對 1 人，絕不允許 1 人配對 2 人
     // 但若明確帶有「強制補齊」的標記（代表秘密強制通道等管理員介入），則允許 1 對多配對
     const isForceMatching = String(targetSession).includes('強制') || String(matchDetail).includes('強制');
     if (!activityId && targetSession && !isForceMatching) {
@@ -1797,7 +1798,7 @@ async function claimAndRunAutoSchedule2000(dateKey, dayOfWeek) {
     autoSchedule2000ClaimInFlight = true;
     try {
         const sched = getBatchScheduleInfo(getCurrentBatch());
-        const autoSession = dayOfWeek === 3 ? sched.wedLabel : sched.satLabel;
+        const autoSession = dayOfWeek === 2 ? sched.tueLabel : (dayOfWeek === 4 ? sched.thuLabel : sched.satLabel);
 
         // 1. 先從雲端確認今天 20:00 是否已被其他後台分頁／裝置執行過，若已執行則直接同步本地鎖並停止
         if (typeof CloudSync !== 'undefined' && !CloudSync.isLocalSandboxMode() && CloudSync.dbUrl) {
@@ -2086,7 +2087,7 @@ function runSessionMatch(isAuto = false, overrideSession = null, options = {}) {
     }
 
     const targetSessionSel = document.getElementById('adminSessionSelect');
-    const rawTargetSession = overrideSession || (targetSessionSel ? targetSessionSel.value : getBatchScheduleInfo(getCurrentBatch()).wedLabel);
+    const rawTargetSession = overrideSession || (targetSessionSel ? targetSessionSel.value : getBatchScheduleInfo(getCurrentBatch()).tueLabel);
     const targetSession = (typeof normalizeSessionLabel === 'function')
         ? normalizeSessionLabel(rawTargetSession)
         : String(rawTargetSession || '').trim();
@@ -2251,7 +2252,7 @@ function repairDuplicateSameSessionMatches(targetSessionFilter = '') {
         if (u && u.id) userById.set(String(u.id).trim(), u);
     });
 
-    // 1. 合併掃描雲端原始節點（CloudSync.tree）與本地會員清單，找出所有「同一常規週三／週六場次配對超過 1 人」的異常重複組合
+    // 1. 合併掃描雲端原始節點（CloudSync.tree）與本地會員清單，找出所有「同一常規週二／週四／週六場次配對超過 1 人」的異常重複組合
     const extraPairsToRemove = new Map(); // pairKey -> { idA, idB, session }
     const inspectUserHistoryForDup = (u) => {
         if (!u || !u.id) return;
@@ -2267,7 +2268,7 @@ function repairDuplicateSameSessionMatches(targetSessionFilter = '') {
             const normSess = (typeof normalizeSessionLabel === 'function')
                 ? normalizeSessionLabel(h.session)
                 : String(h.session).trim();
-            if (!/^第\s*\d+\s*屆.+\([三六]\)$/.test(normSess)) return;
+            if (!/^第\s*\d+\s*屆.+\([二三四六]\)$/.test(normSess)) return;
             if (normFilter && normSess !== normFilter) return;
 
             const pid = String(h.partnerId || '').trim();
@@ -2399,14 +2400,14 @@ function advanceToNextBatch() {
     const nextBatch = getCurrentBatch() + 1;
     setCurrentBatch(nextBatch);
     const nextInfo = getBatchScheduleInfo(nextBatch);
-    appendLog(`<span class="text-amber-300">[屆數刷新]</span> 系統已推進至 <strong>${nextInfo.batchPrefix}（${nextInfo.wedLabel} / ${nextInfo.satLabel}）</strong>！`);
+    appendLog(`<span class="text-amber-300">[屆數刷新]</span> 系統已推進至 <strong>${nextInfo.batchPrefix}（${nextInfo.tueLabel} / ${nextInfo.thuLabel} / ${nextInfo.satLabel}）</strong>！`);
     renderAdminAll();
 }
 
 function getSelectedAdminSession() {
     const sel = document.getElementById('adminSessionSelect');
     if (sel && sel.value) return normalizeSessionLabel(sel.value);
-    return getBatchScheduleInfo(getCurrentBatch()).wedLabel;
+    return getBatchScheduleInfo(getCurrentBatch()).tueLabel;
 }
 
 function seedSampleABCDE() {

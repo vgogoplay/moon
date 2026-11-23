@@ -115,7 +115,7 @@ function renderAdminSharedShell() {
                                     ☁️ Firebase 雲端連線中...
                                 </span>
                                 <span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold">
-                                    ⏰ 每週三 / 週六 20:00 自動配對
+                                    ⏰ 每週二 / 週四 / 週六 20:00 自動配對
                                 </span>
                             </div>
                             <h1 class="text-xl md:text-2xl font-bold font-serif-jp text-[#8f4452] mt-1">⛩️ 月老牽線計畫・後台管理中心</h1>
@@ -198,7 +198,7 @@ function renderAdminSharedShell() {
                         <span class="text-2xl">⛩️</span>
                         <div>
                             <h2 class="text-base font-bold font-serif-jp text-[#8f4452] leading-tight">月老神社後台</h2>
-                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261120snap</span></p>
+                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261123tue46</span></p>
                         </div>
                     </div>
                 </div>

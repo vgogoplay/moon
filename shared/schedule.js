@@ -1,4 +1,4 @@
-/* shared/schedule.js - 前後台共用：屆數、週三／週六場次推算與日期格式化 */
+/* shared/schedule.js - 前後台共用：屆數、週二／週四／週六場次推算與日期格式化 */
 
 function getSundayOfWeek(dateObj = new Date()) {
     const d = new Date(dateObj);
@@ -23,22 +23,33 @@ function formatMonthDay(dateObj) {
 
 function getBatchScheduleInfo(batchNum) {
     const b = Math.max(1, Number(batchNum || 1));
-    const baseSunday = new Date(2026, 10, 8, 0, 0, 0, 0); // 2026/11/08 (日) -> 第1屆11/11(三)、第1屆11/14(六)
+    const baseSunday = new Date(2026, 10, 8, 0, 0, 0, 0); // 2026/11/08 (日) 起算第1屆，固定每週二、四、六 20:00
     const sunday = new Date(baseSunday);
     sunday.setDate(baseSunday.getDate() + (b - 1) * 7);
 
     const monday = new Date(sunday);
     monday.setDate(sunday.getDate() + 1);
 
+    const tue = new Date(sunday);
+    tue.setDate(sunday.getDate() + 2);
+
     const wed = new Date(sunday);
     wed.setDate(sunday.getDate() + 3);
+
+    const thu = new Date(sunday);
+    thu.setDate(sunday.getDate() + 4);
 
     const sat = new Date(sunday);
     sat.setDate(sunday.getDate() + 6);
 
+    const tueDateStr = formatMonthDay(tue);
     const wedDateStr = formatMonthDay(wed);
+    const thuDateStr = formatMonthDay(thu);
     const satDateStr = formatMonthDay(sat);
+
+    const tueLabel = `第${b}屆${tueDateStr}(二)`;
     const wedLabel = `第${b}屆${wedDateStr}(三)`;
+    const thuLabel = `第${b}屆${thuDateStr}(四)`;
     const satLabel = `第${b}屆${satDateStr}(六)`;
 
     return {
@@ -46,13 +57,19 @@ function getBatchScheduleInfo(batchNum) {
         batchPrefix: `第${b}屆`,
         sunday,
         monday,
+        tue,
         wed,
+        thu,
         sat,
+        tueDateStr,
         wedDateStr,
+        thuDateStr,
         satDateStr,
+        tueLabel,
         wedLabel,
+        thuLabel,
         satLabel,
-        sessions: [wedLabel, satLabel]
+        sessions: [tueLabel, thuLabel, satLabel]
     };
 }
 
@@ -63,8 +80,10 @@ function normalizeSessionLabel(sessionStr) {
     if (!batchMatch) return raw;
     const b = Math.max(1, parseInt(batchMatch[1], 10));
     const info = getBatchScheduleInfo(b);
-    if (/(三|星期三|週三)/.test(raw)) return info.wedLabel;
+    if (/(二|星期二|週二)/.test(raw)) return info.tueLabel;
+    if (/(四|星期四|週四)/.test(raw)) return info.thuLabel;
     if (/(六|星期六|週六)/.test(raw)) return info.satLabel;
+    if (/(三|星期三|週三)/.test(raw)) return info.wedLabel;
     return info.batchPrefix;
 }
 
@@ -1136,10 +1155,14 @@ function getRegularSessionEndTs(sessionStr) {
     const b = Math.max(1, parseInt(batchMatch[1], 10));
     const info = getBatchScheduleInfo(b);
     let targetDate = null;
-    if (/(三|星期三|週三)/.test(norm)) {
-        targetDate = new Date(info.wed);
+    if (/(二|星期二|週二)/.test(norm)) {
+        targetDate = new Date(info.tue);
+    } else if (/(四|星期四|週四)/.test(norm)) {
+        targetDate = new Date(info.thu);
     } else if (/(六|星期六|週六)/.test(norm)) {
         targetDate = new Date(info.sat);
+    } else if (/(三|星期三|週三)/.test(norm)) {
+        targetDate = new Date(info.wed);
     } else {
         targetDate = new Date(info.sat);
     }

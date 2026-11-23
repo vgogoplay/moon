@@ -342,10 +342,11 @@ function handleApplyClick() {
 
     const schedCheck = getBatchScheduleInfo(getCurrentBatchNumber());
     const nowCheckTs = Date.now();
-    const isWedClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(schedCheck.wedLabel, nowCheckTs);
+    const isTueClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(schedCheck.tueLabel, nowCheckTs);
+    const isThuClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(schedCheck.thuLabel, nowCheckTs);
     const isSatClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(schedCheck.satLabel, nowCheckTs);
-    if (isWedClosed && isSatClosed) {
-        showMiniNotice('⏳ 本屆場次已截止報名', `${schedCheck.batchPrefix}（${schedCheck.wedLabel}、${schedCheck.satLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
+    if (isTueClosed && isThuClosed && isSatClosed) {
+        showMiniNotice('⏳ 本屆場次已截止報名', `${schedCheck.batchPrefix}（${schedCheck.tueLabel}、${schedCheck.thuLabel}、${schedCheck.satLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
         return;
     }
 
@@ -357,11 +358,12 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
     if (!listEl) return;
 
     const sched = getBatchScheduleInfo(getCurrentBatchNumber());
-    const wedLabel = sched.wedLabel;
+    const tueLabel = sched.tueLabel;
+    const thuLabel = sched.thuLabel;
     const satLabel = sched.satLabel;
     const savedSessions = Array.isArray(appState.registeredSessions) ? appState.registeredSessions : [];
 
-    listEl.innerHTML = [wedLabel, satLabel].map(opt => {
+    listEl.innerHTML = [tueLabel, thuLabel, satLabel].map(opt => {
         const isClosed = (typeof isRegularSessionRegistrationClosed === 'function')
             ? isRegularSessionRegistrationClosed(opt, nowTs)
             : false;
@@ -409,11 +411,12 @@ function openRegisterModal() {
 
     const sched = getBatchScheduleInfo(getCurrentBatchNumber());
     const nowTs = Date.now();
-    const isWedClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.wedLabel, nowTs);
+    const isTueClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.tueLabel, nowTs);
+    const isThuClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.thuLabel, nowTs);
     const isSatClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.satLabel, nowTs);
-    if (isWedClosed && isSatClosed) {
+    if (isTueClosed && isThuClosed && isSatClosed) {
         closeRegisterModal();
-        showMiniNotice('⏳ 本屆場次已截止報名', `${sched.batchPrefix}（${sched.wedLabel}、${sched.satLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
+        showMiniNotice('⏳ 本屆場次已截止報名', `${sched.batchPrefix}（${sched.tueLabel}、${sched.thuLabel}、${sched.satLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
         return;
     }
 
@@ -1054,7 +1057,7 @@ function openCustomActivityModal(activityId) {
 
     const modalTimeNote = schedState.hasSchedule
         ? `⏰ 活動時間：${schedState.windowText || '不限'}${schedState.matchText ? ` ｜ 💘 配對時間：${schedState.matchText}` : ''}`
-        : '此為後台創建的獨立專屬活動，與週三／週六常規自動配對互不影響';
+        : '此為後台創建的獨立專屬活動，與週二／週四／週六常規自動配對互不影響';
     document.getElementById('customActModalTitle').textContent = `🎪 報名專屬活動：【${act.name}】`;
     document.getElementById('customActModalSubtitle').textContent = act.description
         ? `${act.description}（${modalTimeNote}）`
@@ -1112,7 +1115,7 @@ function openCustomActivityModal(activityId) {
             confirmBtn.classList.remove('hidden');
             confirmBtn.textContent = '✨ 更新條件並保持報名';
         } else {
-            statusBox.innerHTML = `📣 <strong>【${act.name}】開放獨立報名中！</strong><br>確認報名後，管理員將於後台進行配對（完全不影響您週三／週六的常規配對）。`;
+            statusBox.innerHTML = `📣 <strong>【${act.name}】開放獨立報名中！</strong><br>確認報名後，管理員將於後台進行配對（完全不影響您週二／週四／週六的常規配對）。`;
             cancelBtn.classList.add('hidden');
             confirmBtn.classList.remove('hidden');
             confirmBtn.textContent = `✨ 確認報名【${act.name}】`;
@@ -1248,7 +1251,7 @@ async function confirmCustomActivityRegistration() {
         ? '此活動指定條件：\n' + displayItems.map(item => `・${item}`).join('\n')
         : '未勾選額外條件（不限制，將進行隨機配對）';
 
-    showMiniNotice('🎪 專屬活動報名成功', `已成功報名【${act.name}】！\n（此為獨立活動，不影響週三／週六場次）\n\n${desc}`);
+    showMiniNotice('🎪 專屬活動報名成功', `已成功報名【${act.name}】！\n（此為獨立活動，不影響週二／週四／週六場次）\n\n${desc}`);
 }
 
 async function cancelCustomActivityRegistration() {
@@ -1289,7 +1292,7 @@ async function cancelCustomActivityRegistration() {
     customActivitySyncSuppressUntil = Date.now() + 2500;
     refreshAllUI();
 
-    showMiniNotice('🍃 已取消報名', `已取消報名【${actName}】（不影響週三／週六常規配對）。`);
+    showMiniNotice('🍃 已取消報名', `已取消報名【${actName}】（不影響週二／週四／週六常規配對）。`);
 }
 
 function refreshAllUI() {
@@ -1300,12 +1303,19 @@ function refreshAllUI() {
     const batchNum = sysConfig.currentBatch;
     const sched = getBatchScheduleInfo(batchNum);
     const nowRefreshTs = Date.now();
-    const isWedClosedNow = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.wedLabel, nowRefreshTs);
+    const isTueClosedNow = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.tueLabel, nowRefreshTs);
+    const isThuClosedNow = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.thuLabel, nowRefreshTs);
     const isSatClosedNow = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.satLabel, nowRefreshTs);
-    const isAllBatchSessionsClosed = isWedClosedNow && isSatClosedNow;
+    const isAllBatchSessionsClosed = isTueClosedNow && isThuClosedNow && isSatClosedNow;
     const openBatchSessionLabels = [
-        !isWedClosedNow ? sched.wedLabel : '',
+        !isTueClosedNow ? sched.tueLabel : '',
+        !isThuClosedNow ? sched.thuLabel : '',
         !isSatClosedNow ? sched.satLabel : ''
+    ].filter(Boolean);
+    const closedBatchSessionLabels = [
+        isTueClosedNow ? sched.tueLabel : '',
+        isThuClosedNow ? sched.thuLabel : '',
+        isSatClosedNow ? sched.satLabel : ''
     ].filter(Boolean);
 
     const normalizedAllSessions = Array.from(new Set((appState.registeredSessions || []).map(s => normalizeSessionLabel(s)).filter(Boolean)));
@@ -1316,7 +1326,7 @@ function refreshAllUI() {
 
     const periodBadgeEl = document.getElementById('currentPeriodBadge');
     if (periodBadgeEl) {
-        periodBadgeEl.textContent = `目前開放：${sched.batchPrefix}（${sched.wedDateStr}(三) / ${sched.satDateStr}(六)）`;
+        periodBadgeEl.textContent = `目前開放：${sched.batchPrefix}（${sched.tueDateStr}(二) / ${sched.thuDateStr}(四) / ${sched.satDateStr}(六)）`;
     }
 
     const warnBanner = document.getElementById('warningAccountBanner');
@@ -1353,7 +1363,7 @@ function refreshAllUI() {
         badge.textContent = '🚫 人數已滿 不可報名';
         applyBtn.disabled = true;
         applyBtn.textContent = '🚫 人數已滿 不可報名';
-        alertBox.innerHTML = `<span class="text-rose-600 font-bold">本屆報名人數已滿，目前暫停開放報名！</span><br>已成功報名的玩家將如期於週三 / 週六 20:00 進行配對。`;
+        alertBox.innerHTML = `<span class="text-rose-600 font-bold">本屆報名人數已滿，目前暫停開放報名！</span><br>已成功報名的玩家將如期於週二 / 週四 / 週六 20:00 進行配對。`;
     } else if (isBothGenderFullForNew) {
         badge.textContent = '🚫 男/女人數已滿';
         applyBtn.disabled = true;
@@ -1376,10 +1386,12 @@ function refreshAllUI() {
         badge.textContent = `⏳ ${sched.batchPrefix}已截止報名`;
         applyBtn.disabled = true;
         applyBtn.textContent = `⏳ ${sched.batchPrefix}已截止報名（請靜待下期開放）`;
-        alertBox.innerHTML = `<span class="text-gray-500 font-bold">${sched.wedLabel} 與 ${sched.satLabel} 皆已過 20:00 截止報名</span>，請靜待下一期開放報名！`;
+        alertBox.innerHTML = `<span class="text-gray-500 font-bold">${sched.tueLabel}、${sched.thuLabel} 與 ${sched.satLabel} 皆已過 20:00 截止報名</span>，請靜待下一期開放報名！`;
     } else if (currentBatchSessions.length > 0) {
         const criteriaSummary = formatCriteriaSummaryText(appState.exactMatchCriteria || {}, appState.mustMatchKeys || []);
-        const closedHint = isWedClosedNow ? `<br><span class="text-[11px] text-gray-400">（${sched.wedLabel} 已於 20:00 截止報名）</span>` : '';
+        const closedHint = closedBatchSessionLabels.length > 0
+            ? `<br><span class="text-[11px] text-gray-400">（${closedBatchSessionLabels.join('、')} 已於 20:00 截止報名）</span>`
+            : '';
         badge.textContent = `⏳ 已報名 (${currentBatchSessions.length}場)`;
         applyBtn.disabled = false;
         applyBtn.textContent = `✅ 已報名【${currentBatchSessions.join('、')}】（點此修改）`;
@@ -1388,10 +1400,11 @@ function refreshAllUI() {
         badge.textContent = `✨ ${sched.batchPrefix}開始報名中`;
         applyBtn.disabled = false;
         applyBtn.textContent = `🌸 開始報名（${sched.batchPrefix}）`;
-        if (isWedClosedNow) {
-            alertBox.innerHTML = `目前開放報名 <strong>${sched.satLabel}</strong>（<span class="text-gray-400 line-through">${sched.wedLabel}</span> 已於 20:00 截止報名），有報名才會參與配對！`;
+        if (closedBatchSessionLabels.length > 0) {
+            const closedStrikeHtml = closedBatchSessionLabels.map(lbl => `<span class="text-gray-400 line-through">${lbl}</span>`).join('、');
+            alertBox.innerHTML = `目前開放報名 <strong>${openBatchSessionLabels.join('</strong> 或 <strong>')}</strong>（${closedStrikeHtml} 已於 20:00 截止報名），有報名才會參與配對！`;
         } else {
-            alertBox.innerHTML = `目前開放報名 <strong>${openBatchSessionLabels.join('</strong> 或 <strong>')}</strong>（可複選），有報名才會參與配對！`;
+            alertBox.innerHTML = `目前開放報名 <strong>${openBatchSessionLabels.join('</strong>、<strong>')}</strong>（可複選），有報名才會參與配對！`;
         }
     }
 
@@ -1540,7 +1553,7 @@ function refreshAllUI() {
             customAlertBox.classList.remove('hidden');
             customAlertBox.innerHTML = `
                 <div class="text-xs space-y-2">
-                    <p class="font-bold text-[#8f4452]">✨ 獨立專屬活動通知（與上方週三／週六場次互不影響）：</p>
+                    <p class="font-bold text-[#8f4452]">✨ 獨立專屬活動通知（與上方週二／週四／週六場次互不影響）：</p>
                     ${statusLines.map(line => `<p>${line}</p>`).join('')}
                 </div>
             `;

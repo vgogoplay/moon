@@ -673,7 +673,7 @@ function syncFromSharedStorage() {
         const curSched = getBatchScheduleInfo(getCurrentBatchNumber());
         const periodBadgeEl = document.getElementById('currentPeriodBadge');
         if (periodBadgeEl) {
-            periodBadgeEl.textContent = `目前開放：${curSched.batchPrefix}（${curSched.wedDateStr}(三) / ${curSched.satDateStr}(六)）`;
+            periodBadgeEl.textContent = `目前開放：${curSched.batchPrefix}（${curSched.tueDateStr}(二) / ${curSched.thuDateStr}(四) / ${curSched.satDateStr}(六)）`;
         }
     }
 }
@@ -722,7 +722,7 @@ function applyBackendTestEvent(cmd, latestUsers) {
         appState.friends.push({
             id: newMockId,
             nickname: chosenName,
-            sessionLabel: getBatchScheduleInfo(getCurrentBatchNumber() + mockIndex + 1).wedLabel,
+            sessionLabel: getBatchScheduleInfo(getCurrentBatchNumber() + mockIndex + 1).tueLabel,
             matchedAt: now,
             myContinue: false,
             partnerContinue: false,
@@ -892,7 +892,7 @@ function switchTab(tabName) {
     }
 }
 
-// ==================== 週三 (3) 與週六 (6) 20:00 倒數計時 ====================
+// ==================== 週二 (2)、週四 (4) 與週六 (6) 20:00 倒數計時 ====================
 let lastRegularSessionCutoffSig = '';
 
 function updateNextMatchCountdown() {
@@ -900,9 +900,10 @@ function updateNextMatchCountdown() {
     const nowMs = now.getTime();
     if (typeof getBatchScheduleInfo === 'function' && typeof getCurrentBatchNumber === 'function' && typeof isRegularSessionRegistrationClosed === 'function') {
         const curSched = getBatchScheduleInfo(getCurrentBatchNumber());
-        const wedClosed = isRegularSessionRegistrationClosed(curSched.wedLabel, nowMs);
+        const tueClosed = isRegularSessionRegistrationClosed(curSched.tueLabel, nowMs);
+        const thuClosed = isRegularSessionRegistrationClosed(curSched.thuLabel, nowMs);
         const satClosed = isRegularSessionRegistrationClosed(curSched.satLabel, nowMs);
-        const cutoffSig = `${curSched.batch}:${wedClosed}:${satClosed}`;
+        const cutoffSig = `${curSched.batch}:${tueClosed}:${thuClosed}:${satClosed}`;
         if (lastRegularSessionCutoffSig && cutoffSig !== lastRegularSessionCutoffSig) {
             lastRegularSessionCutoffSig = cutoffSig;
             if (typeof refreshAllUI === 'function') refreshAllUI();
@@ -917,11 +918,11 @@ function updateNextMatchCountdown() {
     let target = new Date(now);
     target.setHours(20, 0, 0, 0);
 
-    if ((target.getDay() === 3 || target.getDay() === 6) && now >= target) {
+    if ([2, 4, 6].includes(target.getDay()) && now >= target) {
         target.setDate(target.getDate() + 1);
     }
 
-    while (target.getDay() !== 3 && target.getDay() !== 6) {
+    while (![2, 4, 6].includes(target.getDay())) {
         target.setDate(target.getDate() + 1);
     }
 
@@ -931,7 +932,8 @@ function updateNextMatchCountdown() {
     const mins = Math.floor((diff / (1000 * 60)) % 60);
     const secs = Math.floor((diff / 1000) % 60);
 
-    const dayLabel = target.getDay() === 3 ? '週三' : '週六';
+    const dayMap = { 2: '週二', 4: '週四', 6: '週六' };
+    const dayLabel = dayMap[target.getDay()] || '週二';
     document.getElementById('nextMatchCountdown').textContent =
         `${dayLabel} 20:00｜${days}天 ${String(hours).padStart(2, '0')}時 ${String(mins).padStart(2, '0')}分 ${String(secs).padStart(2, '0')}秒`;
 }
