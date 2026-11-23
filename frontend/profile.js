@@ -1286,7 +1286,9 @@ async function restoreFromBackupCode() {
     loadedState.privacy.ig = 'closed';
 
     if (Array.isArray(matchedUser.registeredSessions)) {
-        loadedState.registeredSessions = Array.from(new Set(matchedUser.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+        loadedState.registeredSessions = (typeof normalizeRegisteredSessionsList === 'function')
+            ? normalizeRegisteredSessionsList(matchedUser.registeredSessions)
+            : Array.from(new Set(matchedUser.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
     } else {
         loadedState.registeredSessions = [];
     }

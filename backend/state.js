@@ -350,7 +350,9 @@ function getUsers() {
         if (!u || typeof u !== 'object') return;
         let userMigrated = false;
         if (Array.isArray(u.registeredSessions)) {
-            const norm = Array.from(new Set(u.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+            const norm = (typeof normalizeRegisteredSessionsList === 'function')
+                ? normalizeRegisteredSessionsList(u.registeredSessions)
+                : Array.from(new Set(u.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
             if (JSON.stringify(norm) !== JSON.stringify(u.registeredSessions)) {
                 u.registeredSessions = norm;
                 userMigrated = true;
@@ -1428,6 +1430,20 @@ async function unlockAdminUI() {
     CloudSync.init(() => {
         renderAdminAll(false);
     }).then(() => {
+        if (typeof CloudSync !== 'undefined' && CloudSync._migratedRegSessionUserIds && CloudSync._migratedRegSessionUserIds.size > 0 && CloudSync.inFlightWrites === 0) {
+            const idsToPatch = Array.from(CloudSync._migratedRegSessionUserIds);
+            CloudSync._migratedRegSessionUserIds.clear();
+            const latestUsers = getUsers();
+            idsToPatch.forEach(pid => {
+                const targetU = latestUsers.find(u => u && String(u.id).trim() === pid);
+                if (targetU && typeof CloudSync.patchUserFields === 'function') {
+                    CloudSync.patchUserFields(pid, {
+                        registeredSessions: targetU.registeredSessions || [],
+                        registeredSession: null
+                    }, targetU);
+                }
+            });
+        }
         if (typeof checkAutoSchedule2000 === 'function') {
             checkAutoSchedule2000();
         }

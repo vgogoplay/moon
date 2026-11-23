@@ -1318,7 +1318,9 @@ function refreshAllUI() {
         isSatClosedNow ? sched.satLabel : ''
     ].filter(Boolean);
 
-    const normalizedAllSessions = Array.from(new Set((appState.registeredSessions || []).map(s => normalizeSessionLabel(s)).filter(Boolean)));
+    const normalizedAllSessions = (typeof normalizeRegisteredSessionsList === 'function')
+        ? normalizeRegisteredSessionsList(appState.registeredSessions || [])
+        : Array.from(new Set((appState.registeredSessions || []).map(s => normalizeSessionLabel(s)).filter(Boolean)));
     const currentBatchSessions = normalizedAllSessions.filter(s =>
         sched.sessions.some(target => isSameSession(s, target)) &&
         !(typeof isRegularSessionRegistrationClosed === 'function' && isRegularSessionRegistrationClosed(s, nowRefreshTs))

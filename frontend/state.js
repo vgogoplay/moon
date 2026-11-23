@@ -397,10 +397,14 @@ function syncFromSharedStorage() {
                 stateChanged = true;
             }
 
-            // 同步並正規化前後台已儲存的報名場次與條件（Firebase RTDB 會省略空陣列 []，故 undefined 視同 []）
+            // 同步並正規化前後台已儲存的報名場次與條件（Firebase RTDB 會省略空陣列 []，故 undefined 視同 []；第3屆(三)自動轉為(二)+(四)）
             const rawCloudSessions = Array.isArray(me.registeredSessions) ? me.registeredSessions : [];
-            const normUserSessions = Array.from(new Set(rawCloudSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
-            const normAppSessions = Array.from(new Set((appState.registeredSessions || []).map(s => normalizeSessionLabel(s)).filter(Boolean)));
+            const normUserSessions = (typeof normalizeRegisteredSessionsList === 'function')
+                ? normalizeRegisteredSessionsList(rawCloudSessions)
+                : Array.from(new Set(rawCloudSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+            const normAppSessions = (typeof normalizeRegisteredSessionsList === 'function')
+                ? normalizeRegisteredSessionsList(appState.registeredSessions || [])
+                : Array.from(new Set((appState.registeredSessions || []).map(s => normalizeSessionLabel(s)).filter(Boolean)));
             if (JSON.stringify(normUserSessions) !== JSON.stringify(normAppSessions)) {
                 delete appState.registeredSession;
                 appState.registeredSessions = normUserSessions;
@@ -409,6 +413,9 @@ function syncFromSharedStorage() {
                 if (regModalEl && !regModalEl.classList.contains('hidden') && typeof openRegisterModal === 'function') {
                     openRegisterModal();
                 }
+            }
+            if (JSON.stringify(rawCloudSessions) !== JSON.stringify(normUserSessions) && typeof CloudSync !== 'undefined' && CloudSync.initialized && typeof CloudSync.patchUserFields === 'function') {
+                CloudSync.patchUserFields(me.id, { registeredSessions: normUserSessions, registeredSession: null }, me);
             }
 
             const cloudExactCriteria = (me.exactMatchCriteria && typeof me.exactMatchCriteria === 'object' && !Array.isArray(me.exactMatchCriteria))
