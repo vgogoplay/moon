@@ -25,10 +25,14 @@ function updateMailboxBadge() {
     }
 }
 
-function openMailboxModal() {
+async function openMailboxModal() {
     backToMailboxList();
     renderMailboxList();
     document.getElementById('mailboxModal').classList.remove('hidden');
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized && !CloudSync.isLocalSandboxMode() && typeof CloudSync.pollPlayerNodes === 'function') {
+        await CloudSync.pollPlayerNodes([MAILBOX_KEY]);
+        syncOpenMailboxModalView();
+    }
 }
 
 let currentViewingMailId = null;

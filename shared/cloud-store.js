@@ -1465,8 +1465,8 @@ const CloudSync = {
 
     // ===================== 方案 C：前後台省流混合同步（閒置降頻 + 跨頁 ETag 快取 + 後台按頁讀取） =====================
     PLAYER_SYNC_ENABLED: true,
-    PLAYER_HOT_NODES: ['yuelao_user_index', 'yuelao_mailbox', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_system_batch', 'yuelao_custom_activities'],
-    PLAYER_COLD_NODES: ['yuelao_reports', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
+    PLAYER_HOT_NODES: ['yuelao_system_batch', 'yuelao_custom_activities'],
+    PLAYER_COLD_NODES: ['yuelao_user_index', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
     PLAYER_HOT_INTERVAL_MS: 75000,   // P2：熱門節點每 75 秒 + 隨機抖動檢查一次
     PLAYER_COLD_INTERVAL_MS: 240000, // 冷門節點每 4 分鐘檢查一次（3~5 分鐘區間）
     PLAYER_IDLE_TIMEOUT_MS: 180000,  // 超過 3 分鐘無滑動／點擊／輸入即自動暫停輪詢
@@ -2258,8 +2258,9 @@ const CloudSync = {
         this.applyTreeToLocalStorage();
         this.updateCloudBadge(true);
         this.ensurePlayerDerivedNodes().catch(() => {});
-        // 冷門節點於首屏渲染後背景載入，不阻塞首次開啟
-        this.fetchPlayerPaths(this.PLAYER_COLD_NODES).then(() => {
+        // 冷門節點於首屏渲染後背景載入，不阻塞首次開啟（排除第一階段已讀取節點）
+        const restCold = this.PLAYER_COLD_NODES.filter(p => !earlyNodes.includes(p));
+        this.fetchPlayerPaths(restCold).then(() => {
             this.composePlayerUsers();
             this.chatsTreeVersion++;
             this.applyTreeToLocalStorage();
