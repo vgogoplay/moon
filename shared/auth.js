@@ -249,11 +249,18 @@ const yuelaoAuth = {
         }
         if (!this.isEnabled()) return null;
         this.loadSession();
-        try {
-            if (this.session && this.session.refreshToken) await this.refreshSession();
-            else await this.signInAnonymously();
-        } catch (e) {
-            try { await this.signInAnonymously(); } catch (err) { console.warn('[auth] 匿名登入失敗', err); }
+        const hasFreshToken = Boolean(
+            this.session &&
+            this.session.idToken &&
+            Date.now() < Number(this.session.expiresAt || 0) - 10 * 60 * 1000
+        );
+        if (!hasFreshToken) {
+            try {
+                if (this.session && this.session.refreshToken) await this.refreshSession();
+                else await this.signInAnonymously();
+            } catch (e) {
+                try { await this.signInAnonymously(); } catch (err) { console.warn('[auth] 匿名登入失敗', err); }
+            }
         }
         this.startRefreshTimer();
         if (this.isBackendPage() && this.loadAdminSession()) {

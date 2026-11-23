@@ -1483,7 +1483,9 @@ const CloudSync = {
     _hiddenRoomPath: '',
     activeRoomEs: null,
     activeRoomFallbackTimer: null,
-    _chatIndexUnsupported: false,
+    _chatIndexUnsupported: (() => {
+        try { return sessionStorage.getItem('yuelao_chat_idx_unsupported_v1') === '1'; } catch (e) { return false; }
+    })(),
     playerTimersStarted: false,
     lastUserActivityAt: Date.now(),
     isPlayerIdlePaused: false,
@@ -1867,6 +1869,7 @@ const CloudSync = {
             if (res.status === 400 && queryParams && !options._noQuery) {
                 // Firebase 規則尚未設定 yuelao_chats 的 .indexOn: ["ts"] 時，自動改用一般 ETag 讀取整間聊天室（上限 200 則）
                 this._chatIndexUnsupported = true;
+                try { sessionStorage.setItem('yuelao_chat_idx_unsupported_v1', '1'); } catch (e) {}
                 return this.conditionalGetNode(path, { ...options, _noQuery: true });
             }
             if (!res.ok) {
@@ -2235,6 +2238,7 @@ const CloudSync = {
                 if (useIndexedQuery && !openedOnce) {
                     // 若 Firebase 規則尚未加入 .indexOn: ["ts"] 導致 SSE 回 400，立即改用無 orderBy 的即時串流
                     this._chatIndexUnsupported = true;
+                    try { sessionStorage.setItem('yuelao_chat_idx_unsupported_v1', '1'); } catch (e) {}
                     try { es.close(); } catch (err) {}
                     if (this.activeRoomEs === es) {
                         this.activeRoomEs = null;
@@ -2272,9 +2276,9 @@ const CloudSync = {
             await new Promise(r => setTimeout(r, 500));
             await this.fetchPlayerPaths([CUSTOM_ACTIVITIES_KEY]);
         }
-        // 第二階段：其餘熱門節點與聊天室（依本人記錄的配對名單決定，重整時直接載入各房最新 30 則訊息）
-        const restHot = this.PLAYER_HOT_NODES.filter(p => !earlyNodes.includes(p));
-        await this.fetchPlayerPaths([...restHot, ...this.playerDynamicPaths()], { chatLimit: 30 });
+        // 第二階段：其餘熱門節點與聊天室（排除第一階段已抓過的本人節點，首頁僅檢查最新 1 則以顯示未讀紅點）
+        const secondStagePaths = [...this.PLAYER_HOT_NODES, ...this.playerDynamicPaths()].filter(p => !earlyNodes.includes(p));
+        await this.fetchPlayerPaths(secondStagePaths, { chatLimit: 1 });
         this.composePlayerUsers();
         this.hasLoadedFullTree = true;
         this.initialized = true;
@@ -2866,18 +2870,45 @@ const CloudSync = {
         return Array.from(set);
     },
 
-    // 比對本地已知的配對節點，只把內容真正不同的項目加入寫入計畫（冪等）
+    DERIVED_SYNC_SIGS_KEY: 'yuelao_derived_sync_sigs_v1',
+    derivedSyncSigs: null,
+
+    loadDerivedSyncSigs() {
+        if (this.derivedSyncSigs && typeof this.derivedSyncSigs === 'object') return this.derivedSyncSigs;
+        try {
+            const raw = localStorage.getItem(this.DERIVED_SYNC_SIGS_KEY);
+            const parsed = raw ? JSON.parse(raw) : {};
+            this.derivedSyncSigs = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (e) {
+            this.derivedSyncSigs = {};
+        }
+        return this.derivedSyncSigs;
+    },
+
+    saveDerivedSyncSigs() {
+        if (!this.derivedSyncSigs) return;
+        try {
+            localStorage.setItem(this.DERIVED_SYNC_SIGS_KEY, JSON.stringify(this.derivedSyncSigs));
+        } catch (e) {}
+    },
+
+    // 比對本地已知與已同步簽章的配對節點，只把內容真正不同的項目加入寫入計畫（冪等，避免重整重複 PUT）
     pairWritePlan(ownerId, ownerRecord, pk, plan) {
         const tree = this.tree || {};
+        const sigs = this.loadDerivedSyncSigs();
         const profile = buildPairProfileRecord(ownerRecord);
         const ig = buildPairIgRecord(ownerRecord);
+        const profPath = `${PAIR_PROFILES_KEY}/${pk}/${ownerId}`;
+        const igPath = `${PAIR_IG_KEY}/${pk}/${ownerId}`;
         const curP = tree[PAIR_PROFILES_KEY] && tree[PAIR_PROFILES_KEY][pk] ? tree[PAIR_PROFILES_KEY][pk][ownerId] : null;
         const curI = tree[PAIR_IG_KEY] && tree[PAIR_IG_KEY][pk] ? tree[PAIR_IG_KEY][pk][ownerId] : null;
-        if (profile && canonJson(profile) !== canonJson(curP || null)) {
-            plan.push([`${PAIR_PROFILES_KEY}/${pk}/${ownerId}`, profile]);
+        const nextPSig = canonJson(profile);
+        const nextISig = canonJson(ig);
+        if (profile && nextPSig !== canonJson(curP || null) && sigs[profPath] !== nextPSig) {
+            plan.push([profPath, profile, nextPSig]);
         }
-        if (canonJson(ig) !== canonJson(curI || null)) {
-            plan.push([`${PAIR_IG_KEY}/${pk}/${ownerId}`, ig]);
+        if (nextISig !== canonJson(curI || null) && sigs[igPath] !== nextISig) {
+            plan.push([igPath, ig, nextISig]);
         }
     },
 
@@ -2886,11 +2917,14 @@ const CloudSync = {
         const ownerId = String(pid || '').trim();
         if (!ownerId || !record || typeof record !== 'object') return 0;
         const tree = this.tree || {};
+        const sigs = this.loadDerivedSyncSigs();
         const plan = [];
         const idx = buildUserIndexRecord(record);
+        const idxPath = `${USER_INDEX_KEY}/${ownerId}`;
         const curIdx = tree[USER_INDEX_KEY] ? tree[USER_INDEX_KEY][ownerId] : null;
-        if (idx && canonJson(idx) !== canonJson(curIdx || null)) {
-            plan.push([`${USER_INDEX_KEY}/${ownerId}`, idx]);
+        const nextIdxSig = canonJson(idx);
+        if (idx && nextIdxSig !== canonJson(curIdx || null) && sigs[idxPath] !== nextIdxSig) {
+            plan.push([idxPath, idx, nextIdxSig]);
         }
         this.partnerIdsOf(record).forEach(partnerId => {
             const pk = this.pairKeyOf(ownerId, partnerId);
@@ -2903,11 +2937,18 @@ const CloudSync = {
             }
         });
         const unique = new Map();
-        plan.forEach(([path, value]) => unique.set(path, value));
+        plan.forEach(([path, value, sig]) => unique.set(path, { value, sig }));
         const entries = Array.from(unique.entries());
-        for (const [path, value] of entries) {
-            await this.putNode(path, value);
+        if (entries.length === 0) return 0;
+        let sigsChanged = false;
+        for (const [path, { value, sig }] of entries) {
+            const ok = await this.putNode(path, value);
+            if (ok) {
+                sigs[path] = sig;
+                sigsChanged = true;
+            }
         }
+        if (sigsChanged) this.saveDerivedSyncSigs();
         return entries.length;
     },
 
