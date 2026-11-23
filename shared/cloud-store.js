@@ -1466,9 +1466,11 @@ const CloudSync = {
     // ===================== 方案 C：前後台省流混合同步（閒置降頻 + 跨頁 ETag 快取 + 後台按頁讀取） =====================
     PLAYER_SYNC_ENABLED: true,
     PLAYER_HOT_NODES: ['yuelao_system_batch', 'yuelao_custom_activities'],
-    PLAYER_COLD_NODES: ['yuelao_user_index', 'yuelao_wish_wall', 'yuelao_fate_wall', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
+    PLAYER_COLD_NODES: ['yuelao_wish_wall', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_banned_rules', 'yuelao_unmatched_pairs'],
     PLAYER_HOT_INTERVAL_MS: 75000,   // P2：熱門節點每 75 秒 + 隨機抖動檢查一次
     PLAYER_COLD_INTERVAL_MS: 240000, // 冷門節點每 4 分鐘檢查一次（3~5 分鐘區間）
+    PLAYER_USER_INDEX_INTERVAL_MS: 1800000, // 男女比例與 MBTI 統計索引每 30 分鐘檢查一次
+    lastUserIndexPolledAt: 0,
     PLAYER_IDLE_TIMEOUT_MS: 180000,  // 超過 3 分鐘無滑動／點擊／輸入即自動暫停輪詢
     BACKEND_POLL_INTERVAL_MS: 60000, // P2：後台僅輪詢當前頁面所需節點，每 60 秒檢查一次
     BACKEND_IDLE_TIMEOUT_MS: 300000, // 後台超過 5 分鐘無操作自動暫停輪詢
@@ -2033,6 +2035,9 @@ const CloudSync = {
 
     async fetchPlayerPaths(paths, options = {}) {
         const unique = Array.from(new Set((paths || []).filter(Boolean)));
+        if (unique.includes(USER_INDEX_KEY)) {
+            this.lastUserIndexPolledAt = Date.now();
+        }
         await Promise.all(unique.map(p => {
             const getOpts = (p.startsWith(CHATS_KEY + '/') && !this.isBackendContext() && options.chatLimit)
                 ? { limit: Number(options.chatLimit) }
@@ -2061,6 +2066,9 @@ const CloudSync = {
             return;
         }
         const unique = Array.from(new Set(paths.filter(Boolean)));
+        if (unique.includes(USER_INDEX_KEY)) {
+            this.lastUserIndexPolledAt = Date.now();
+        }
         const results = await Promise.all(unique.map(p => this.conditionalGetNode(p).then(r => ({ p, r }))));
         let changed = false;
         results.forEach(({ p, r }) => {
@@ -2100,7 +2108,10 @@ const CloudSync = {
     },
 
     pollPlayerCold() {
+        const now = Date.now();
+        const needUserIndex = (now - Number(this.lastUserIndexPolledAt || 0)) >= this.PLAYER_USER_INDEX_INTERVAL_MS;
         const coldDyn = [
+            ...(needUserIndex ? [USER_INDEX_KEY] : []),
             ...this.playerColdDynamicPaths(),
             ...this.playerHotDynamicPaths(true).filter(p => p.startsWith(`${CHATS_KEY}/`) && p !== this.activeRoomPath)
         ];
@@ -2258,8 +2269,8 @@ const CloudSync = {
         this.applyTreeToLocalStorage();
         this.updateCloudBadge(true);
         this.ensurePlayerDerivedNodes().catch(() => {});
-        // 冷門節點於首屏渲染後背景載入，不阻塞首次開啟（排除第一階段已讀取節點）
-        const restCold = this.PLAYER_COLD_NODES.filter(p => !earlyNodes.includes(p));
+        // 冷門節點與緣分動態牆於首屏渲染後背景載入一次，不阻塞首次開啟（排除第一階段已讀取節點）
+        const restCold = Array.from(new Set([FATE_WALL_KEY, ...this.PLAYER_COLD_NODES])).filter(p => !earlyNodes.includes(p));
         this.fetchPlayerPaths(restCold).then(() => {
             this.composePlayerUsers();
             this.chatsTreeVersion++;
@@ -2602,7 +2613,7 @@ const CloudSync = {
     async refreshPlayerFresh() {
         if (this.isLocalSandboxMode()) return true;
         const me = this.playerSelfId();
-        const paths = [USER_INDEX_KEY, ...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES, ...(me ? [`${USERS_KEY}/${me}`] : []), ...this.playerDynamicPaths()];
+        const paths = [USER_INDEX_KEY, FATE_WALL_KEY, ...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES, ...(me ? [`${USERS_KEY}/${me}`] : []), ...this.playerDynamicPaths()];
         await this.fetchPlayerPaths(paths);
         this.composePlayerUsers();
         this.chatsTreeVersion++;
