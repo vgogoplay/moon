@@ -600,17 +600,33 @@ const CloudSync = {
             if (!prev) {
                 byPartner.set(pid, normalizedItem);
             } else {
-                const mergedVotes = Array.from(new Set([...(prev.continueVotes || []), ...votes]));
                 const mergedForceProtect = Boolean(prev.isForceRepaired || normalizedItem.isForceRepaired);
                 const chosenSession = (String(prev.session || '').includes('・強制補齊') ? prev.session : normalizedItem.session) || prev.session;
                 const chosenDetail = (String(prev.matchDetail || '').includes('強制補齊') ? prev.matchDetail : normalizedItem.matchDetail) || prev.matchDetail || (mergedForceProtect ? '・強制補齊' : '');
+                
+                const mergedIgUnlocked = Boolean(prev.igUnlocked || normalizedItem.igUnlocked);
+                const prevTs = Number(prev.matchedAt || 0);
+                const nextTs = Number(normalizedItem.matchedAt || 0);
+                const isExtended = Boolean(
+                    (normalizedItem.igUnlocked && !prev.igUnlocked && nextTs > prevTs) ||
+                    (mergedIgUnlocked && nextTs > prevTs && Array.isArray(normalizedItem.continueVotes) && normalizedItem.continueVotes.length === 0)
+                );
+                const resolvedMatchedAt = isExtended
+                    ? nextTs
+                    : (mergedIgUnlocked
+                        ? (Math.max(prevTs, nextTs) || Date.now())
+                        : (Math.min(prevTs || Infinity, nextTs || Infinity) || Date.now()));
+                const mergedVotes = isExtended
+                    ? []
+                    : Array.from(new Set([...(prev.continueVotes || []), ...votes]));
+                    
                 const mergedObj = {
                     ...prev,
                     ...normalizedItem,
                     partnerName: normalizedItem.partnerName || prev.partnerName,
                     session: chosenSession,
-                    matchedAt: Math.min(Number(prev.matchedAt || 0) || Infinity, Number(normalizedItem.matchedAt || 0) || Infinity) || Date.now(),
-                    igUnlocked: Boolean(prev.igUnlocked || normalizedItem.igUnlocked),
+                    matchedAt: resolvedMatchedAt,
+                    igUnlocked: mergedIgUnlocked,
                     isForceRepaired: mergedForceProtect,
                     continueVotes: mergedVotes
                 };
@@ -1813,7 +1829,7 @@ const CloudSync = {
         let chatLimitMode = 0;
         if (path.startsWith(CHATS_KEY + '/') && !this.isBackendContext()) {
             if (!this._chatIndexUnsupported && !options._noQuery) {
-                chatLimitMode = Number(options.limit) || (path === this.activeRoomPath ? 50 : 1);
+                chatLimitMode = Number(options.limit) || (path === this.activeRoomPath ? 30 : 1);
                 queryParams = `orderBy="ts"&limitToLast=${chatLimitMode}`;
                 etagCacheKey = `${path}::last${chatLimitMode}`;
             } else {
@@ -1946,7 +1962,7 @@ const CloudSync = {
         return this.syncDerivedNodesFor(me, rec, { bothSides: false });
     },
 
-    mergeChatRoomSnapshot(roomPath, data, limitMode = 50) {
+    mergeChatRoomSnapshot(roomPath, data, limitMode = 30) {
         const clean = String(roomPath || '').replace(/^\/+|\/+$/g, '');
         const parts = clean.split('/');
         if (parts[0] !== CHATS_KEY || !parts[1]) {
@@ -2002,10 +2018,10 @@ const CloudSync = {
         this.tree[CHATS_KEY][pairKey] = trimmedMap;
         this.chatsTreeVersion++;
 
-        // 若背景以 limit=1 發現該聊天室有新訊息，清除 ::last50 ETag，確保玩家點開該房時必抓取完整最新 50 則
+        // 若背景以 limit=1 發現該聊天室有新訊息，清除 ::last30 ETag，確保玩家點開該房時必抓取完整最新 30 則
         if (Number(limitMode) === 1 && hasNewOrUpdated) {
             const cache = this.loadPersistedEtags();
-            const fullKey = `${clean}::last50`;
+            const fullKey = `${clean}::last30`;
             if (cache[fullKey]) {
                 delete cache[fullKey];
                 this.savePersistedEtags();
@@ -2108,9 +2124,10 @@ const CloudSync = {
     async fetchActiveChatRoomNow(roomPath, options = {}) {
         if (!roomPath || this.isLocalSandboxMode() || !this.isPlayerSyncMode()) return false;
         if (this.inFlightWrites > 0) return false;
-        const r = await this.conditionalGetNode(roomPath, { limit: 50, force: Boolean(options.force) });
+        const targetLimit = Number(options.limit) || 30;
+        const r = await this.conditionalGetNode(roomPath, { limit: targetLimit, force: Boolean(options.force) });
         if (r.status === 'changed') {
-            const changed = this.mergeChatRoomSnapshot(roomPath, r.data, 50);
+            const changed = this.mergeChatRoomSnapshot(roomPath, r.data, targetLimit);
             this.applyTreeToLocalStorage();
             if (changed && typeof this.onUpdateCallback === 'function') {
                 this.onUpdateCallback();
@@ -2138,7 +2155,7 @@ const CloudSync = {
 
     setActiveChatRoom(roomPath) {
         if (this.isLocalSandboxMode()) return;
-        // 只對「目前開啟的單一聊天室」建立 SSE 並立即拉取最新 50 則；切換聊天室或分頁隱藏時關閉
+        // 只對「目前開啟的單一聊天室」建立 SSE 並立即拉取最新 30 則；切換聊天室或分頁隱藏時關閉
         if (!this.isPlayerSyncMode()) return;
         if (this.isPlayerIdlePaused) {
             this._pausedRoomPath = roomPath || '';
@@ -2149,7 +2166,7 @@ const CloudSync = {
         if (!roomPath) return;
         this.activeRoomPath = roomPath;
 
-        // 無論手機瀏覽器 SSE 是否順暢，切入或重新進入聊天室時立即主動以 ETag 拉取最新 50 則
+        // 無論手機瀏覽器 SSE 是否順暢，切入或重新進入聊天室時立即主動以 ETag 拉取最新 30 則
         this.fetchActiveChatRoomNow(roomPath);
 
         if (typeof EventSource === 'undefined') {
@@ -2162,7 +2179,7 @@ const CloudSync = {
                 if (!payload) return;
                 const rel = String(payload.path || '/').replace(/^\/+|\/+$/g, '');
                 if (!rel) {
-                    this.mergeChatRoomSnapshot(roomPath, payload.data, 50);
+                    this.mergeChatRoomSnapshot(roomPath, payload.data, 30);
                 } else {
                     const base = `${roomPath}/${rel}`;
                     if (e.type === 'patch' && payload.data && typeof payload.data === 'object') {
@@ -2180,7 +2197,7 @@ const CloudSync = {
             const aq = this.authQuery();
             const sep = aq ? '&' : '?';
             const streamUrl = useIndexedQuery
-                ? `${this.dbUrl}/${this.encodePath(roomPath)}.json${aq}${sep}orderBy="ts"&limitToLast=50`
+                ? `${this.dbUrl}/${this.encodePath(roomPath)}.json${aq}${sep}orderBy="ts"&limitToLast=30`
                 : `${this.dbUrl}/${this.encodePath(roomPath)}.json${aq}`;
             let openedOnce = false;
             const es = new EventSource(streamUrl);
@@ -2232,9 +2249,9 @@ const CloudSync = {
             await new Promise(r => setTimeout(r, 500));
             await this.fetchPlayerPaths([CUSTOM_ACTIVITIES_KEY]);
         }
-        // 第二階段：其餘熱門節點與聊天室（依本人記錄的配對名單決定，重整時直接載入各房最新 50 則訊息）
+        // 第二階段：其餘熱門節點與聊天室（依本人記錄的配對名單決定，重整時直接載入各房最新 30 則訊息）
         const restHot = this.PLAYER_HOT_NODES.filter(p => !earlyNodes.includes(p));
-        await this.fetchPlayerPaths([...restHot, ...this.playerDynamicPaths()], { chatLimit: 50 });
+        await this.fetchPlayerPaths([...restHot, ...this.playerDynamicPaths()], { chatLimit: 30 });
         this.composePlayerUsers();
         this.hasLoadedFullTree = true;
         this.initialized = true;

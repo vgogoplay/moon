@@ -343,16 +343,6 @@
                         <p class="text-xs font-bold text-rose-700">🚫 目前聊天室已禁止發話，請聯繫管理員</p>
                     </div>
 
-                    <!-- 20:00 心動抉擇未完成時的聊天鎖定橫幅 -->
-                    <div id="confessionLockBanner" class="hidden mb-3 p-3.5 rounded-2xl bg-rose-50 border border-rose-300 flex flex-wrap items-center justify-between gap-2">
-                        <p class="text-xs font-semibold text-[#8f4452]">
-                            🔒 已觸發今日 20:00 心動抉擇，完成選擇後才能繼續在好友名單上聊天！
-                        </p>
-                        <button type="button" onclick="openEveningConfessionModal()" class="btn-sakura px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0">
-                            💘 立即選擇心動對象
-                        </button>
-                    </div>
-
                     <!-- 剩餘 0 天到期續緣詢問橫幅（觸發時聊天室禁止發話） -->
                     <div id="sevenDayDecisionBanner" class="hidden mb-3 p-4 rounded-2xl bg-gradient-to-r from-rose-50 to-pink-100 border border-pink-300 space-y-2.5">
                         <p class="text-sm font-bold font-serif-jp text-[#8f4452]">⏳ 剩餘 0 天！你們要不要繼續配對？</p>
@@ -1050,13 +1040,13 @@
     <script src="shared/schedule.js?v=20261122sunbatch"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261120opt"></script>
-    <script src="shared/cloud-store.js?v=20261122chatsync2"></script>
+    <script src="shared/cloud-store.js?v=20261122continue"></script>
     <!-- 前台功能模組 -->
     <script src="frontend/forum.js?v=20261121guest"></script>
   <script src="frontend/state.js?v=20261122chatsync2"></script>
     <script src="frontend/profile.js?v=20261122quota"></script>
     <script src="frontend/activities.js?v=20261121moffset"></script>
-    <script src="frontend/friends-chat.js?v=20261121mhistfix"></script>
+    <script src="frontend/friends-chat.js?v=20261122continue"></script>
     <script src="frontend/wishes.js?v=20261121pin10px"></script>
 </body>
 </html>

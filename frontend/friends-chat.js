@@ -880,14 +880,46 @@ function resetChatVisibleBatch(scrollBottom = true) {
     }
 }
 
-function loadMoreOlderChatMessages() {
+async function loadMoreOlderChatMessages() {
     const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
     if (!friend || !Array.isArray(friend.messages)) return;
-    if (chatVisibleBatchLimit >= friend.messages.length) return;
 
-    chatVisibleBatchLimit = Math.min(friend.messages.length, chatVisibleBatchLimit + CHAT_BATCH_STEP);
-    pendingPreserveScrollOnPrepend = true;
-    renderActiveFriendWorkspace();
+    if (chatVisibleBatchLimit < friend.messages.length) {
+        chatVisibleBatchLimit = Math.min(friend.messages.length, chatVisibleBatchLimit + CHAT_BATCH_STEP);
+        pendingPreserveScrollOnPrepend = true;
+        renderActiveFriendWorkspace();
+        return;
+    }
+
+    const isRealFriend = !String(friend.id).startsWith('MOCK_FRIEND_') && Boolean(appState && appState.playerId);
+    if (
+        isRealFriend &&
+        !friend._fetchingOlderCloud &&
+        !friend._noMoreCloudHistory &&
+        friend.messages.length >= CHAT_BATCH_STEP &&
+        friend.messages.length < 200 &&
+        typeof CloudSync !== 'undefined' &&
+        typeof CloudSync.fetchActiveChatRoomNow === 'function'
+    ) {
+        friend._fetchingOlderCloud = true;
+        const nextCloudLimit = Math.min(200, friend.messages.length + CHAT_BATCH_STEP);
+        const roomPath = `${CHATS_KEY}/${ChatStore.getPairKey(appState.playerId, friend.id)}`;
+        try {
+            const changed = await CloudSync.fetchActiveChatRoomNow(roomPath, { limit: nextCloudLimit, force: true });
+            const latestMsgs = ChatStore.getMessages(appState.playerId, friend.id);
+            if (changed && latestMsgs.length > friend.messages.length) {
+                friend.messages = latestMsgs;
+                chatVisibleBatchLimit = Math.min(latestMsgs.length, chatVisibleBatchLimit + CHAT_BATCH_STEP);
+                pendingPreserveScrollOnPrepend = true;
+                renderActiveFriendWorkspace();
+            } else {
+                friend._noMoreCloudHistory = true;
+                renderActiveFriendWorkspace();
+            }
+        } finally {
+            friend._fetchingOlderCloud = false;
+        }
+    }
 }
 
 function ensureChatBoxScrollPagination(chatBox) {
@@ -899,11 +931,19 @@ function ensureChatBoxScrollPagination(chatBox) {
         if (chatBox.scrollTop > 24) return;
 
         const now = Date.now();
-        if (now - lastChatPrependTriggerTs < 200) return;
+        if (now - lastChatPrependTriggerTs < 250) return;
 
         const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
         if (!friend || !Array.isArray(friend.messages)) return;
-        if (chatVisibleBatchLimit >= friend.messages.length) return;
+        const canFetchMoreCloud = (
+            !String(friend.id).startsWith('MOCK_FRIEND_') &&
+            Boolean(appState && appState.playerId) &&
+            !friend._fetchingOlderCloud &&
+            !friend._noMoreCloudHistory &&
+            friend.messages.length >= CHAT_BATCH_STEP &&
+            friend.messages.length < 200
+        );
+        if (chatVisibleBatchLimit >= friend.messages.length && !canFetchMoreCloud) return;
 
         lastChatPrependTriggerTs = now;
         loadMoreOlderChatMessages();
@@ -1022,36 +1062,44 @@ function renderActiveFriendWorkspace() {
     const chatSendBtn = document.getElementById('chatSendBtn');
 
     if (isChatBanned) {
-        chatBannedBanner.classList.remove('hidden');
-        lockBanner.classList.add('hidden');
-        chatInput.disabled = true;
-        chatInput.value = '';
-        chatInput.placeholder = '🚫 請聯繫管理員';
-        chatInput.classList.add('!bg-gray-100', '!text-gray-400');
-        chatSendBtn.disabled = true;
+        if (chatBannedBanner) chatBannedBanner.classList.remove('hidden');
+        if (lockBanner) lockBanner.classList.add('hidden');
+        if (chatInput) {
+            chatInput.disabled = true;
+            chatInput.value = '';
+            chatInput.placeholder = '🚫 請聯繫管理員';
+            chatInput.classList.add('!bg-gray-100', '!text-gray-400');
+        }
+        if (chatSendBtn) chatSendBtn.disabled = true;
     } else if (pendingChoice) {
-        chatBannedBanner.classList.add('hidden');
-        lockBanner.classList.remove('hidden');
-        chatInput.disabled = true;
-        chatInput.value = '';
-        chatInput.placeholder = '🔒 請先完成 20:00 心動抉擇才能聊天...';
-        chatInput.classList.remove('!bg-gray-100', '!text-gray-400');
-        chatSendBtn.disabled = true;
+        if (chatBannedBanner) chatBannedBanner.classList.add('hidden');
+        if (lockBanner) lockBanner.classList.remove('hidden');
+        if (chatInput) {
+            chatInput.disabled = true;
+            chatInput.value = '';
+            chatInput.placeholder = '🔒 請先完成 20:00 心動抉擇才能聊天...';
+            chatInput.classList.remove('!bg-gray-100', '!text-gray-400');
+        }
+        if (chatSendBtn) chatSendBtn.disabled = true;
     } else if (isZeroDays) {
-        chatBannedBanner.classList.add('hidden');
-        lockBanner.classList.add('hidden');
-        chatInput.disabled = true;
-        chatInput.value = '';
-        chatInput.placeholder = '🚫 剩餘 0 天，聊天室已禁止發話（請先選擇是否繼續配對）';
-        chatInput.classList.remove('!bg-gray-100', '!text-gray-400');
-        chatSendBtn.disabled = true;
+        if (chatBannedBanner) chatBannedBanner.classList.add('hidden');
+        if (lockBanner) lockBanner.classList.add('hidden');
+        if (chatInput) {
+            chatInput.disabled = true;
+            chatInput.value = '';
+            chatInput.placeholder = '🚫 剩餘 0 天，聊天室已禁止發話（請先選擇是否繼續配對）';
+            chatInput.classList.remove('!bg-gray-100', '!text-gray-400');
+        }
+        if (chatSendBtn) chatSendBtn.disabled = true;
     } else {
-        chatBannedBanner.classList.add('hidden');
-        lockBanner.classList.add('hidden');
-        chatInput.disabled = false;
-        chatInput.placeholder = '寫下想對他說的話...';
-        chatInput.classList.remove('!bg-gray-100', '!text-gray-400');
-        chatSendBtn.disabled = false;
+        if (chatBannedBanner) chatBannedBanner.classList.add('hidden');
+        if (lockBanner) lockBanner.classList.add('hidden');
+        if (chatInput) {
+            chatInput.disabled = false;
+            chatInput.placeholder = '寫下想對他說的話...';
+            chatInput.classList.remove('!bg-gray-100', '!text-gray-400');
+        }
+        if (chatSendBtn) chatSendBtn.disabled = false;
     }
     updateRandomTopicButtonState();
 
@@ -1147,6 +1195,12 @@ function renderActiveFriendWorkspace() {
         if (canAppendSingleBubble) {
             chatBox.insertAdjacentHTML('beforeend', renderSingleChatBubbleHtml(lastMsgObj, friend));
         } else {
+            const canLoadMoreCloudOlder = Boolean(
+                isRealFriend &&
+                !friend._noMoreCloudHistory &&
+                totalMsgCount >= CHAT_BATCH_STEP &&
+                totalMsgCount < 200
+            );
             let topStatusHtml = '';
             if (remainingOlderCount > 0) {
                 const nextLoadCount = Math.min(CHAT_BATCH_STEP, remainingOlderCount);
@@ -1157,7 +1211,15 @@ function renderActiveFriendWorkspace() {
                         </button>
                     </div>
                 `;
-            } else if (totalMsgCount > CHAT_BATCH_STEP) {
+            } else if (canLoadMoreCloudOlder) {
+                topStatusHtml = `
+                    <div class="text-center pb-1">
+                        <button type="button" onclick="loadMoreOlderChatMessages()" class="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-pink-200 text-[11px] text-[#8f4452] font-semibold hover:bg-pink-50 transition shadow-2xs">
+                            <span>⬆️ 往上滑動或點擊載入更早 ${CHAT_BATCH_STEP} 則歷史訊息</span>
+                        </button>
+                    </div>
+                `;
+            } else if (totalMsgCount > CHAT_BATCH_STEP || friend._noMoreCloudHistory) {
                 topStatusHtml = `
                     <div class="text-center pb-1">
                         <span class="inline-block px-3 py-0.5 rounded-full bg-pink-50/80 text-[10px] text-gray-400">
@@ -1600,14 +1662,28 @@ document.getElementById('chatSendForm').addEventListener('submit', function(e) {
     }
 });
 
-function recordMutualContinueVote(myId, partnerId, voterNickname, isSimulatedPartner = false) {
-    const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
+async function recordMutualContinueVote(myId, partnerId, voterNickname, isSimulatedPartner = false) {
     const idA = String(myId);
     const idB = String(partnerId);
     const voterId = isSimulatedPartner ? idB : idA;
 
-    const userA = users.find(u => String(u.id) === idA);
-    const userB = users.find(u => String(u.id) === idB);
+    let userA = null;
+    let userB = null;
+
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+        const [resA, resB] = await Promise.all([
+            CloudSync.getNodeOnce(`${USERS_KEY}/${idA}`),
+            CloudSync.getNodeOnce(`${USERS_KEY}/${idB}`)
+        ]);
+        if (resA && typeof resA === 'object') userA = { ...resA, id: idA };
+        if (resB && typeof resB === 'object') userB = { ...resB, id: idB };
+    }
+
+    if (!userA || !userB) {
+        const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
+        if (!userA) userA = users.find(u => String(u.id) === idA);
+        if (!userB) userB = users.find(u => String(u.id) === idB);
+    }
     if (!userA || !userB) return false;
 
     const getOrCreateHistItem = (owner, other) => {
@@ -1650,7 +1726,12 @@ function recordMutualContinueVote(myId, partnerId, voterNickname, isSimulatedPar
         if (String(userA.matchedWithId) === idB) userA.matchedAt = extendedMatchedAt;
         if (String(userB.matchedWithId) === idA) userB.matchedAt = extendedMatchedAt;
 
-        Store.saveSharedUsers(users, { isMatchMutation: true });
+        if (typeof CloudSync !== 'undefined') {
+            await Promise.all([
+                CloudSync.upsertUser(userA, true, { isMatchMutation: true }),
+                CloudSync.upsertUser(userB, true, { isMatchMutation: true })
+            ]);
+        }
 
         const sysText = `🌸 雙方皆按下「繼續配對」成為好友！緣分已再延後 7 天（剩餘 7 天），聊天室已重新開放並自動解鎖彼此 IG 帳號，可以繼續聊天囉！`;
         const updatedMsgs = ChatStore.appendMessage(idA, idB, { senderId: 'system', text: sysText });
@@ -1671,7 +1752,12 @@ function recordMutualContinueVote(myId, partnerId, voterNickname, isSimulatedPar
         const votesArr = Array.from(voteSet);
         itemA.continueVotes = votesArr;
         itemB.continueVotes = votesArr;
-        Store.saveSharedUsers(users, { isMatchMutation: true });
+        if (typeof CloudSync !== 'undefined') {
+            await Promise.all([
+                CloudSync.upsertUser(userA, true, { isMatchMutation: true }),
+                CloudSync.upsertUser(userB, true, { isMatchMutation: true })
+            ]);
+        }
 
         const sysText = `💖 ${voterNickname} 已按下「繼續配對」，等待另一方也按下繼續中...`;
         const updatedMsgs = ChatStore.appendMessage(idA, idB, { senderId: 'system', text: sysText });
@@ -1689,7 +1775,7 @@ function recordMutualContinueVote(myId, partnerId, voterNickname, isSimulatedPar
     }
 }
 
-function respondSevenDayDecision(isContinue) {
+async function respondSevenDayDecision(isContinue) {
     const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
     if (!friend) return;
 
@@ -1702,7 +1788,7 @@ function respondSevenDayDecision(isContinue) {
     const isRealFriend = !String(friend.id).startsWith('MOCK_FRIEND_') && !!appState.playerId;
 
     if (isRealFriend) {
-        const completed = recordMutualContinueVote(appState.playerId, friend.id, myNick, false);
+        const completed = await recordMutualContinueVote(appState.playerId, friend.id, myNick, false);
         Store.save(appState, false, true); // 優化：繼續配對時不推送整包 appState 到雲端，避免覆蓋最新名單
         refreshAllUI();
         if (completed) {
