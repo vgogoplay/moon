@@ -1,6 +1,6 @@
 /* style.css */
 body {
-    font-family: 'Noto Sans TC', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", sans-serif;
     background: radial-gradient(circle at top left, #fff4f6 0%, #ffe6ec 48%, #fdf2f5 100%);
     min-height: 100vh;
     color: #4a3b3c;
