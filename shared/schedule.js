@@ -87,38 +87,6 @@ function normalizeSessionLabel(sessionStr) {
     return info.batchPrefix;
 }
 
-// 第 3 屆（含）起常規場次改為每週二、四、六 20:00；若舊報名資料仍選到第 3 屆(三)，自動轉為該屆(二)＋(四)
-function normalizeRegisteredSessionsList(rawList) {
-    const items = Array.isArray(rawList)
-        ? rawList
-        : (rawList && typeof rawList === 'object' ? Object.values(rawList) : (rawList ? [rawList] : []));
-    const out = [];
-    const seen = new Set();
-    const pushUnique = (lbl) => {
-        const clean = String(lbl || '').trim();
-        if (clean && !seen.has(clean)) {
-            seen.add(clean);
-            out.push(clean);
-        }
-    };
-    items.forEach(rawItem => {
-        const raw = String(rawItem ?? '').trim();
-        if (!raw) return;
-        const batchMatch = raw.match(/^第\s*(\d+)\s*屆/);
-        if (batchMatch) {
-            const b = Math.max(1, parseInt(batchMatch[1], 10));
-            if (b >= 3 && /(三|星期三|週三)/.test(raw)) {
-                const info = getBatchScheduleInfo(b);
-                pushUnique(info.tueLabel);
-                pushUnique(info.thuLabel);
-                return;
-            }
-        }
-        pushUnique(normalizeSessionLabel(raw));
-    });
-    return out;
-}
-
 function isSameSession(s1, s2) {
     const n1 = normalizeSessionLabel(s1);
     const n2 = normalizeSessionLabel(s2);
@@ -1296,12 +1264,9 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
         let customChanged = false;
 
         // 1. 檢查常規場次（例如：第2屆11/21(六) 於 20:00 結束後，等到 20:03 自動清除選項）
-        const rawPrevSessions = Array.isArray(u.registeredSessions)
+        const prevSessions = Array.isArray(u.registeredSessions)
             ? u.registeredSessions
             : (u.registeredSession ? [u.registeredSession] : []);
-        const prevSessions = (typeof normalizeRegisteredSessionsList === 'function')
-            ? normalizeRegisteredSessionsList(rawPrevSessions)
-            : rawPrevSessions;
         if (prevSessions.length > 0) {
             const keptSessions = [];
             prevSessions.forEach(s => {

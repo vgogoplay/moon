@@ -962,14 +962,9 @@ const CloudSync = {
             cleanUser.region = String(cleanUser.region || inferRegionByCity(cleanUser.city) || '').trim();
             cleanUser.mbti = String(cleanUser.mbti || '').trim();
             cleanUser.mbtiGroup = String(cleanUser.mbtiGroup || inferMbtiGroup(cleanUser.mbti) || '').trim();
-            const rawRegList = this.normalizeStringArray(u.registeredSessions || u.registeredSession);
-            cleanUser.registeredSessions = (typeof normalizeRegisteredSessionsList === 'function')
-                ? normalizeRegisteredSessionsList(rawRegList)
-                : Array.from(new Set(rawRegList.map(s => normalizeSessionLabel(s)).filter(Boolean)));
-            if (cleanUser.id && JSON.stringify(rawRegList) !== JSON.stringify(cleanUser.registeredSessions)) {
-                if (!this._migratedRegSessionUserIds) this._migratedRegSessionUserIds = new Set();
-                this._migratedRegSessionUserIds.add(String(cleanUser.id).trim());
-            }
+            cleanUser.registeredSessions = Array.from(new Set(
+                this.normalizeStringArray(cleanUser.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
+            ));
             cleanUser.matchedHistory = this.normalizeMatchedHistoryList(cleanUser.matchedHistory)
                 .filter(h => !this.isRogueCustomMatchEntry(h, customActsSnapshotForFilter));
             const directWithId = String(cleanUser.matchedWithId || '').trim();
@@ -1904,7 +1899,8 @@ const CloudSync = {
     playerHotDynamicPaths(includeAllChats = false) {
         const me = this.playerSelfId();
         if (!me) return [];
-        const paths = [`${USERS_KEY}/${me}`];
+        // [優化] 本人節點已於 startPlayerTimers 的 loopHot 中與 PLAYER_HOT_NODES 一併讀取，移除此處的重複陣列元素
+        const paths = [];
         const isFriendsTabOpen = (typeof document !== 'undefined')
             ? Boolean(document.getElementById('tab-friends') && !document.getElementById('tab-friends').classList.contains('hidden'))
             : false;
@@ -1920,6 +1916,12 @@ const CloudSync = {
 
     // 玩家端低頻輪詢的動態節點（每 4 分鐘）：好友公開資料快照與 IG 解鎖節點
     playerColdDynamicPaths() {
+        // [優化] 好友資料卡與 IG 解鎖狀態延後至點擊好友分頁時才載入，不佔用背景冷門輪詢
+        return [];
+    },
+    
+    // 取得所有配對好友的卡片與 IG 節點路徑（供好友分頁按需載入）
+    getFriendCardPaths() {
         const me = this.playerSelfId();
         if (!me) return [];
         const paths = [];
@@ -1934,7 +1936,9 @@ const CloudSync = {
 
     // 玩家端完整動態節點（初次載入與手動刷新時使用）
     playerDynamicPaths() {
-        return [...this.playerHotDynamicPaths(true), ...this.playerColdDynamicPaths()];
+        const me = this.playerSelfId();
+        const mePath = me ? [`${USERS_KEY}/${me}`] : [];
+        return [...mePath, ...this.playerHotDynamicPaths(true), ...this.playerColdDynamicPaths()];
     },
 
     // 把索引、好友卡片快照、配對 IG 與本人私有記錄合併成與原本相同形狀的 tree[USERS_KEY]，
@@ -2108,8 +2112,11 @@ const CloudSync = {
     },
 
     pollPlayerHot() {
+        const me = this.playerSelfId();
+        const mePath = me ? `${USERS_KEY}/${me}` : null;
         const dyn = this.playerHotDynamicPaths(false).filter(p => p !== this.activeRoomPath);
-        return this.pollPlayerNodes([...this.PLAYER_HOT_NODES, ...dyn]);
+        const hotNodes = mePath ? [...this.PLAYER_HOT_NODES, mePath] : this.PLAYER_HOT_NODES;
+        return this.pollPlayerNodes([...hotNodes, ...dyn]);
     },
 
     pollPlayerCold() {
@@ -2618,7 +2625,7 @@ const CloudSync = {
     async refreshPlayerFresh() {
         if (this.isLocalSandboxMode()) return true;
         const me = this.playerSelfId();
-        const paths = [USER_INDEX_KEY, FATE_WALL_KEY, ...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES, ...(me ? [`${USERS_KEY}/${me}`] : []), ...this.playerDynamicPaths()];
+        const paths = [USER_INDEX_KEY, FATE_WALL_KEY, ...this.PLAYER_HOT_NODES, ...this.PLAYER_COLD_NODES, ...this.playerDynamicPaths()];
         await this.fetchPlayerPaths(paths);
         this.composePlayerUsers();
         this.chatsTreeVersion++;
@@ -3043,10 +3050,9 @@ const CloudSync = {
         cleanRecord.region = String(cleanRecord.region || inferRegionByCity(cleanRecord.city) || '').trim();
         cleanRecord.mbti = String(cleanRecord.mbti || '').trim();
         cleanRecord.mbtiGroup = String(cleanRecord.mbtiGroup || inferMbtiGroup(cleanRecord.mbti) || '').trim();
-        const rawRecordReg = this.normalizeStringArray(cleanRecord.registeredSessions);
-        cleanRecord.registeredSessions = (typeof normalizeRegisteredSessionsList === 'function')
-            ? normalizeRegisteredSessionsList(rawRecordReg)
-            : Array.from(new Set(rawRecordReg.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+        cleanRecord.registeredSessions = Array.from(new Set(
+            this.normalizeStringArray(cleanRecord.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
+        ));
         cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory)
             .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId) && !this.isRogueCustomMatchEntry(h));
 
@@ -3210,10 +3216,7 @@ const CloudSync = {
                 cleanRecord.region = String(cleanRecord.region || (typeof inferRegionByCity === 'function' ? inferRegionByCity(cleanRecord.city) : '') || '').trim();
                 cleanRecord.mbti = String(cleanRecord.mbti || '').trim();
                 cleanRecord.mbtiGroup = String(cleanRecord.mbtiGroup || (typeof inferMbtiGroup === 'function' ? inferMbtiGroup(cleanRecord.mbti) : '') || '').trim();
-                const rawSyncReg = this.normalizeStringArray(cleanRecord.registeredSessions);
-                cleanRecord.registeredSessions = (typeof normalizeRegisteredSessionsList === 'function')
-                    ? normalizeRegisteredSessionsList(rawSyncReg)
-                    : Array.from(new Set(rawSyncReg.map(s => (typeof normalizeSessionLabel === 'function' ? normalizeSessionLabel(s) : s)).filter(Boolean)));
+                cleanRecord.registeredSessions = Array.from(new Set(this.normalizeStringArray(cleanRecord.registeredSessions).map(s => (typeof normalizeSessionLabel === 'function' ? normalizeSessionLabel(s) : s)).filter(Boolean)));
                 cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory).filter(h => !this.isPairRecentlyUnmatched(uid, h.partnerId));
                 cleanRecord.exactMatchCriteria = (cleanRecord.exactMatchCriteria && typeof cleanRecord.exactMatchCriteria === 'object' && !Array.isArray(cleanRecord.exactMatchCriteria)) ? cleanRecord.exactMatchCriteria : {};
                 cleanRecord.mustMatchKeys = (typeof normalizeMustMatchKeysList === 'function')
@@ -3498,9 +3501,7 @@ const Store = {
         if (sessions.length === 0 && parsed.registeredSession) {
             sessions = [parsed.registeredSession];
         }
-        sessions = (typeof normalizeRegisteredSessionsList === 'function')
-            ? normalizeRegisteredSessionsList(sessions)
-            : Array.from(new Set(sessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+        sessions = Array.from(new Set(sessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
 
         const mergedProfile = { ...base.profile, ...(parsed.profile || {}) };
         if (!mergedProfile.region && mergedProfile.city) {
@@ -3612,9 +3613,7 @@ const Store = {
                         return cleanProf;
                     })(),
                     privacy: userRec.privacy || {},
-                    registeredSessions: Array.isArray(userRec.registeredSessions)
-                        ? ((typeof normalizeRegisteredSessionsList === 'function') ? normalizeRegisteredSessionsList(userRec.registeredSessions) : Array.from(new Set(userRec.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean))))
-                        : [],
+                    registeredSessions: Array.isArray(userRec.registeredSessions) ? Array.from(new Set(userRec.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean))) : [],
                     exactMatchCriteria: userRec.exactMatchCriteria || {},
                     mustMatchKeys: Array.isArray(userRec.mustMatchKeys) ? [...userRec.mustMatchKeys] : [],
                     customActivityRegs: (userRec.customActivityRegs && typeof userRec.customActivityRegs === 'object' && !Array.isArray(userRec.customActivityRegs)) ? userRec.customActivityRegs : {}
@@ -3692,9 +3691,7 @@ const Store = {
         }
 
         if (Array.isArray(state.registeredSessions)) {
-            state.registeredSessions = (typeof normalizeRegisteredSessionsList === 'function')
-                ? normalizeRegisteredSessionsList(state.registeredSessions)
-                : Array.from(new Set(state.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
+            state.registeredSessions = Array.from(new Set(state.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
         }
         if (state.matchedSession && !String(state.matchedSession).includes('強制')) {
             state.matchedSession = normalizeSessionLabel(state.matchedSession);
@@ -4384,47 +4381,17 @@ const ActivityRegArchive = {
 
     mergeCloudTreeAndUsers(cloudRegNode, usersArr) {
         const merged = this.getAllMap();
-        const isBackend = (typeof CloudSync !== 'undefined' && typeof CloudSync.isBackendContext === 'function' && CloudSync.isBackendContext());
-        const migrateArchiveEntry = (key, item) => {
-            if (!item || typeof item !== 'object' || !item.playerId) return;
-            if (item.kind === 'regular' && item.session) {
-                const bMatch = String(item.session).match(/^第\s*(\d+)\s*屆/);
-                const bNum = bMatch ? parseInt(bMatch[1], 10) : 0;
-                if (bNum >= 3 && /(三|星期三|週三)/.test(String(item.session)) && typeof getBatchScheduleInfo === 'function') {
-                    const info = getBatchScheduleInfo(bNum);
-                    delete merged[key];
-                    if (isBackend && CloudSync.initialized && CloudSync.inFlightWrites === 0) {
-                        CloudSync.deleteNode(`${REG_HISTORY_KEY}/${key}`);
-                    }
-                    [info.tueLabel, info.thuLabel].forEach(newLbl => {
-                        const newKey = this.makeRegularKey(newLbl, item.playerId);
-                        if (newKey) {
-                            const newEntry = this.buildRegularEntry({ id: item.playerId }, newLbl, merged[newKey] || item);
-                            if (newEntry) {
-                                merged[newKey] = newEntry;
-                                if (isBackend && CloudSync.initialized && CloudSync.inFlightWrites === 0) {
-                                    CloudSync.putNode(`${REG_HISTORY_KEY}/${newKey}`, newEntry);
-                                }
-                            }
-                        }
-                    });
-                    return;
-                }
-            }
-            merged[key] = item;
-        };
-
-        Object.entries({ ...merged }).forEach(([k, item]) => migrateArchiveEntry(k, item));
         if (cloudRegNode && typeof cloudRegNode === 'object' && !Array.isArray(cloudRegNode)) {
             Object.keys(cloudRegNode).forEach(k => {
-                migrateArchiveEntry(k, cloudRegNode[k]);
+                const item = cloudRegNode[k];
+                if (item && typeof item === 'object' && item.playerId) {
+                    merged[k] = item;
+                }
             });
         }
         (Array.isArray(usersArr) ? usersArr : []).forEach(u => {
             if (!u || !u.id) return;
-            const sessions = (typeof normalizeRegisteredSessionsList === 'function')
-                ? normalizeRegisteredSessionsList(u.registeredSessions)
-                : (Array.isArray(u.registeredSessions) ? u.registeredSessions : []);
+            const sessions = Array.isArray(u.registeredSessions) ? u.registeredSessions : [];
             sessions.forEach(s => {
                 const key = this.makeRegularKey(s, u.id);
                 if (key) {
