@@ -12,6 +12,23 @@ const FORUM_RETENTION_MS = FORUM_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const FORUM_POSTS_PER_PAGE = 5;
 let forumCurrentPage = 1;
 
+function countForumPostReplies(postObj) {
+    if (!postObj || typeof postObj !== 'object') return 0;
+    const repliesRaw = postObj.replies;
+    let actualCount = null;
+    if (Array.isArray(repliesRaw)) {
+        actualCount = repliesRaw.filter(r => r && typeof r === 'object').length;
+    } else if (repliesRaw && typeof repliesRaw === 'object') {
+        actualCount = Object.values(repliesRaw).filter(r => r && typeof r === 'object').length;
+    }
+    const storedCount = Number(postObj.replyCount || 0);
+    if (actualCount !== null) {
+        if (actualCount === 0 && storedCount > 0) return storedCount;
+        return actualCount;
+    }
+    return Math.max(0, storedCount);
+}
+
 function isBackendForumPost(post) {
     if (!post || typeof post !== 'object') return false;
     return Boolean(
@@ -96,8 +113,8 @@ function renderForumList() {
     } else if (currentForumFilter === '熱門') {
         const cutoffTs = Date.now() - 4 * 24 * 60 * 60 * 1000; // 近3天內 (放寬涵蓋到第4天午夜)
         filtered = activePosts.filter(p => !isBackendForumPost(p) && Number(p.createdAt || 0) >= cutoffTs).sort((a, b) => {
-            const scoreA = Number(a.pushCount || 0) + Number(a.replyCount || 0);
-            const scoreB = Number(b.pushCount || 0) + Number(b.replyCount || 0);
+            const scoreA = Number(a.pushCount || 0) + countForumPostReplies(a);
+            const scoreB = Number(b.pushCount || 0) + countForumPostReplies(b);
             if (scoreB !== scoreA) return scoreB - scoreA;
             return Number(b.createdAt || 0) - Number(a.createdAt || 0);
         });
@@ -172,7 +189,7 @@ function renderForumList() {
         // 已移除發文者暱稱 4 字限制，完整顯示
         const dateAuthorStr = `${dateStr} ${authorName}`;
         const likes = Number(p.pushCount || 0);
-        const replies = Number(p.replyCount || 0);
+        const replies = countForumPostReplies(p);
         const statsHtml = `<div class="flex items-center gap-2 text-gray-400 text-[11px] shrink-0"><span>❤️${likes}</span><span>💬${replies}</span></div>`;
 
         return `
@@ -510,14 +527,27 @@ async function refreshForumPost(forceId = null) {
                     return;
                 }
                 viewingPostData = { ...res, id: res.id || pid };
+                let listNeedSync = false;
+                const idxPost = forumPosts.find(p => String(p.id) === String(pid));
                 if (viewingPostData.likes && typeof viewingPostData.likes === 'object') {
                     const actualLikesCount = Object.keys(viewingPostData.likes).filter(k => Boolean(viewingPostData.likes[k])).length;
                     viewingPostData.pushCount = actualLikesCount;
-                    const idxPost = forumPosts.find(p => String(p.id) === String(pid));
                     if (idxPost && Number(idxPost.pushCount || 0) !== actualLikesCount) {
                         idxPost.pushCount = actualLikesCount;
-                        renderForumList();
+                        listNeedSync = true;
                     }
+                }
+                const actualRepliesCount = countForumPostReplies(viewingPostData);
+                viewingPostData.replyCount = actualRepliesCount;
+                if (idxPost && (Number(idxPost.replyCount || 0) !== actualRepliesCount || JSON.stringify(idxPost.replies || {}) !== JSON.stringify(viewingPostData.replies || {}))) {
+                    idxPost.replyCount = actualRepliesCount;
+                    if (viewingPostData.replies && typeof viewingPostData.replies === 'object') {
+                        idxPost.replies = viewingPostData.replies;
+                    }
+                    listNeedSync = true;
+                }
+                if (listNeedSync) {
+                    renderForumList();
                 }
                 renderForumPostDetail();
             } else {
