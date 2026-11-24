@@ -225,11 +225,6 @@ function syncFromSharedStorage() {
         stateChanged = true;
         if (!sysCfgNow.registrationOpen) {
             closeRegisterModal();
-        } else {
-            const regModalEl = document.getElementById('registerModal');
-            if (regModalEl && !regModalEl.classList.contains('hidden') && typeof renderRegisterModalSessionOptions === 'function') {
-                renderRegisterModalSessionOptions();
-            }
         }
     }
 
@@ -360,6 +355,9 @@ function syncFromSharedStorage() {
                 'matchedWithId', 'matchedWithName', 'matchedAt', 'updatedAt',
                 'forceConfessionTriggerId'
             ]);
+            if (Object.prototype.hasOwnProperty.call(me, 'lockNickname')) {
+                appState.profile.lockNickname = Boolean(me.lockNickname);
+            }
             Object.entries(me).forEach(([k, v]) => {
                 if (!skipSyncKeys.has(k)) {
                     appState.profile[k] = v;

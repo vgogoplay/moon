@@ -1929,12 +1929,11 @@ function openEveningConfessionModal() {
 
     const listEl = document.getElementById('confessionTargetList');
     listEl.innerHTML = appState.friends.map((f, idx) => `
-        <label class="flex items-center justify-between p-2.5 rounded-xl border border-pink-200 bg-pink-50/40 cursor-pointer hover:bg-pink-50">
+        <label class="flex items-center p-2.5 rounded-xl border border-pink-200 bg-pink-50/40 cursor-pointer hover:bg-pink-50">
             <div class="flex items-center gap-2">
                 <input type="radio" name="confessionTarget" value="${f.id}" ${idx === 0 ? 'checked' : ''} class="accent-[#c96a7b]">
-                <span class="font-bold text-xs text-[#8f4452]">${f.nickname}</span>
+                <span class="font-bold text-xs text-[#8f4452]">${yuelaoEscapeHtml(f.nickname || '')}</span>
             </div>
-            <span class="text-[11px] text-gray-500">${f.profile.city || ''} ・ ${f.profile.mbti || ''}</span>
         </label>
     `).join('');
 

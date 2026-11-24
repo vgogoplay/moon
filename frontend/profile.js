@@ -244,8 +244,10 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
     const priv = field.alwaysOpen ? 'open' : (appState.privacy[field.key] || field.defaultPrivacy || sectionDefaultPriv || 'closed');
     const fullWidthClass = (field.type === 'textarea' || field.type === 'multiselect' || field.type === 'regionCity' || field.type === 'mbtiTwoStep' || field.type === 'petTwoStep') ? 'md:col-span-2' : '';
     const isGenderLocked = (field.key === 'gender' && !!appState.playerId);
-    const isInputDisabled = isProfileLocked || isGenderLocked;
-    const lockedInputStyle = isProfileLocked ? '!bg-gray-100 !text-gray-400 !border-gray-300 cursor-not-allowed' : '';
+    const isNicknameLocked = (field.key === 'nickname' && Boolean(appState && appState.profile && appState.profile.lockNickname));
+    const isFieldSelfLocked = isProfileLocked || isNicknameLocked;
+    const isInputDisabled = isFieldSelfLocked || isGenderLocked;
+    const lockedInputStyle = isFieldSelfLocked ? '!bg-gray-100 !text-gray-400 !border-gray-300 cursor-not-allowed' : '';
 
     let inputHtml = '';
     let extraGenderNoticeHtml = '';
@@ -420,7 +422,7 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
     } else {
         const minAttr = field.min !== undefined ? `min="${field.min}"` : '';
         const maxAttr = field.max !== undefined ? `max="${field.max}"` : '';
-        inputHtml = `<input type="${field.type}" name="${field.key}" value="${val || ''}" ${minAttr} ${maxAttr} class="input-jp ${lockedInputStyle}" placeholder="${field.placeholder || ''}" ${isFieldRequired(field) ? 'required' : ''} ${isProfileLocked ? 'disabled' : ''}>`;
+        inputHtml = `<input type="${field.type}" name="${field.key}" value="${val || ''}" ${minAttr} ${maxAttr} class="input-jp ${lockedInputStyle}" placeholder="${field.placeholder || ''}" ${isFieldRequired(field) ? 'required' : ''} ${isFieldSelfLocked ? 'disabled' : ''}>`;
     }
 
     let hintsHtml = '';
@@ -470,11 +472,12 @@ function renderSingleFieldCard(field, sectionDefaultPriv, isProfileLocked, quota
     }
 
     return `
-        <div id="field-card-${field.key}" class="${fullWidthClass} p-3.5 rounded-2xl ${isProfileLocked ? 'bg-gray-50/90 border-gray-200' : 'bg-white/75 border-pink-100/90'} border space-y-2">
+        <div id="field-card-${field.key}" class="${fullWidthClass} p-3.5 rounded-2xl ${isFieldSelfLocked ? 'bg-gray-50/90 border-gray-200' : 'bg-white/75 border-pink-100/90'} border space-y-2">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                    <label class="text-sm md:text-base font-bold leading-snug ${isProfileLocked ? 'text-gray-400' : 'text-[#5e464a]'}">
+                    <label class="text-sm md:text-base font-bold leading-snug ${isFieldSelfLocked ? 'text-gray-400' : 'text-[#5e464a]'}">
                         ${field.label} ${isFieldRequired(field) ? '<span class="text-rose-500">*</span>' : ''}
+                        ${isNicknameLocked ? '<span class="ml-1.5 text-[11px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-bold">🔒 禁止前台修改</span>' : ''}
                     </label>
                     ${field.subtitle ? `<p class="text-[11px] text-gray-400">${field.subtitle}</p>` : ''}
                 </div>
@@ -951,6 +954,9 @@ document.getElementById('profileForm').addEventListener('submit', async function
     Store.save(appState, false, true);
 
     const normalizeNickname = (rawName) => String(rawName || '').trim().toLowerCase();
+    if (appState && appState.profile && appState.profile.lockNickname) {
+        nextProfile.nickname = String(appState.profile.nickname || '').trim();
+    }
     const rawNickname = String(nextProfile.nickname || '').trim();
     const normalizedNickname = normalizeNickname(rawNickname);
 

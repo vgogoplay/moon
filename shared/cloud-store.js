@@ -965,10 +965,6 @@ const CloudSync = {
             cleanUser.registeredSessions = Array.from(new Set(
                 this.normalizeStringArray(cleanUser.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
             ));
-            cleanUser.batchUsedSessions = Array.from(new Set([
-                ...this.normalizeStringArray(cleanUser.batchUsedSessions).map(s => normalizeSessionLabel(s)).filter(Boolean),
-                ...cleanUser.registeredSessions
-            ]));
             if (typeof applyOneTimeMaleBatch3ThuCleanup === 'function' && applyOneTimeMaleBatch3ThuCleanup(cleanUser)) {
                 if (cleanUser.id) {
                     if (!this._migratedMaleB3ThuUserIds) this._migratedMaleB3ThuUserIds = new Set();
@@ -2406,10 +2402,6 @@ const CloudSync = {
                 await yuelaoAuth.init();
             }
             if (this.isLocalSandboxMode()) {
-                this.isOnline = false;
-                if (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function') {
-                    Store.getUsersArray();
-                }
                 this.initialized = true;
                 this.hasLoadedFullTree = true;
                 this.refreshCloudBadge();
@@ -3328,25 +3320,7 @@ const IdAllocator = {
 const Store = {
     getUsersArray() {
         const arr = LocalJsonCache.get(USERS_LOCAL_KEY, () => []);
-        if (!Array.isArray(arr)) return [];
-        if (typeof applyOneTimeMaleBatch3ThuCleanup === 'function') {
-            let changed = false;
-            arr.forEach(u => {
-                if (applyOneTimeMaleBatch3ThuCleanup(u)) {
-                    changed = true;
-                    if (u && u.id && typeof ActivityRegArchive !== 'undefined' && typeof TARGET_CANCEL_MALE_B3_THU_LABEL !== 'undefined') {
-                        ActivityRegArchive.removeRegular(TARGET_CANCEL_MALE_B3_THU_LABEL, u.id);
-                    }
-                }
-            });
-            if (changed) {
-                try {
-                    localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(arr));
-                    LocalJsonCache.invalidate(USERS_LOCAL_KEY);
-                } catch (e) {}
-            }
-        }
-        return arr;
+        return Array.isArray(arr) ? arr : [];
     },
 
     getSystemConfig() {
@@ -3364,10 +3338,7 @@ const Store = {
                 genderLimitEnabled: sys.genderLimitEnabled !== undefined ? Boolean(sys.genderLimitEnabled) : false,
                 genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30,
                 maleDisplayOffset: sys.maleDisplayOffset !== undefined ? Math.max(0, Number(sys.maleDisplayOffset) || 0) : 0,
-                wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true,
-                maleExtraSessionPlayerIds: typeof normalizeMaleExtraSessionPlayerIds === 'function'
-                    ? normalizeMaleExtraSessionPlayerIds(sys.maleExtraSessionPlayerIds)
-                    : (Array.isArray(sys.maleExtraSessionPlayerIds) ? sys.maleExtraSessionPlayerIds.map(String) : [])
+                wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true
             };
         } catch (e) {
             return {
@@ -3379,8 +3350,7 @@ const Store = {
                 genderLimitEnabled: false,
                 genderLimitMax: 30,
                 maleDisplayOffset: 0,
-                wishEarlyCloseCanMatch: true,
-                maleExtraSessionPlayerIds: []
+                wishEarlyCloseCanMatch: true
             };
         }
     },
@@ -3614,7 +3584,6 @@ const Store = {
             mustMatchKeys: (typeof normalizeMustMatchKeysList === 'function')
                 ? normalizeMustMatchKeysList(parsed.mustMatchKeys, parsed.exactMatchCriteria || {})
                 : (Array.isArray(parsed.mustMatchKeys) ? parsed.mustMatchKeys.slice(0, 2) : []),
-            batchUsedSessions: Array.isArray(parsed.batchUsedSessions) ? Array.from(new Set(parsed.batchUsedSessions.map(s => normalizeSessionLabel(s)).filter(Boolean))) : [],
             customActivityRegs: (parsed.customActivityRegs && typeof parsed.customActivityRegs === 'object' && !Array.isArray(parsed.customActivityRegs)) ? parsed.customActivityRegs : {},
             friends: Array.isArray(parsed.friends) ? parsed.friends : []
         };
@@ -3699,7 +3668,6 @@ const Store = {
                     })(),
                     privacy: userRec.privacy || {},
                     registeredSessions: Array.isArray(userRec.registeredSessions) ? Array.from(new Set(userRec.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean))) : [],
-                    batchUsedSessions: Array.isArray(userRec.batchUsedSessions) ? Array.from(new Set(userRec.batchUsedSessions.map(s => normalizeSessionLabel(s)).filter(Boolean))) : [],
                     exactMatchCriteria: userRec.exactMatchCriteria || {},
                     mustMatchKeys: Array.isArray(userRec.mustMatchKeys) ? [...userRec.mustMatchKeys] : [],
                     customActivityRegs: (userRec.customActivityRegs && typeof userRec.customActivityRegs === 'object' && !Array.isArray(userRec.customActivityRegs)) ? userRec.customActivityRegs : {}
@@ -3779,10 +3747,6 @@ const Store = {
         if (Array.isArray(state.registeredSessions)) {
             state.registeredSessions = Array.from(new Set(state.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
         }
-        state.batchUsedSessions = Array.from(new Set([
-            ...(Array.isArray(state.batchUsedSessions) ? state.batchUsedSessions : []),
-            ...(Array.isArray(state.registeredSessions) ? state.registeredSessions : [])
-        ].map(s => normalizeSessionLabel(s)).filter(Boolean)));
         if (typeof isMalePlayerRecord === 'function' && isMalePlayerRecord(state)) {
             state.b3ThuMaleCleared = true;
         }
@@ -3829,8 +3793,15 @@ const Store = {
             state.profile.mbti = resolvedMbti;
             state.profile.mbtiGroup = resolvedMbtiGroup;
 
+            const resolvedLockNick = Boolean(
+                (state.profile && state.profile.lockNickname) ||
+                existingRecord.lockNickname ||
+                (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][String(state.playerId)] && CloudSync.tree[USERS_KEY][String(state.playerId)].lockNickname)
+            );
+            state.profile.lockNickname = resolvedLockNick;
             const mergedProfileForRecord = {
                 ...state.profile,
+                lockNickname: resolvedLockNick,
                 nickname: (state.profile.nickname && String(state.profile.nickname).trim()) || `玩家_${state.playerId}`,
                 region: resolvedRegion,
                 city: resolvedCity,
@@ -3855,11 +3826,6 @@ const Store = {
                 readMailIds: Array.isArray(state.readMailIds) ? Array.from(new Set(state.readMailIds.map(String))) : [],
                 b3ThuMaleCleared: Boolean(state.b3ThuMaleCleared || existingRecord.b3ThuMaleCleared || (typeof isMalePlayerRecord === 'function' && isMalePlayerRecord(state))),
                 registeredSessions: state.isWarnedAccount ? [] : (Array.isArray(state.registeredSessions) ? state.registeredSessions : []),
-                batchUsedSessions: Array.from(new Set([
-                    ...(Array.isArray(existingRecord.batchUsedSessions) ? existingRecord.batchUsedSessions : []),
-                    ...(Array.isArray(state.batchUsedSessions) ? state.batchUsedSessions : []),
-                    ...(Array.isArray(state.registeredSessions) ? state.registeredSessions : [])
-                ].map(s => normalizeSessionLabel(s)).filter(Boolean))),
                 exactMatchCriteria: state.exactMatchCriteria || {},
                 mustMatchKeys: (typeof normalizeMustMatchKeysList === 'function')
                     ? normalizeMustMatchKeysList(state.mustMatchKeys, state.exactMatchCriteria || {})
@@ -4466,12 +4432,8 @@ const ActivityRegArchive = {
         const sessions = Array.isArray(user.registeredSessions)
             ? user.registeredSessions
             : (user.registeredSession ? [user.registeredSession] : []);
-        const allArchiveSessions = Array.from(new Set([
-            ...sessions,
-            ...(Array.isArray(user.batchUsedSessions) ? user.batchUsedSessions : [])
-        ].filter(Boolean)));
-        allArchiveSessions.forEach(s => {
-            this.recordRegular(user, s, pushToCloud);
+        sessions.forEach(s => {
+            if (s) this.recordRegular(user, s, pushToCloud);
         });
         if (user.customActivityRegs && typeof user.customActivityRegs === 'object' && !Array.isArray(user.customActivityRegs)) {
             Object.keys(user.customActivityRegs).forEach(actId => {

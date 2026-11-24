@@ -392,6 +392,19 @@ function renderChatsPageSection(users, forceRender = false) {
     if (summaryBadge) {
         summaryBadge.textContent = `聊天室 ${allRooms.length} 間 ／ 訊息 ${totalMessagesAll} 則`;
     }
+    const lowRemainBtn = document.getElementById('openLowRemainCleanupBtn');
+    if (lowRemainBtn) {
+        const nowCheckTs = Date.now();
+        const lowCount = allRooms.filter(r => {
+            if (!r || !r.lastTs || r.lastTs <= 0) return false;
+            const remMs = Math.max(0, (r.lastTs + 3 * 24 * 60 * 60 * 1000) - nowCheckTs);
+            const remHrs = Math.ceil(remMs / (60 * 60 * 1000));
+            return remHrs < 6;
+        }).length;
+        lowRemainBtn.textContent = lowCount > 0
+            ? `🧹 檢查剩餘 < 6 小時（${lowCount} 間）`
+            : '🧹 檢查剩餘 < 6 小時';
+    }
 
     const kw = adminChatSearchKeyword.toLowerCase();
     const filteredRooms = kw
@@ -593,6 +606,9 @@ function renderChatsPageSection(users, forceRender = false) {
                 </div>
                 <p class="text-[11px] text-gray-500 mt-0.5">房間代號：<span class="font-mono">${escapeChatAdminHtml(activeRoom.pairKey)}</span> ・ 目前顯示最新 ${visibleKeyedItems.length} / 共 ${totalRoomMsgs} 則訊息</p>
             </div>
+            <button type="button" id="manualDeleteAndUnmatchRoomBtn" onclick="manualDeleteChatAndUnmatchPair('${escapeChatAdminHtml(activeRoom.pairKey)}', '${escapeChatAdminHtml(activeRoom.idA)}', '${escapeChatAdminHtml(activeRoom.idB)}')" class="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-2xs transition shrink-0 whitespace-nowrap">
+                🗑️ 刪除聊天紀錄並解除雙方好友
+            </button>
         `;
 
         const canIncrementalPatch = (
@@ -783,5 +799,492 @@ async function syncAllChatMetaFromCloudNow() {
 
 window.backfillMissingAdminChatMetaToCloud = backfillMissingAdminChatMetaToCloud;
 window.syncAllChatMetaFromCloudNow = syncAllChatMetaFromCloudNow;
+
+let _lowRemainCandidateRooms = [];
+let _lowRemainSelectedKeys = new Set();
+let _lowRemainCleanupInFlight = false;
+
+function collectLowRemainHoursChatRooms(thresholdHours = 6) {
+    const users = (typeof getUsers === 'function') ? getUsers() : [];
+    const chatsMap = typeof getAdminChatsMap === 'function'
+        ? getAdminChatsMap()
+        : JSON.parse(localStorage.getItem(typeof ADMIN_CHATS_KEY !== 'undefined' ? ADMIN_CHATS_KEY : CHATS_KEY) || '{}');
+    const { rooms: allRooms } = getIndexedAdminChatRooms(users, chatsMap);
+    const nowTs = Date.now();
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+
+    const matched = [];
+    allRooms.forEach(r => {
+        if (!r || !r.lastTs || r.lastTs <= 0) return;
+        const remainMs = Math.max(0, (r.lastTs + threeDaysMs) - nowTs);
+        const remainHours = Math.ceil(remainMs / (60 * 60 * 1000));
+        if (remainHours < thresholdHours) {
+            matched.push({
+                ...r,
+                remainMs,
+                remainHours
+            });
+        }
+    });
+
+    matched.sort((a, b) => Number(a.remainMs) - Number(b.remainMs));
+    return matched;
+}
+
+function syncLowRemainSelectionControls() {
+    const total = _lowRemainCandidateRooms.length;
+    const selectedCount = _lowRemainSelectedKeys.size;
+
+    const selectAllCb = document.getElementById('lowRemainSelectAllCheckbox');
+    if (selectAllCb) {
+        selectAllCb.disabled = total === 0;
+        selectAllCb.checked = total > 0 && selectedCount === total;
+        selectAllCb.indeterminate = selectedCount > 0 && selectedCount < total;
+    }
+
+    const badgeEl = document.getElementById('lowRemainFoundCountBadge');
+    if (badgeEl) {
+        badgeEl.textContent = `共找到 ${total} 間（已勾選 ${selectedCount} 間）`;
+    }
+
+    const nextBtn = document.getElementById('lowRemainToStep2Btn');
+    if (nextBtn) {
+        nextBtn.disabled = selectedCount === 0;
+        nextBtn.textContent = `🗑️ 下一步：二次確認清除 (${selectedCount} 間)`;
+    }
+}
+
+function toggleLowRemainRoomCheckbox(pairKey, checked) {
+    const pk = String(pairKey || '').trim();
+    if (!pk) return;
+    if (checked) {
+        _lowRemainSelectedKeys.add(pk);
+    } else {
+        _lowRemainSelectedKeys.delete(pk);
+    }
+    syncLowRemainSelectionControls();
+}
+
+function toggleSelectAllLowRemainRooms(checked) {
+    if (checked) {
+        _lowRemainSelectedKeys = new Set(_lowRemainCandidateRooms.map(r => r.pairKey));
+    } else {
+        _lowRemainSelectedKeys.clear();
+    }
+    const listBox = document.getElementById('lowRemainRoomsListContainer');
+    if (listBox) {
+        listBox.querySelectorAll('input[type="checkbox"][data-low-remain-pk]').forEach(cb => {
+            cb.checked = Boolean(checked);
+        });
+    }
+    syncLowRemainSelectionControls();
+}
+
+function renderLowRemainRoomsStep1List() {
+    const listBox = document.getElementById('lowRemainRoomsListContainer');
+    if (!listBox) return;
+
+    if (_lowRemainCandidateRooms.length === 0) {
+        listBox.innerHTML = `
+            <div class="p-8 text-center text-xs text-gray-400 space-y-1.5">
+                <div class="text-2xl">🌸</div>
+                <p class="font-semibold text-gray-500">目前沒有剩餘小時低於 6 小時的配對聊天室！</p>
+                <p class="text-[11px]">所有配對聊天室的剩餘有效期皆為 6 小時以上。</p>
+            </div>
+        `;
+        syncLowRemainSelectionControls();
+        return;
+    }
+
+    listBox.innerHTML = _lowRemainCandidateRooms.map((r, idx) => {
+        const isChecked = _lowRemainSelectedKeys.has(r.pairKey);
+        const badgeA = r.genderA === '男' ? 'bg-sky-100 text-sky-700' : (r.genderA === '女' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600');
+        const badgeB = r.genderB === '男' ? 'bg-sky-100 text-sky-700' : (r.genderB === '女' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600');
+        const remainBadgeHtml = r.remainHours === 0
+            ? `<span class="px-2 py-0.5 rounded-full bg-rose-600 text-white font-bold text-[10px] shrink-0">⚠️ 剩 0 小時（已到期）</span>`
+            : `<span class="px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 font-bold text-[10px] shrink-0">⏳ 剩 ${r.remainHours} 小時</span>`;
+        const lastTimeStr = formatAdminChatDateTime(r.lastMsg);
+
+        return `
+            <label class="flex items-start gap-3 p-3.5 hover:bg-pink-50/40 cursor-pointer transition select-none">
+                <input type="checkbox" data-low-remain-pk="${escapeChatAdminHtml(r.pairKey)}" onchange="toggleLowRemainRoomCheckbox('${escapeChatAdminHtml(r.pairKey)}', this.checked)" ${isChecked ? 'checked' : ''} class="mt-1 w-4 h-4 accent-[#c96a7b] rounded shrink-0 cursor-pointer">
+                <div class="flex-1 min-w-0 space-y-1">
+                    <div class="flex flex-wrap items-center justify-between gap-1.5">
+                        <div class="flex flex-wrap items-center gap-1.5 text-xs min-w-0">
+                            <span class="text-[10px] font-mono text-gray-400">#${idx + 1}</span>
+                            <span class="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold ${badgeA}">${escapeChatAdminHtml(r.idA)}</span>
+                            <span class="font-bold text-[#8f4452] truncate max-w-[96px]">${escapeChatAdminHtml(r.nameA)}</span>
+                            <span class="text-pink-400 font-bold">⇄</span>
+                            <span class="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold ${badgeB}">${escapeChatAdminHtml(r.idB)}</span>
+                            <span class="font-bold text-[#8f4452] truncate max-w-[96px]">${escapeChatAdminHtml(r.nameB)}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                            ${remainBadgeHtml}
+                            <span class="text-[10px] px-2 py-0.5 rounded-full bg-rose-50 border border-pink-200 text-[#8f4452] font-bold">
+                                ${r.msgCount || r.messages.length} 則
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between gap-2 text-[11px] text-gray-500">
+                        <p class="truncate flex-1">最後訊息：${escapeChatAdminHtml(r.lastMsg.text || '（無文字）')}</p>
+                        <span class="text-[10px] text-gray-400 shrink-0">${escapeChatAdminHtml(lastTimeStr)}</span>
+                    </div>
+                </div>
+            </label>
+        `;
+    }).join('');
+
+    syncLowRemainSelectionControls();
+}
+
+function openLowRemainHoursCleanupModal() {
+    if (_lowRemainCleanupInFlight) return;
+    _lowRemainCandidateRooms = collectLowRemainHoursChatRooms(6);
+    _lowRemainSelectedKeys = new Set(_lowRemainCandidateRooms.map(r => r.pairKey));
+
+    const step1 = document.getElementById('lowRemainStep1View');
+    const step2 = document.getElementById('lowRemainStep2View');
+    if (step1) step1.classList.remove('hidden');
+    if (step2) step2.classList.add('hidden');
+
+    renderLowRemainRoomsStep1List();
+
+    const modal = document.getElementById('lowRemainChatsModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeLowRemainHoursCleanupModal() {
+    if (_lowRemainCleanupInFlight) return;
+    const modal = document.getElementById('lowRemainChatsModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function proceedLowRemainSecondConfirm() {
+    if (_lowRemainCleanupInFlight) return;
+    const selectedRooms = _lowRemainCandidateRooms.filter(r => _lowRemainSelectedKeys.has(r.pairKey));
+    if (selectedRooms.length === 0) {
+        alert('請先勾選至少一間要清除的聊天室！');
+        return;
+    }
+
+    const confirmCountEl = document.getElementById('lowRemainConfirmCountText');
+    if (confirmCountEl) {
+        confirmCountEl.textContent = `共 ${selectedRooms.length} 間聊天室（將解除 ${selectedRooms.length} 組雙方好友）`;
+    }
+
+    const confirmListEl = document.getElementById('lowRemainConfirmTargetList');
+    if (confirmListEl) {
+        confirmListEl.innerHTML = selectedRooms.map((r, idx) => {
+            const remainText = r.remainHours === 0 ? '剩 0 小時（已到期）' : `剩 ${r.remainHours} 小時`;
+            return `
+                <div class="px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs">
+                    <div class="flex flex-wrap items-center gap-1.5 min-w-0">
+                        <span class="text-[10px] font-mono text-gray-400">#${idx + 1}</span>
+                        <span class="font-bold text-[#8f4452]">${escapeChatAdminHtml(r.nameA)} (ID:${escapeChatAdminHtml(r.idA)})</span>
+                        <span class="text-pink-400 font-bold">⇄</span>
+                        <span class="font-bold text-[#8f4452]">${escapeChatAdminHtml(r.nameB)} (ID:${escapeChatAdminHtml(r.idB)})</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0 text-[10px]">
+                        <span class="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-bold">${remainText}</span>
+                        <span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-semibold">${r.msgCount || r.messages.length} 則</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    const step1 = document.getElementById('lowRemainStep1View');
+    const step2 = document.getElementById('lowRemainStep2View');
+    if (step1) step1.classList.add('hidden');
+    if (step2) step2.classList.remove('hidden');
+}
+
+function backToLowRemainStep1() {
+    if (_lowRemainCleanupInFlight) return;
+    const step1 = document.getElementById('lowRemainStep1View');
+    const step2 = document.getElementById('lowRemainStep2View');
+    if (step2) step2.classList.add('hidden');
+    if (step1) step1.classList.remove('hidden');
+}
+
+async function executeLowRemainRoomsCleanup() {
+    if (_lowRemainCleanupInFlight) return;
+    const targetRooms = _lowRemainCandidateRooms.filter(r => _lowRemainSelectedKeys.has(r.pairKey));
+    if (targetRooms.length === 0) return;
+
+    _lowRemainCleanupInFlight = true;
+    const execBtn = document.getElementById('lowRemainExecuteBtn');
+    const backBtn = document.getElementById('lowRemainBackStep1Btn');
+    const xBtn = document.getElementById('closeLowRemainModalXBtn');
+    const origExecText = execBtn ? execBtn.textContent : '';
+    if (execBtn) execBtn.disabled = true;
+    if (backBtn) backBtn.disabled = true;
+    if (xBtn) xBtn.disabled = true;
+
+    try {
+        const users = (typeof getUsers === 'function') ? getUsers() : [];
+        const userById = new Map();
+        users.forEach(u => {
+            if (u && u.id) userById.set(String(u.id).trim(), u);
+        });
+
+        const clearedPairKeys = new Set();
+        const metaKey = (typeof CHAT_META_KEY !== 'undefined') ? CHAT_META_KEY : 'yuelao_chat_meta';
+        const adminChatsKey = (typeof ADMIN_CHATS_KEY !== 'undefined') ? ADMIN_CHATS_KEY : 'yuelao_admin_chats';
+
+        for (let i = 0; i < targetRooms.length; i++) {
+            const room = targetRooms[i];
+            if (execBtn) {
+                execBtn.textContent = `⏳ 正在解除好友並清空紀錄 (${i + 1} / ${targetRooms.length})...`;
+            }
+
+            const pidA = String(room.idA || '').trim();
+            const pidB = String(room.idB || '').trim();
+            const pk = String(room.pairKey || '').trim();
+            if (!pidA || !pidB || !pk) continue;
+
+            const userA = userById.get(pidA) || null;
+            const userB = userById.get(pidB) || null;
+
+            // 1. 雲端與本地解除雙方好友配對、寫入永久解除墓碑、刪除配對快照與清空聊天紀錄（不保存）
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.unmatchUsersInCloud === 'function') {
+                await CloudSync.unmatchUsersInCloud(pidA, pidB, userA, userB);
+            } else {
+                if (typeof CloudSync !== 'undefined' && typeof CloudSync.markPairUnmatched === 'function') {
+                    await CloudSync.markPairUnmatched(pidA, pidB, 315360000000);
+                }
+                if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+                    ChatStore.clearChat(pidA, pidB);
+                }
+            }
+
+            // 2. 確保記憶體樹中的聊天紀錄與摘要節點立即移除
+            if (typeof CloudSync !== 'undefined' && CloudSync.tree) {
+                if (CloudSync.tree[CHATS_KEY] && Object.prototype.hasOwnProperty.call(CloudSync.tree[CHATS_KEY], pk)) {
+                    delete CloudSync.tree[CHATS_KEY][pk];
+                }
+                if (CloudSync.tree[metaKey] && Object.prototype.hasOwnProperty.call(CloudSync.tree[metaKey], pk)) {
+                    delete CloudSync.tree[metaKey][pk];
+                }
+            }
+
+            // 3. 若本地 users 快取存在，同步移除該組好友配對紀錄
+            if (typeof applyUnmatchPairToUsersList === 'function') {
+                applyUnmatchPairToUsersList(users, pidA, pidB);
+            }
+
+            clearedPairKeys.add(pk);
+        }
+
+        // 4. 同步清理 localStorage 中的聊天快取與本地會員快取（聊天紀錄不保存）
+        [adminChatsKey, CHATS_KEY].forEach(lsKey => {
+            try {
+                const raw = localStorage.getItem(lsKey);
+                if (!raw) return;
+                const obj = JSON.parse(raw);
+                if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+                    let changed = false;
+                    clearedPairKeys.forEach(pk => {
+                        if (Object.prototype.hasOwnProperty.call(obj, pk)) {
+                            delete obj[pk];
+                            changed = true;
+                        }
+                    });
+                    if (changed) {
+                        localStorage.setItem(lsKey, JSON.stringify(obj));
+                        if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(lsKey);
+                    }
+                }
+            } catch (e) {}
+        });
+
+        try {
+            if (localStorage.getItem(USERS_KEY) !== null) {
+                localStorage.setItem(USERS_KEY, JSON.stringify(users));
+                if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_KEY);
+            }
+        } catch (e) {}
+
+        // 5. 若右側明細視窗正開啟被清除的聊天室，立即重設
+        if (selectedAdminChatPairKey && clearedPairKeys.has(selectedAdminChatPairKey)) {
+            selectedAdminChatPairKey = '';
+            activeAdminChatDetailPairKey = '';
+            resetRenderedAdminChatDomState();
+        }
+
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.chatsTreeVersion++;
+        }
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('chats');
+            AdminMemoryCache.invalidate('users');
+        }
+        cachedAdminChatSourceRef = null;
+        lastAdminChatRoomsSig = '';
+
+        if (typeof appendLog === 'function') {
+            appendLog(`<span class="text-rose-300">[手動清除低時數聊天室]</span> 管理員已手動清除 <strong>${clearedPairKeys.size}</strong> 間剩餘低於 6 小時的聊天室，同步解除雙方好友配對並永久清空聊天紀錄（不保存）。`);
+        }
+
+        _lowRemainCleanupInFlight = false;
+        closeLowRemainHoursCleanupModal();
+        renderAdminAll(true);
+        alert(`✅ 已完成手動清除！
+
+・共處理 ${clearedPairKeys.size} 間剩餘低於 6 小時的聊天室
+・前後台已同步解除雙方好友配對
+・聊天紀錄已永久清空（不保存）`);
+    } catch (err) {
+        console.error('[low-remain-cleanup] 手動清除失敗', err);
+        alert(`❌ 清除過程中發生異常：${(err && err.message) || '請稍後再試'}`);
+    } finally {
+        _lowRemainCleanupInFlight = false;
+        if (execBtn) {
+            execBtn.disabled = false;
+            execBtn.textContent = origExecText || '🔥 確認解除雙方好友並清空聊天紀錄';
+        }
+        if (backBtn) backBtn.disabled = false;
+        if (xBtn) xBtn.disabled = false;
+    }
+}
+
+window.openLowRemainHoursCleanupModal = openLowRemainHoursCleanupModal;
+window.closeLowRemainHoursCleanupModal = closeLowRemainHoursCleanupModal;
+window.toggleLowRemainRoomCheckbox = toggleLowRemainRoomCheckbox;
+window.toggleSelectAllLowRemainRooms = toggleSelectAllLowRemainRooms;
+window.proceedLowRemainSecondConfirm = proceedLowRemainSecondConfirm;
+window.backToLowRemainStep1 = backToLowRemainStep1;
+window.executeLowRemainRoomsCleanup = executeLowRemainRoomsCleanup;
+
+
+let _manualSingleRoomActionInFlight = false;
+
+async function manualDeleteChatAndUnmatchPair(pairKey, idA, idB) {
+    if (_manualSingleRoomActionInFlight) return;
+    const pk = String(pairKey || '').trim() || ((typeof ChatStore !== 'undefined' && typeof ChatStore.getPairKey === 'function') ? ChatStore.getPairKey(idA, idB) : '');
+    const parts = pk.split('__');
+    const pidA = String(idA || parts[0] || '').trim();
+    const pidB = String(idB || parts[1] || '').trim();
+    if (!pidA || !pidB) {
+        alert('找不到完整的雙方玩家 ID，無法執行解除配對。');
+        return;
+    }
+
+    const users = (typeof getUsers === 'function') ? getUsers() : [];
+    const userA = users.find(u => u && String(u.id).trim() === pidA) || null;
+    const userB = users.find(u => u && String(u.id).trim() === pidB) || null;
+    const nameA = (userA && userA.nickname) ? userA.nickname : `玩家_${pidA}`;
+    const nameB = (userB && userB.nickname) ? userB.nickname : `玩家_${pidB}`;
+
+    if (!confirm(`確定要刪除「${nameA} (ID:${pidA}) ⇄ ${nameB} (ID:${pidB})」的聊天紀錄（不保存），並解除會員列表雙方好友配對嗎？
+
+此操作會同步更新前後台名單與清空聊天室，無法復原。`)) {
+        return;
+    }
+
+    _manualSingleRoomActionInFlight = true;
+    const actBtn = document.getElementById('manualDeleteAndUnmatchRoomBtn');
+    if (actBtn) actBtn.disabled = true;
+
+    try {
+        const cleanUserObj = (srcUser, selfId, partnerId) => {
+            if (!srcUser || typeof srcUser !== 'object') return null;
+            const u = { ...srcUser, id: selfId };
+            if (Array.isArray(u.matchedHistory)) {
+                u.matchedHistory = u.matchedHistory.filter(h => String(h && h.partnerId).trim() !== partnerId);
+            }
+            if (String(u.matchedWithId || '').trim() === partnerId) {
+                const fallbackLast = (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0)
+                    ? u.matchedHistory[u.matchedHistory.length - 1]
+                    : null;
+                u.matchedSession = fallbackLast ? (fallbackLast.session || null) : null;
+                u.matchedWithId = fallbackLast ? (fallbackLast.partnerId || null) : null;
+                u.matchedWithName = fallbackLast ? (fallbackLast.partnerName || null) : null;
+                u.matchedAt = fallbackLast ? (fallbackLast.matchedAt || null) : null;
+            }
+            return u;
+        };
+
+        const cleanedA = cleanUserObj(userA, pidA, pidB);
+        const cleanedB = cleanUserObj(userB, pidB, pidA);
+
+        users.forEach((u, idx) => {
+            if (!u || !u.id) return;
+            const uid = String(u.id).trim();
+            if (uid === pidA && cleanedA) users[idx] = cleanedA;
+            if (uid === pidB && cleanedB) users[idx] = cleanedB;
+        });
+
+        if (typeof CloudSync !== 'undefined') {
+            if (typeof CloudSync.unmatchUsersInCloud === 'function') {
+                await CloudSync.unmatchUsersInCloud(pidA, pidB, cleanedA || userA, cleanedB || userB);
+            } else {
+                if (typeof CloudSync.markPairUnmatched === 'function') {
+                    await CloudSync.markPairUnmatched(pidA, pidB, 315360000000);
+                }
+                if (cleanedA && typeof CloudSync.upsertUser === 'function') {
+                    await CloudSync.upsertUser(cleanedA, true, { isMatchMutation: true });
+                }
+                if (cleanedB && typeof CloudSync.upsertUser === 'function') {
+                    await CloudSync.upsertUser(cleanedB, true, { isMatchMutation: true });
+                }
+                if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+                    ChatStore.clearChat(pidA, pidB);
+                }
+            }
+        } else if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+            ChatStore.clearChat(pidA, pidB);
+        }
+
+        // 同步清除本地聊天室快取與更新本地會員名單
+        [ADMIN_CHATS_KEY, CHATS_KEY].forEach(cKey => {
+            try {
+                const rawC = localStorage.getItem(cKey);
+                if (rawC) {
+                    const parsedC = JSON.parse(rawC);
+                    if (parsedC && typeof parsedC === 'object' && pk && Object.prototype.hasOwnProperty.call(parsedC, pk)) {
+                        delete parsedC[pk];
+                        localStorage.setItem(cKey, JSON.stringify(parsedC));
+                        if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(cKey);
+                    }
+                }
+            } catch (e) {}
+        });
+
+        try {
+            localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
+            if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_LOCAL_KEY);
+        } catch (e) {}
+
+        if (selectedAdminChatPairKey === pk || activeAdminChatDetailPairKey === pk) {
+            selectedAdminChatPairKey = '';
+            activeAdminChatDetailPairKey = '';
+            resetRenderedAdminChatDomState();
+        }
+
+        if (typeof CloudSync !== 'undefined') {
+            CloudSync.chatsTreeVersion++;
+        }
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('chats');
+            AdminMemoryCache.invalidate('users');
+        }
+        cachedAdminChatSourceRef = null;
+        lastAdminChatRoomsSig = '';
+
+        renderAdminAll(true);
+        alert(`✅ 已刪除聊天紀錄（不保存）並解除雙方好友配對！\n\n・對象：${nameA} (ID:${pidA}) ⇄ ${nameB} (ID:${pidB})`);
+    } catch (err) {
+        console.error('[manual-unmatch] 解除配對失敗', err);
+        alert(`❌ 操作失敗：${(err && err.message) || '請稍後再試'}`);
+    } finally {
+        _manualSingleRoomActionInFlight = false;
+        const latestBtn = document.getElementById('manualDeleteAndUnmatchRoomBtn');
+        if (latestBtn) latestBtn.disabled = false;
+    }
+}
+
+window.manualDeleteChatAndUnmatchPair = manualDeleteChatAndUnmatchPair;
+
 window.onAdminChatRoomsPerPageChange = onAdminChatRoomsPerPageChange;
 

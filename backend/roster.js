@@ -364,12 +364,20 @@ function openEditPlayerModal(playerId) {
                     const val = u[f.key];
                     const curPriv = privMap[f.key] || f.defaultPrivacy || sec.defaultPrivacy || 'closed';
                     const isWide = (f.type === 'textarea' || f.type === 'multiselect' || f.type === 'regionCity' || f.type === 'mbtiTwoStep' || f.type === 'petTwoStep');
-                    const privSelectHtml = f.lockPrivacy ? '' : `
+                    const isNicknameField = (f.key === 'nickname');
+                    const curNickLocked = Boolean(u.lockNickname);
+                    const privSelectHtml = isNicknameField ? `
+                        <select id="edit-priv-${f.key}" onchange="onAdminEditNicknameOptionChange(this.value)" class="text-[11px] px-2.5 py-1 admin-input-box text-[#8f4452] font-semibold">
+                            <option value="open" ${(!curNickLocked && curPriv === 'open') ? 'selected' : ''}>開放好友</option>
+                            <option value="closed" ${(!curNickLocked && curPriv !== 'open') ? 'selected' : ''}>不開放</option>
+                            <option value="no_edit" ${curNickLocked ? 'selected' : ''}>禁止前台修改</option>
+                        </select>
+                    ` : (f.lockPrivacy ? '' : `
                         <select id="edit-priv-${f.key}" class="text-[11px] px-2.5 py-1 admin-input-box text-[#8f4452] font-semibold">
                             <option value="open" ${curPriv === 'open' ? 'selected' : ''}>開放給好友</option>
                             <option value="closed" ${curPriv === 'closed' ? 'selected' : ''}>不開放</option>
                         </select>
-                    `;
+                    `);
 
                     let controlHtml = '';
                     if (f.type === 'regionCity') {
@@ -556,6 +564,13 @@ function onAdminEditSelectOtherChange(key, val) {
     }
 }
 
+function onAdminEditNicknameOptionChange(optVal) {
+    if (optVal === 'no_edit') {
+        const nickInput = document.getElementById('edit-field-nickname');
+        if (nickInput) nickInput.focus();
+    }
+}
+
 function onAdminEditHobbiesChange() {
     const checked = Array.from(document.querySelectorAll('input[name="edit-ms-hobbies"]:checked')).map(cb => cb.value);
     const otherEl = document.getElementById('edit-field-hobbiesOther');
@@ -579,9 +594,22 @@ function saveAdminEditedPlayer(e) {
     const u = { ...prevUser };
     const nextPrivacy = { ...(u.privacy || {}) };
 
+    let nextLockNickname = Boolean(u.lockNickname);
     ADMIN_EDIT_SECTIONS.forEach(sec => {
         sec.fields.forEach(f => {
-            if (!f.lockPrivacy) {
+            if (f.key === 'nickname') {
+                const nickPrivEl = document.getElementById(`edit-priv-${f.key}`);
+                if (nickPrivEl) {
+                    const chosenNickOpt = nickPrivEl.value;
+                    if (chosenNickOpt === 'no_edit') {
+                        nextLockNickname = true;
+                        nextPrivacy[f.key] = (nextPrivacy[f.key] === 'open') ? 'open' : 'closed';
+                    } else {
+                        nextLockNickname = false;
+                        nextPrivacy[f.key] = chosenNickOpt === 'open' ? 'open' : 'closed';
+                    }
+                }
+            } else if (!f.lockPrivacy) {
                 const privEl = document.getElementById(`edit-priv-${f.key}`);
                 if (privEl) nextPrivacy[f.key] = privEl.value;
             }
@@ -644,6 +672,7 @@ function saveAdminEditedPlayer(e) {
     nextPrivacy.bio = 'open';
     nextPrivacy.icebreakerQuestion = 'open';
 
+    u.lockNickname = nextLockNickname;
     u.privacy = nextPrivacy;
     u.updatedAt = new Date().toLocaleString('zh-TW') + ' (管理員編輯)';
     u.backupCode = (typeof deriveFixedBackupCode === 'function') ? deriveFixedBackupCode(u.id) : (typeof generatePlayerBackupCode === 'function' ? generatePlayerBackupCode(u, users) : u.backupCode);
