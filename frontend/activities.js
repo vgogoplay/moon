@@ -386,11 +386,11 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
     if (step1LabelEl) {
         const hasExtraPrivilege = (typeof hasMaleExtraRegularSessionPrivilege === 'function') && hasMaleExtraRegularSessionPrivilege(appState);
         if (isMaleLimited && quotaExhausted) {
-            step1LabelEl.innerHTML = `1. 本週配對場次額度已用完（已使用 ${lockedUsedCount} / ${maxAllowed} 場）<br><span class="text-[11px] text-rose-600 font-bold">（本屆報名次數已用罄，下週日更新下一屆後才可再報名）</span>`;
+            step1LabelEl.innerHTML = `1. 本週配對場次額度已用完（已使用 ${lockedUsedCount} / ${maxAllowed} 場）<br><span class="text-[11px] text-rose-600 font-bold">（本屆報名次數已用罄，下週日更新下一屆後才可再報名）</span><br><span class="text-[11px] text-red-600 font-bold">（・🔒贊助 可增加1場選擇）</span>`;
         } else if (isMaleLimited && hasExtraPrivilege) {
             step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，✨ 已解鎖最多可選 ${maxAllowed} 場；本週已用 ${lockedUsedCount} 場）`;
         } else if (isMaleLimited) {
-            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，最多可選 ${maxAllowed} 場；本週已用 ${lockedUsedCount} 場）<br><span class="text-[11px] text-red-600 font-bold">（🔒贊助解鎖-第3場）</span>`;
+            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，最多可選 ${maxAllowed} 場；本週已用 ${lockedUsedCount} 場）<br><span class="text-[11px] text-red-600 font-bold">（・🔒贊助 可增再加1場選擇）</span>`;
         } else {
             step1LabelEl.innerHTML = '1. 請選擇要參加的配對場次（選填，可複選）';
         }
