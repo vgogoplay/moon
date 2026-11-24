@@ -225,6 +225,11 @@ function syncFromSharedStorage() {
         stateChanged = true;
         if (!sysCfgNow.registrationOpen) {
             closeRegisterModal();
+        } else {
+            const regModalEl = document.getElementById('registerModal');
+            if (regModalEl && !regModalEl.classList.contains('hidden') && typeof renderRegisterModalSessionOptions === 'function') {
+                renderRegisterModalSessionOptions();
+            }
         }
     }
 
@@ -398,6 +403,9 @@ function syncFromSharedStorage() {
             }
 
             // 同步並正規化前後台已儲存的報名場次與條件（Firebase RTDB 會省略空陣列 []，故 undefined 視同 []）
+            if (me.b3ThuMaleCleared && !appState.b3ThuMaleCleared) {
+                appState.b3ThuMaleCleared = true;
+            }
             const rawCloudSessions = Array.isArray(me.registeredSessions) ? me.registeredSessions : [];
             const normUserSessions = Array.from(new Set(rawCloudSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
             const normAppSessions = Array.from(new Set((appState.registeredSessions || []).map(s => normalizeSessionLabel(s)).filter(Boolean)));
@@ -408,6 +416,22 @@ function syncFromSharedStorage() {
                 const regModalEl = document.getElementById('registerModal');
                 if (regModalEl && !regModalEl.classList.contains('hidden') && typeof openRegisterModal === 'function') {
                     openRegisterModal();
+                }
+            }
+            const mePidStr = String(me.id || '').trim();
+            if (typeof CloudSync !== 'undefined' && CloudSync._migratedMaleB3ThuUserIds && CloudSync._migratedMaleB3ThuUserIds.has(mePidStr)) {
+                CloudSync._migratedMaleB3ThuUserIds.delete(mePidStr);
+                if (typeof ActivityRegArchive !== 'undefined' && typeof TARGET_CANCEL_MALE_B3_THU_LABEL !== 'undefined') {
+                    ActivityRegArchive.removeRegular(TARGET_CANCEL_MALE_B3_THU_LABEL, mePidStr);
+                }
+                if (CloudSync.initialized && typeof CloudSync.patchUserFields === 'function') {
+                    CloudSync.patchUserFields(mePidStr, {
+                        registeredSessions: normUserSessions,
+                        registeredSession: null,
+                        exactMatchCriteria: normUserSessions.length === 0 ? {} : (me.exactMatchCriteria || {}),
+                        mustMatchKeys: normUserSessions.length === 0 ? [] : (me.mustMatchKeys || []),
+                        b3ThuMaleCleared: true
+                    }, me);
                 }
             }
 

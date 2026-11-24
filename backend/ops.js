@@ -185,6 +185,37 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
         }
     }
 
+    const extraMaleIds = (typeof normalizeMaleExtraSessionPlayerIds === 'function')
+        ? normalizeMaleExtraSessionPlayerIds(sysCfg.maleExtraSessionPlayerIds)
+        : (Array.isArray(sysCfg.maleExtraSessionPlayerIds) ? sysCfg.maleExtraSessionPlayerIds : []);
+    const extraCountBadge = document.getElementById('maleExtraSessionCountBadge');
+    if (extraCountBadge) {
+        extraCountBadge.textContent = `已開放 ${extraMaleIds.length} 位男生`;
+    }
+    const extraListBox = document.getElementById('maleExtraSessionPlayersList');
+    if (extraListBox) {
+        const userNameById = new Map();
+        effectiveUsers.forEach(u => {
+            if (u && u.id) userNameById.set(String(u.id).trim(), String(u.nickname || '').trim());
+        });
+        const escIdHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        if (extraMaleIds.length === 0) {
+            extraListBox.innerHTML = `<p class="text-xs text-gray-400">目前尚未新增任何男生加選名單（所有男生皆維持最多選 2 個選項）。</p>`;
+        } else {
+            extraListBox.innerHTML = extraMaleIds.map(pid => {
+                const nick = userNameById.get(pid);
+                const nickLabel = nick ? ` ${escIdHtml(nick)}` : '';
+                return `
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sky-50 border border-sky-200 text-sky-900 text-xs font-semibold">
+                        <span>🚹 <strong>ID:${escIdHtml(pid)}</strong>${nickLabel}</span>
+                        <span class="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">可選 3 場</span>
+                        <button type="button" onclick="removeMaleExtraSessionPlayer('${escIdHtml(pid)}')" title="移除此玩家（恢復為最多選 2 場）" class="ml-0.5 text-rose-500 hover:text-rose-700 font-bold">✕</button>
+                    </span>
+                `;
+            }).join('');
+        }
+    }
+
     const forceBatchSel = document.getElementById('forceBatchSelect');
     if (forceBatchSel && typeof getBatchScheduleInfo === 'function') {
         const prevForceBatch = forceBatchSel.value;
@@ -791,4 +822,105 @@ async function runDbCleanup() {
     } catch (err) {
         alert('清理失敗，請稍後重試（已完成的部分不會重複刪除）。');
     }
+}
+
+
+function addMaleExtraSessionPlayer() {
+    const inputEl = document.getElementById('maleExtraSessionPlayerInput');
+    if (!inputEl) return;
+    const rawText = inputEl.value.trim();
+    if (!rawText) {
+        alert('請輸入要開放可選 3 個配對選項的男生玩家 ID！');
+        inputEl.focus();
+        return;
+    }
+
+    const rawTokens = rawText.split(/[,，\s\n]+/).map(s => s.trim()).filter(Boolean);
+    if (rawTokens.length === 0) return;
+
+    let effectiveUsers = (typeof getUsers === 'function') ? getUsers() : [];
+    if ((!Array.isArray(effectiveUsers) || effectiveUsers.length === 0) && typeof CloudSync !== 'undefined' && CloudSync.tree && typeof USER_INDEX_KEY !== 'undefined' && CloudSync.tree[USER_INDEX_KEY] && typeof CloudSync.tree[USER_INDEX_KEY] === 'object') {
+        effectiveUsers = Object.values(CloudSync.tree[USER_INDEX_KEY]).filter(u => u && typeof u === 'object' && u.id);
+    }
+    const userById = new Map();
+    effectiveUsers.forEach(u => {
+        if (u && u.id) userById.set(String(u.id).trim(), u);
+    });
+
+    const cfg = getSystemConfig();
+    const curList = (typeof normalizeMaleExtraSessionPlayerIds === 'function')
+        ? normalizeMaleExtraSessionPlayerIds(cfg.maleExtraSessionPlayerIds)
+        : (Array.isArray(cfg.maleExtraSessionPlayerIds) ? [...cfg.maleExtraSessionPlayerIds] : []);
+    const nextSet = new Set(curList);
+
+    const addedLabels = [];
+    const skippedFemales = [];
+    const alreadyExists = [];
+    const unknownIds = [];
+
+    rawTokens.forEach(pid => {
+        const u = userById.get(pid);
+        if (u) {
+            const actualG = (typeof resolveUserActualGender === 'function')
+                ? resolveUserActualGender(u)
+                : (String(u.gender || '').trim() || (pid.startsWith('1') ? '男' : (pid.startsWith('2') ? '女' : '')));
+            if (actualG === '女') {
+                skippedFemales.push(`${u.nickname || ''} (ID:${pid})`.trim());
+                return;
+            }
+        } else if (pid.startsWith('2')) {
+            skippedFemales.push(`ID:${pid}`);
+            return;
+        } else {
+            unknownIds.push(pid);
+        }
+
+        if (nextSet.has(pid)) {
+            alreadyExists.push(pid);
+            return;
+        }
+        nextSet.add(pid);
+        addedLabels.push(u && u.nickname ? `${u.nickname} (ID:${pid})` : `ID:${pid}`);
+    });
+
+    if (skippedFemales.length > 0) {
+        alert(`⚠️ 以下為女生帳號，女生本身已不限制場次選項數量，無需加入此名單：\n・${skippedFemales.join('\n・')}`);
+    }
+
+    if (addedLabels.length === 0) {
+        if (alreadyExists.length > 0 && skippedFemales.length === 0) {
+            alert(`玩家 ID（${alreadyExists.join('、')}）已在可選 3 場特權名單中！`);
+        }
+        inputEl.value = '';
+        return;
+    }
+
+    if (unknownIds.length > 0) {
+        const ok = confirm(`找不到玩家 ID「${unknownIds.join('、')}」的建檔資料，仍要預先將此 ID 加入可選 3 場名單嗎？`);
+        if (!ok) {
+            unknownIds.forEach(uid => nextSet.delete(uid));
+            if (nextSet.size === curList.length) return;
+        }
+    }
+
+    const updatedIds = Array.from(nextSet);
+    setSystemConfig({ maleExtraSessionPlayerIds: updatedIds });
+    inputEl.value = '';
+    appendLog(`<span class="text-emerald-300">[男生加選場次特權]</span> 已將 <strong>${addedLabels.join('、')}</strong> 加入名單，前台報名上限提升為 <strong>3 個選項</strong>。`);
+    renderAdminAll(true);
+}
+
+function removeMaleExtraSessionPlayer(playerId) {
+    const pid = String(playerId || '').trim();
+    if (!pid) return;
+    const cfg = getSystemConfig();
+    const curList = (typeof normalizeMaleExtraSessionPlayerIds === 'function')
+        ? normalizeMaleExtraSessionPlayerIds(cfg.maleExtraSessionPlayerIds)
+        : (Array.isArray(cfg.maleExtraSessionPlayerIds) ? [...cfg.maleExtraSessionPlayerIds] : []);
+    const nextList = curList.filter(id => id !== pid);
+    if (nextList.length === curList.length) return;
+
+    setSystemConfig({ maleExtraSessionPlayerIds: nextList });
+    appendLog(`<span class="text-amber-300">[男生加選場次特權]</span> 已將玩家 <strong>ID:${pid}</strong> 移出特權名單，恢復為最多可選 <strong>2 個選項</strong>。`);
+    renderAdminAll(true);
 }

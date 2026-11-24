@@ -93,6 +93,116 @@ function isSameSession(s1, s2) {
     return n1 !== '' && n1 === n2;
 }
 
+const MAX_MALE_REGULAR_SESSIONS = 2;
+const MAX_MALE_EXTRA_REGULAR_SESSIONS = 3;
+const TARGET_CANCEL_MALE_B3_THU_LABEL = '第3屆11/26(四)';
+const TARGET_CANCEL_MALE_B3_TUE_LABEL = '第3屆11/24(二)';
+const TARGET_CANCEL_MALE_B3_SAT_LABEL = '第3屆11/28(六)';
+
+function normalizeMaleExtraSessionPlayerIds(raw) {
+    const items = Array.isArray(raw)
+        ? raw
+        : (raw && typeof raw === 'object' ? Object.values(raw) : []);
+    const seen = new Set();
+    const result = [];
+    items.forEach(v => {
+        const s = String(v ?? '').trim();
+        if (s && !seen.has(s)) {
+            seen.add(s);
+            result.push(s);
+        }
+    });
+    return result;
+}
+
+function getMaleExtraSessionPlayerIdsList() {
+    try {
+        if (typeof Store !== 'undefined' && Store && typeof Store.getSystemConfig === 'function') {
+            return normalizeMaleExtraSessionPlayerIds(Store.getSystemConfig().maleExtraSessionPlayerIds);
+        }
+    } catch (e) {}
+    try {
+        if (typeof getSystemConfig === 'function') {
+            return normalizeMaleExtraSessionPlayerIds(getSystemConfig().maleExtraSessionPlayerIds);
+        }
+    } catch (e) {}
+    try {
+        const keyName = (typeof SYSTEM_STATE_KEY !== 'undefined') ? SYSTEM_STATE_KEY : 'yuelao_system_batch';
+        const raw = localStorage.getItem(keyName);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            return normalizeMaleExtraSessionPlayerIds(parsed && parsed.maleExtraSessionPlayerIds);
+        }
+    } catch (e) {}
+    return [];
+}
+
+function hasMaleExtraRegularSessionPrivilege(userOrState) {
+    if (!isMalePlayerRecord(userOrState)) return false;
+    const prof = (userOrState.profile && typeof userOrState.profile === 'object') ? userOrState.profile : userOrState;
+    const pid = String(userOrState.playerId || userOrState.id || prof.id || '').trim();
+    if (!pid) return false;
+    return getMaleExtraSessionPlayerIdsList().includes(pid);
+}
+
+function isMalePlayerRecord(userOrState) {
+    if (!userOrState || typeof userOrState !== 'object') return false;
+    const prof = (userOrState.profile && typeof userOrState.profile === 'object') ? userOrState.profile : userOrState;
+    if (typeof resolveUserActualGender === 'function') {
+        const g = resolveUserActualGender({
+            gender: prof.gender || userOrState.gender,
+            id: userOrState.playerId || userOrState.id || prof.id
+        });
+        if (g === '男') return true;
+        if (g === '女') return false;
+    }
+    const rawG = String(prof.gender || userOrState.gender || '').trim();
+    if (rawG === '男' || rawG === '男生') return true;
+    const pid = String(userOrState.playerId || userOrState.id || prof.id || '').trim();
+    return pid.startsWith('1');
+}
+
+function getMaxRegularSessionsForUser(userOrState) {
+    if (!isMalePlayerRecord(userOrState)) return Infinity;
+    return hasMaleExtraRegularSessionPrivilege(userOrState)
+        ? MAX_MALE_EXTRA_REGULAR_SESSIONS
+        : MAX_MALE_REGULAR_SESSIONS;
+}
+
+// 清理規則：若男生未在「可選 3 場特權名單」內，且同時選了第3屆 二、四、六（三場全選），
+// 則自動移除「第3屆11/26(四)」，只保留 第3屆11/24(二) 與 第3屆11/28(六)（不影響之後手動改選任意 2 場）
+function applyOneTimeMaleBatch3ThuCleanup(userObj) {
+    if (!userObj || typeof userObj !== 'object') return false;
+    if (!isMalePlayerRecord(userObj)) return false;
+    if (hasMaleExtraRegularSessionPrivilege(userObj)) return false;
+
+    const rawList = Array.isArray(userObj.registeredSessions)
+        ? userObj.registeredSessions
+        : (userObj.registeredSession ? [userObj.registeredSession] : []);
+
+    const hasTue = rawList.some(s => isSameSession(s, TARGET_CANCEL_MALE_B3_TUE_LABEL));
+    const hasThu = rawList.some(s => isSameSession(s, TARGET_CANCEL_MALE_B3_THU_LABEL));
+    const hasSat = rawList.some(s => isSameSession(s, TARGET_CANCEL_MALE_B3_SAT_LABEL));
+
+    userObj.b3ThuMaleCleared = true;
+    if (!(hasTue && hasThu && hasSat)) return false;
+
+    const filtered = Array.from(new Set(
+        rawList
+            .map(s => normalizeSessionLabel(s))
+            .filter(s => s && !isSameSession(s, TARGET_CANCEL_MALE_B3_THU_LABEL))
+    ));
+    userObj.registeredSessions = filtered;
+    if (Object.prototype.hasOwnProperty.call(userObj, 'registeredSession')) {
+        delete userObj.registeredSession;
+    }
+    if (filtered.length === 0) {
+        userObj.exactMatchCriteria = {};
+        userObj.mustMatchKeys = [];
+    }
+    return true;
+}
+
 function extractBatchLabel(sessionStr) {
     const m = String(sessionStr || '').match(/^第\s*\d+\s*屆/);
     return m ? m[0].replace(/\s+/g, '') : String(sessionStr || '');

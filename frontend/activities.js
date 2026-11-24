@@ -362,18 +362,37 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
     const thuLabel = sched.thuLabel;
     const satLabel = sched.satLabel;
     const savedSessions = Array.isArray(appState.registeredSessions) ? appState.registeredSessions : [];
+    const maxAllowed = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
+    const isMaleLimited = Number.isFinite(maxAllowed);
 
+    const step1LabelEl = listEl.previousElementSibling;
+    if (step1LabelEl) {
+        const hasExtraPrivilege = (typeof hasMaleExtraRegularSessionPrivilege === 'function') && hasMaleExtraRegularSessionPrivilege(appState);
+        if (isMaleLimited && hasExtraPrivilege) {
+            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，✨ 已解鎖最多可選 ${maxAllowed} 場）`;
+        } else if (isMaleLimited) {
+            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，最多可選 ${maxAllowed} 場）<br><span class="text-[11px] text-[#c96a7b] font-bold">（贊助解鎖 第3場）</span>`;
+        } else {
+            step1LabelEl.innerHTML = '1. 請選擇要參加的配對場次（選填，可複選）';
+        }
+    }
+
+    let initialCheckedCount = 0;
     listEl.innerHTML = [tueLabel, thuLabel, satLabel].map(opt => {
         const isClosed = (typeof isRegularSessionRegistrationClosed === 'function')
             ? isRegularSessionRegistrationClosed(opt, nowTs)
             : false;
         const wasRegistered = savedSessions.some(s => isSameSession(s, opt));
-        const checked = !isClosed && wasRegistered;
+        let checked = !isClosed && wasRegistered;
+        if (checked && initialCheckedCount >= maxAllowed) {
+            checked = false;
+        }
+        if (checked) initialCheckedCount++;
 
         if (isClosed) {
             return `
-                <label title="此場次已於當日 20:00 截止報名，無法再勾選" class="flex items-center gap-2.5 p-3 rounded-2xl border border-gray-200 bg-gray-100/90 text-gray-400 opacity-80 cursor-not-allowed select-none">
-                    <input type="checkbox" name="regSessionCheck" value="${opt}" disabled class="w-4 h-4 accent-gray-400 cursor-not-allowed">
+                <label data-session-closed="1" title="此場次已於當日 20:00 截止報名，無法再勾選" class="flex items-center gap-2.5 p-3 rounded-2xl border border-gray-200 bg-gray-100/90 text-gray-400 opacity-80 cursor-not-allowed select-none">
+                    <input type="checkbox" name="regSessionCheck" value="${opt}" disabled data-time-closed="1" class="w-4 h-4 accent-gray-400 cursor-not-allowed">
                     <div class="min-w-0">
                         <div class="font-bold text-xs text-gray-400 line-through">${opt}</div>
                         <div class="text-[10px] text-rose-500 font-bold mt-0.5">🚫 已截止報名（20:00 已過）</div>
@@ -383,11 +402,11 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
         }
 
         return `
-            <label class="flex items-center gap-2.5 p-3 rounded-2xl border border-pink-200 bg-pink-50/40 cursor-pointer hover:bg-pink-50 transition">
+            <label data-session-card="1" class="flex items-center gap-2.5 p-3 rounded-2xl border border-pink-200 bg-pink-50/40 cursor-pointer hover:bg-pink-50 transition">
                 <input type="checkbox" name="regSessionCheck" value="${opt}" ${checked ? 'checked' : ''} onchange="onRegSessionCheckChange()" class="accent-[#c96a7b] w-4 h-4">
                 <div class="min-w-0">
-                    <div class="font-bold text-xs text-[#8f4452]">${opt}</div>
-                    <div class="text-[10px] text-emerald-700 font-semibold mt-0.5">🟢 開放報名中（當日 20:00 截止）</div>
+                    <div data-session-title="1" class="font-bold text-xs text-[#8f4452]">${opt}</div>
+                    <div data-session-sub="1" class="text-[10px] text-emerald-700 font-semibold mt-0.5">🟢 開放報名中（當日 20:00 截止）</div>
                 </div>
             </label>
         `;
@@ -714,11 +733,56 @@ function collectDualCriteriaFromDom(scope) {
 }
 
 window.onRegSessionCheckChange = function() {
-    const checkedSessions = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:not(:disabled):checked')).map(cb => cb.value);
+    const maxAllowed = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
+    const isMaleLimited = Number.isFinite(maxAllowed);
+    const openCheckboxes = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:not([data-time-closed="1"])'));
+    let checkedCount = 0;
+    openCheckboxes.forEach(cb => {
+        if (cb.checked) {
+            if (checkedCount >= maxAllowed) {
+                cb.checked = false;
+            } else {
+                checkedCount++;
+            }
+        }
+    });
+
+    const reachedLimit = isMaleLimited && checkedCount >= maxAllowed;
+    openCheckboxes.forEach(cb => {
+        const shouldDisable = reachedLimit && !cb.checked;
+        cb.disabled = shouldDisable;
+        const cardEl = cb.closest('label[data-session-card="1"]');
+        if (!cardEl) return;
+        const titleEl = cardEl.querySelector('[data-session-title="1"]');
+        const subEl = cardEl.querySelector('[data-session-sub="1"]');
+        if (shouldDisable) {
+            cardEl.title = `每屆最多只能選 ${maxAllowed} 個場次`;
+            cardEl.className = 'flex items-center gap-2.5 p-3 rounded-2xl border border-gray-200 bg-gray-100/90 text-gray-400 opacity-75 cursor-not-allowed select-none transition';
+            cb.className = 'w-4 h-4 accent-gray-400 cursor-not-allowed';
+            if (titleEl) titleEl.className = 'font-bold text-xs text-gray-400';
+            if (subEl) {
+                subEl.className = 'text-[10px] text-amber-700 font-semibold mt-0.5';
+                subEl.textContent = `🔒 最多選 ${maxAllowed} 場（取消其他場次可改選）`;
+            }
+        } else {
+            cardEl.removeAttribute('title');
+            cardEl.className = 'flex items-center gap-2.5 p-3 rounded-2xl border border-pink-200 bg-pink-50/40 cursor-pointer hover:bg-pink-50 transition';
+            cb.className = 'accent-[#c96a7b] w-4 h-4';
+            if (titleEl) titleEl.className = 'font-bold text-xs text-[#8f4452]';
+            if (subEl) {
+                subEl.className = 'text-[10px] text-emerald-700 font-semibold mt-0.5';
+                subEl.textContent = '🟢 開放報名中（當日 20:00 截止）';
+            }
+        }
+    });
+
+    const checkedSessions = openCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
     const submitBtn = document.querySelector('#registerModal button[onclick="confirmRegistration()"]');
     if (submitBtn) {
         if (checkedSessions.length === 0) {
             submitBtn.textContent = '💾 保存設定（取消場次報名）';
+        } else if (isMaleLimited) {
+            submitBtn.textContent = `✨ 確認送出報名（已選 ${checkedSessions.length} / ${maxAllowed} 場）`;
         } else {
             submitBtn.textContent = `✨ 確認送出報名（已選 ${checkedSessions.length} 場）`;
         }
@@ -813,6 +877,12 @@ async function confirmRegistration() {
     const selectedSessions = rawCheckedSessions.filter(s =>
         !(typeof isRegularSessionRegistrationClosed === 'function' && isRegularSessionRegistrationClosed(s, nowSubmitTs))
     );
+    const maxAllowedSessions = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
+    if (selectedSessions.length > maxAllowedSessions) {
+        renderRegisterModalSessionOptions(nowSubmitTs);
+        showMiniNotice(`🚫 最多只能選 ${maxAllowedSessions} 場`, `每屆最多只能勾選 ${maxAllowedSessions} 個配對場次，請取消其中 1 場後再送出！`);
+        return;
+    }
     if (blockedClosedSessions.length > 0 && selectedSessions.length === 0) {
         renderRegisterModalSessionOptions(nowSubmitTs);
         showMiniNotice('🚫 該場次已截止報名', `【${blockedClosedSessions.join('、')}】已超過 20:00 報名截止時間，請改選其他尚未截止的場次！`);
@@ -1400,11 +1470,15 @@ function refreshAllUI() {
         badge.textContent = `✨ ${sched.batchPrefix}開始報名中`;
         applyBtn.disabled = false;
         applyBtn.textContent = `🌸 開始報名（${sched.batchPrefix}）`;
+        const maxRegHintCount = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
+        const multiHintText = Number.isFinite(maxRegHintCount)
+            ? (maxRegHintCount > 2 ? `✨ 已解鎖最多可選 ${maxRegHintCount} 場` : `最多可選 ${maxRegHintCount} 場`)
+            : '可複選';
         if (closedBatchSessionLabels.length > 0) {
             const closedStrikeHtml = closedBatchSessionLabels.map(lbl => `<span class="text-gray-400 line-through">${lbl}</span>`).join('、');
             alertBox.innerHTML = `目前開放報名 <strong>${openBatchSessionLabels.join('</strong> 或 <strong>')}</strong>（${closedStrikeHtml} 已於 20:00 截止報名），有報名才會參與配對！`;
         } else {
-            alertBox.innerHTML = `目前開放報名 <strong>${openBatchSessionLabels.join('</strong>、<strong>')}</strong>（可複選），有報名才會參與配對！`;
+            alertBox.innerHTML = `目前開放報名 <strong>${openBatchSessionLabels.join('</strong>、<strong>')}</strong>（${multiHintText}），有報名才會參與配對！`;
         }
     }
 

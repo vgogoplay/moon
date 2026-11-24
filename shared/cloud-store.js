@@ -965,6 +965,12 @@ const CloudSync = {
             cleanUser.registeredSessions = Array.from(new Set(
                 this.normalizeStringArray(cleanUser.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
             ));
+            if (typeof applyOneTimeMaleBatch3ThuCleanup === 'function' && applyOneTimeMaleBatch3ThuCleanup(cleanUser)) {
+                if (cleanUser.id) {
+                    if (!this._migratedMaleB3ThuUserIds) this._migratedMaleB3ThuUserIds = new Set();
+                    this._migratedMaleB3ThuUserIds.add(String(cleanUser.id).trim());
+                }
+            }
             cleanUser.matchedHistory = this.normalizeMatchedHistoryList(cleanUser.matchedHistory)
                 .filter(h => !this.isRogueCustomMatchEntry(h, customActsSnapshotForFilter));
             const directWithId = String(cleanUser.matchedWithId || '').trim();
@@ -2396,6 +2402,9 @@ const CloudSync = {
                 await yuelaoAuth.init();
             }
             if (this.isLocalSandboxMode()) {
+                if (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function') {
+                    Store.getUsersArray();
+                }
                 this.initialized = true;
                 this.hasLoadedFullTree = true;
                 this.refreshCloudBadge();
@@ -3094,6 +3103,9 @@ const CloudSync = {
         cleanRecord.registeredSessions = Array.from(new Set(
             this.normalizeStringArray(cleanRecord.registeredSessions).map(s => normalizeSessionLabel(s)).filter(Boolean)
         ));
+        if (typeof isMalePlayerRecord === 'function' && isMalePlayerRecord(cleanRecord)) {
+            cleanRecord.b3ThuMaleCleared = true;
+        }
         cleanRecord.matchedHistory = this.normalizeMatchedHistoryList(cleanRecord.matchedHistory)
             .filter(h => !this.isPairRecentlyUnmatched(pid, h.partnerId) && !this.isRogueCustomMatchEntry(h));
 
@@ -3311,7 +3323,25 @@ const IdAllocator = {
 const Store = {
     getUsersArray() {
         const arr = LocalJsonCache.get(USERS_LOCAL_KEY, () => []);
-        return Array.isArray(arr) ? arr : [];
+        if (!Array.isArray(arr)) return [];
+        if (typeof applyOneTimeMaleBatch3ThuCleanup === 'function') {
+            let changed = false;
+            arr.forEach(u => {
+                if (applyOneTimeMaleBatch3ThuCleanup(u)) {
+                    changed = true;
+                    if (u && u.id && typeof ActivityRegArchive !== 'undefined' && typeof TARGET_CANCEL_MALE_B3_THU_LABEL !== 'undefined') {
+                        ActivityRegArchive.removeRegular(TARGET_CANCEL_MALE_B3_THU_LABEL, u.id);
+                    }
+                }
+            });
+            if (changed) {
+                try {
+                    localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(arr));
+                    LocalJsonCache.invalidate(USERS_LOCAL_KEY);
+                } catch (e) {}
+            }
+        }
+        return arr;
     },
 
     getSystemConfig() {
@@ -3329,7 +3359,10 @@ const Store = {
                 genderLimitEnabled: sys.genderLimitEnabled !== undefined ? Boolean(sys.genderLimitEnabled) : false,
                 genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30,
                 maleDisplayOffset: sys.maleDisplayOffset !== undefined ? Math.max(0, Number(sys.maleDisplayOffset) || 0) : 0,
-                wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true
+                wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true,
+                maleExtraSessionPlayerIds: typeof normalizeMaleExtraSessionPlayerIds === 'function'
+                    ? normalizeMaleExtraSessionPlayerIds(sys.maleExtraSessionPlayerIds)
+                    : (Array.isArray(sys.maleExtraSessionPlayerIds) ? sys.maleExtraSessionPlayerIds.map(String) : [])
             };
         } catch (e) {
             return {
@@ -3341,7 +3374,8 @@ const Store = {
                 genderLimitEnabled: false,
                 genderLimitMax: 30,
                 maleDisplayOffset: 0,
-                wishEarlyCloseCanMatch: true
+                wishEarlyCloseCanMatch: true,
+                maleExtraSessionPlayerIds: []
             };
         }
     },
@@ -3561,7 +3595,7 @@ const Store = {
         else if (mergedProfile.targetGender === '女') mergedProfile.targetGender = '女生';
         else if (mergedProfile.targetGender === '非二元') mergedProfile.targetGender = '都可以';
 
-        return {
+        const normalizedStateObj = {
             ...base,
             ...parsed,
             version: SCHEMA_VERSION,
@@ -3578,6 +3612,10 @@ const Store = {
             customActivityRegs: (parsed.customActivityRegs && typeof parsed.customActivityRegs === 'object' && !Array.isArray(parsed.customActivityRegs)) ? parsed.customActivityRegs : {},
             friends: Array.isArray(parsed.friends) ? parsed.friends : []
         };
+        if (typeof applyOneTimeMaleBatch3ThuCleanup === 'function') {
+            applyOneTimeMaleBatch3ThuCleanup(normalizedStateObj);
+        }
+        return normalizedStateObj;
     },
 
     loadByPlayerId(targetPlayerId) {
@@ -3734,6 +3772,9 @@ const Store = {
         if (Array.isArray(state.registeredSessions)) {
             state.registeredSessions = Array.from(new Set(state.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
         }
+        if (typeof isMalePlayerRecord === 'function' && isMalePlayerRecord(state)) {
+            state.b3ThuMaleCleared = true;
+        }
         if (state.matchedSession && !String(state.matchedSession).includes('強制')) {
             state.matchedSession = normalizeSessionLabel(state.matchedSession);
         }
@@ -3801,6 +3842,7 @@ const Store = {
                 isMatchBanned: Boolean(authMatchSource.isMatchBanned),
                 isChatBanned: Boolean(authMatchSource.isChatBanned),
                 readMailIds: Array.isArray(state.readMailIds) ? Array.from(new Set(state.readMailIds.map(String))) : [],
+                b3ThuMaleCleared: Boolean(state.b3ThuMaleCleared || existingRecord.b3ThuMaleCleared || (typeof isMalePlayerRecord === 'function' && isMalePlayerRecord(state))),
                 registeredSessions: state.isWarnedAccount ? [] : (Array.isArray(state.registeredSessions) ? state.registeredSessions : []),
                 exactMatchCriteria: state.exactMatchCriteria || {},
                 mustMatchKeys: (typeof normalizeMustMatchKeysList === 'function')

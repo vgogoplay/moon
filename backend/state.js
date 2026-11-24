@@ -159,7 +159,10 @@ function getSystemConfig() {
         genderLimitEnabled: sys.genderLimitEnabled !== undefined ? Boolean(sys.genderLimitEnabled) : false,
         genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30,
         maleDisplayOffset: sys.maleDisplayOffset !== undefined ? Math.max(0, Number(sys.maleDisplayOffset) || 0) : 0,
-        wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true
+        wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true,
+        maleExtraSessionPlayerIds: typeof normalizeMaleExtraSessionPlayerIds === 'function'
+            ? normalizeMaleExtraSessionPlayerIds(sys.maleExtraSessionPlayerIds)
+            : (Array.isArray(sys.maleExtraSessionPlayerIds) ? sys.maleExtraSessionPlayerIds.map(String) : [])
     };
 }
 
@@ -172,7 +175,11 @@ function setSystemConfig(patch) {
     localStorage.setItem(SYSTEM_STATE_KEY, serialized);
     if (typeof CloudSync !== 'undefined') {
         if (CloudSync.initialized && typeof CloudSync.patchNode === 'function') {
-            CloudSync.patchNode(SYSTEM_STATE_KEY, patch);
+            const fbPatch = { ...patch };
+            if (Array.isArray(fbPatch.maleExtraSessionPlayerIds) && fbPatch.maleExtraSessionPlayerIds.length === 0) {
+                fbPatch.maleExtraSessionPlayerIds = null;
+            }
+            CloudSync.patchNode(SYSTEM_STATE_KEY, fbPatch);
         } else {
             CloudSync.putNode(SYSTEM_STATE_KEY, updated);
         }
@@ -357,6 +364,12 @@ function getUsers() {
             }
         } else {
             u.registeredSessions = [];
+        }
+        if (typeof applyOneTimeMaleBatch3ThuCleanup === 'function' && applyOneTimeMaleBatch3ThuCleanup(u)) {
+            userMigrated = true;
+            if (u.id && typeof ActivityRegArchive !== 'undefined' && typeof TARGET_CANCEL_MALE_B3_THU_LABEL !== 'undefined') {
+                ActivityRegArchive.removeRegular(TARGET_CANCEL_MALE_B3_THU_LABEL, u.id);
+            }
         }
         if (Object.prototype.hasOwnProperty.call(u, 'registeredSession')) {
             delete u.registeredSession;
@@ -1428,6 +1441,26 @@ async function unlockAdminUI() {
     CloudSync.init(() => {
         renderAdminAll(false);
     }).then(() => {
+        if (typeof CloudSync !== 'undefined' && CloudSync._migratedMaleB3ThuUserIds && CloudSync._migratedMaleB3ThuUserIds.size > 0 && CloudSync.inFlightWrites === 0) {
+            const idsToPatch = Array.from(CloudSync._migratedMaleB3ThuUserIds);
+            CloudSync._migratedMaleB3ThuUserIds.clear();
+            const latestUsers = getUsers();
+            idsToPatch.forEach(pid => {
+                if (typeof ActivityRegArchive !== 'undefined' && typeof TARGET_CANCEL_MALE_B3_THU_LABEL !== 'undefined') {
+                    ActivityRegArchive.removeRegular(TARGET_CANCEL_MALE_B3_THU_LABEL, pid);
+                }
+                const targetU = latestUsers.find(u => u && String(u.id).trim() === pid);
+                if (targetU && typeof CloudSync.patchUserFields === 'function') {
+                    CloudSync.patchUserFields(pid, {
+                        registeredSessions: targetU.registeredSessions || [],
+                        registeredSession: null,
+                        exactMatchCriteria: (targetU.registeredSessions && targetU.registeredSessions.length > 0) ? (targetU.exactMatchCriteria || {}) : {},
+                        mustMatchKeys: (targetU.registeredSessions && targetU.registeredSessions.length > 0) ? (targetU.mustMatchKeys || []) : [],
+                        b3ThuMaleCleared: true
+                    }, targetU);
+                }
+            });
+        }
         if (typeof checkAutoSchedule2000 === 'function') {
             checkAutoSchedule2000();
         }

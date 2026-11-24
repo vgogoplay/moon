@@ -64,6 +64,31 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- 4. 男生加選場次特權名單（預設最多選 2 個選項，新增至名單後可選 3 個選項） -->
+                <div class="md:col-span-2 p-4 rounded-2xl bg-white border-2 border-pink-200 space-y-3">
+                    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                        <div class="space-y-1 min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <p class="text-xs font-bold text-[#8f4452]">4. 男生加選場次特權名單（可選 3 個配對選項）</p>
+                                <span id="maleExtraSessionCountBadge" class="text-[11px] px-2.5 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                                    已開放 0 位男生
+                                </span>
+                            </div>
+                            <p class="text-[11px] text-gray-500 leading-relaxed">
+                                一般男生每屆最多只能選 <strong>2 個選項</strong>；輸入男生玩家 ID 新增至此名單後，該玩家前台報名時可選 <strong>3 個選項</strong>（可全選週二／週四／週六）。
+                            </p>
+                        </div>
+                        <div class="admin-field-box !py-2 !px-3 flex flex-wrap items-center gap-2 shrink-0">
+                            <label for="maleExtraSessionPlayerInput" class="text-xs font-bold text-[#5e464a] whitespace-nowrap">男生玩家 ID</label>
+                            <input type="text" id="maleExtraSessionPlayerInput" onkeydown="if(event.key==='Enter'){event.preventDefault();addMaleExtraSessionPlayer();}" placeholder="例如：10001（可逗號分隔多筆）" class="w-48 sm:w-56 p-2 admin-input-box text-xs font-mono">
+                            <button type="button" onclick="addMaleExtraSessionPlayer()" class="px-4 py-2 rounded-xl text-xs font-bold shadow transition bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white hover:opacity-95 whitespace-nowrap">
+                                ➕ 新增（可選 3 場）
+                            </button>
+                        </div>
+                    </div>
+                    <div id="maleExtraSessionPlayersList" class="flex flex-wrap gap-2 pt-1"></div>
+                </div>
             </div>
         </div>
 
@@ -527,14 +552,14 @@
     </div>
 
     <!-- 前後台共用核心層 -->
-    <script src="shared/schedule.js?v=20261123tue46"></script>
+    <script src="shared/schedule.js?v=20261124malefix2"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261123nodup"></script>
-    <script src="shared/cloud-store.js?v=20261123nodup"></script>
+    <script src="shared/cloud-store.js?v=20261124malefix2"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261123tue46"></script>
+    <script src="backend/state.js?v=20261124malespon"></script>
     <script src="backend/matching.js?v=20261123tue46"></script>
-    <script src="backend/ops.js?v=20261123tue46"></script>
+    <script src="backend/ops.js?v=20261124malespon"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261123tue46"></script>
 </body>
