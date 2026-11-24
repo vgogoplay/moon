@@ -371,7 +371,7 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
         if (isMaleLimited && hasExtraPrivilege) {
             step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，✨ 已解鎖最多可選 ${maxAllowed} 場）`;
         } else if (isMaleLimited) {
-            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，最多可選 ${maxAllowed} 場）<br><span class="text-[11px] text-[#c96a7b] font-bold">（贊助解鎖 第3場）</span>`;
+            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，最多可選 ${maxAllowed} 場）<br><span class="text-[11px] text-red-600 font-bold">（🔒贊助解鎖-第3場）</span>`;
         } else {
             step1LabelEl.innerHTML = '1. 請選擇要參加的配對場次（選填，可複選）';
         }
@@ -484,15 +484,21 @@ function renderDualCriteriaOptionsList(scope, savedCriteria = {}, savedMustKeys 
 
     listEl.innerHTML = EXACT_MATCH_OPTIONS.map(item => {
         const isChecked = Object.prototype.hasOwnProperty.call(savedCriteria, item.key);
-        const isMust = isChecked && validMustSet.has(item.key);
+        const modeVal = isChecked ? (validMustSet.has(item.key) ? '1' : '0') : '';
+        const isMust = modeVal === '1';
+        const isOr = modeVal === '0';
         const isPetTwoStep = item.type === 'petTwoStep';
         const spanClass = isPetTwoStep ? 'sm:col-span-2 ' : '';
 
         let selectorHtml = '';
         if (isPetTwoStep) {
-            const parsedPet = (typeof parsePetCriterionValue === 'function')
-                ? parsePetCriterionValue(savedCriteria[item.key])
-                : { status: '有養寵物', petType: '不限' };
+            const hasSavedPet = isChecked && Boolean(savedCriteria[item.key]);
+            const parsedPet = hasSavedPet
+                ? ((typeof parsePetCriterionValue === 'function')
+                    ? parsePetCriterionValue(savedCriteria[item.key])
+                    : { status: '有養寵物', petType: '不限' })
+                : { status: '', petType: '' };
+            const isUnsetPet = parsedPet.status === '';
             const isNoPetCrit = parsedPet.status === '沒有養寵物';
             const petOptionsList = typeof PET_TYPE_OPTIONS !== 'undefined'
                 ? PET_TYPE_OPTIONS
@@ -500,46 +506,53 @@ function renderDualCriteriaOptionsList(scope, savedCriteria = {}, savedMustKeys 
             selectorHtml = `
                 <div id="${cfg.cardPrefix}pet_wrap_${item.key}" class="${isChecked ? 'grid grid-cols-1 sm:grid-cols-2 gap-1.5' : 'hidden'}">
                     <select id="${cfg.selectPrefix}${item.key}_status" onchange="onDualCriterionPetStatusChange('${scope}', '${item.key}')" class="input-jp !py-1 !text-xs">
-                        <option value="有養寵物" ${!isNoPetCrit ? 'selected' : ''}>有養寵物</option>
+                        <option value="" ${isUnsetPet ? 'selected' : ''}>請選擇...</option>
+                        <option value="有養寵物" ${parsedPet.status === '有養寵物' ? 'selected' : ''}>有養寵物</option>
                         <option value="沒有養寵物" ${isNoPetCrit ? 'selected' : ''}>沒有養寵物</option>
                     </select>
-                    <select id="${cfg.selectPrefix}${item.key}_type" ${isNoPetCrit ? 'disabled' : ''} class="input-jp !py-1 !text-xs">
-                        ${isNoPetCrit
-                            ? '<option value="沒有養寵物" selected>沒有養寵物</option>'
-                            : `
-                                <option value="不限" ${parsedPet.petType === '不限' ? 'selected' : ''}>不限（有養任何寵物皆可）</option>
-                                ${petOptionsList.map(pt => `<option value="${pt}" ${parsedPet.petType === pt ? 'selected' : ''}>${pt}</option>`).join('')}
-                            `
+                    <select id="${cfg.selectPrefix}${item.key}_type" ${(isUnsetPet || isNoPetCrit) ? 'disabled' : ''} class="input-jp !py-1 !text-xs">
+                        ${isUnsetPet
+                            ? '<option value="" selected>請先選擇左側...</option>'
+                            : (isNoPetCrit
+                                ? '<option value="沒有養寵物" selected>沒有養寵物</option>'
+                                : `
+                                    <option value="" ${parsedPet.petType === '' ? 'selected' : ''}>請選擇寵物類型...</option>
+                                    <option value="不限" ${parsedPet.petType === '不限' ? 'selected' : ''}>不限（有養任何寵物皆可）</option>
+                                    ${petOptionsList.map(pt => `<option value="${pt}" ${parsedPet.petType === pt ? 'selected' : ''}>${pt}</option>`).join('')}
+                                `)
                         }
                     </select>
                 </div>
             `;
         } else {
-            const selectedVal = savedCriteria[item.key] || item.choices[0];
+            const hasSavedVal = isChecked && Boolean(savedCriteria[item.key]);
+            const selectedVal = hasSavedVal ? String(savedCriteria[item.key]) : '';
             selectorHtml = `
                 <select id="${cfg.selectPrefix}${item.key}" class="input-jp !py-1 !text-xs ${isChecked ? '' : 'hidden'}">
+                    <option value="" ${selectedVal === '' ? 'selected' : ''}>請選擇...</option>
                     ${item.choices.map(c => `<option value="${c}" ${selectedVal === c ? 'selected' : ''}>${c}</option>`).join('')}
                 </select>
             `;
         }
 
         return `
-            <div id="${cfg.cardPrefix}${item.key}" class="${spanClass}p-2.5 rounded-xl border transition space-y-1.5 ${isChecked ? (isMust ? 'border-[#c96a7b] bg-rose-50/55 shadow-2xs' : 'border-pink-200 bg-pink-50/20') : 'border-pink-100 bg-white'}">
+            <div id="${cfg.cardPrefix}${item.key}" class="${spanClass}p-2.5 rounded-xl border transition space-y-1.5 ${isChecked ? (isMust ? 'border-[#c96a7b] bg-rose-50/55 shadow-2xs' : (isOr ? 'border-pink-200 bg-pink-50/20' : 'border-amber-300 bg-amber-50/30')) : 'border-pink-100 bg-white'}">
                 <div class="flex items-center justify-between gap-1.5">
                     <label class="flex items-center gap-2 text-xs font-semibold text-[#5e464a] cursor-pointer min-w-0">
                         <input type="checkbox" name="${cfg.checkName}" value="${item.key}" ${isChecked ? 'checked' : ''} onchange="onDualCriterionCheckChange('${scope}', '${item.key}')" class="accent-[#c96a7b] shrink-0">
                         <span class="truncate">${item.label}</span>
                     </label>
-                    <input type="hidden" id="${cfg.mustInputPrefix}${item.key}" value="${isMust ? '1' : '0'}">
+                    <input type="hidden" id="${cfg.mustInputPrefix}${item.key}" value="${modeVal}">
                 </div>
                 ${selectorHtml}
                 <div id="${cfg.cardPrefix}mode_${item.key}" class="${isChecked ? 'grid grid-cols-2 gap-1 pt-0.5' : 'hidden'}">
+                    <div data-role="mode-hint" class="${modeVal === '' ? 'col-span-2 text-[10px] text-rose-500 font-semibold' : 'hidden'}">請選擇條件類型：</div>
                     <button type="button" data-role="must-btn" onclick="setDualCriterionMode('${scope}', '${item.key}', true)"
                         class="py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center ${isMust ? 'bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white border-[#c96a7b] shadow-2xs' : 'bg-white border-pink-200 text-[#8f4452] hover:bg-rose-50'}">
                         🔒 必須吻合
                     </button>
                     <button type="button" data-role="or-btn" onclick="setDualCriterionMode('${scope}', '${item.key}', false)"
-                        class="py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center ${!isMust ? 'bg-pink-100 text-[#8f4452] border-pink-300' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}">
+                        class="py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center ${isOr ? 'bg-pink-100 text-[#8f4452] border-pink-300' : 'bg-white border-pink-200 text-[#8f4452] hover:bg-pink-50'}">
                         ✨ 任一符合
                     </button>
                 </div>
@@ -559,19 +572,27 @@ function syncDualCriteriaUIState(scope) {
     checkedBoxes.forEach(cb => {
         const key = cb.value;
         const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
-        if (flagEl && flagEl.value === '1') {
+        const val = flagEl ? flagEl.value : '';
+        if (val === '1') {
             if (mustCount < MAX_MUST_MATCH_COUNT) {
                 mustCount++;
-            } else {
+            } else if (orCount < MAX_MUST_MATCH_COUNT) {
                 flagEl.value = '0';
                 orCount++;
+            } else {
+                flagEl.value = '';
             }
-        } else {
-            orCount++;
+        } else if (val === '0') {
+            if (orCount < MAX_MUST_MATCH_COUNT) {
+                orCount++;
+            } else {
+                flagEl.value = '';
+            }
         }
     });
 
     const isMustFull = mustCount >= MAX_MUST_MATCH_COUNT;
+    const isOrFull = orCount >= MAX_MUST_MATCH_COUNT;
 
     EXACT_MATCH_OPTIONS.forEach(item => {
         const key = item.key;
@@ -588,7 +609,7 @@ function syncDualCriteriaUIState(scope) {
 
         const isChecked = cb.checked;
         if (!isChecked) {
-            flagEl.value = '0';
+            flagEl.value = '';
             if (isPetTwoStep) {
                 sel.className = 'hidden';
             } else {
@@ -599,7 +620,9 @@ function syncDualCriteriaUIState(scope) {
             return;
         }
 
-        const isMust = flagEl.value === '1';
+        const modeVal = flagEl.value;
+        const isMust = modeVal === '1';
+        const isOr = modeVal === '0';
         if (isPetTwoStep) {
             sel.className = 'grid grid-cols-1 sm:grid-cols-2 gap-1.5';
         } else {
@@ -608,7 +631,16 @@ function syncDualCriteriaUIState(scope) {
         modeBox.className = 'grid grid-cols-2 gap-1 pt-0.5';
         cardEl.className = isMust
             ? `${spanClass}p-2.5 rounded-xl border transition space-y-1.5 border-[#c96a7b] bg-rose-50/55 shadow-2xs`
-            : `${spanClass}p-2.5 rounded-xl border transition space-y-1.5 border-pink-200 bg-pink-50/20`;
+            : (isOr
+                ? `${spanClass}p-2.5 rounded-xl border transition space-y-1.5 border-pink-200 bg-pink-50/20`
+                : `${spanClass}p-2.5 rounded-xl border transition space-y-1.5 border-amber-300 bg-amber-50/30`);
+
+        const modeHint = modeBox.querySelector('[data-role="mode-hint"]');
+        if (modeHint) {
+            modeHint.className = modeVal === ''
+                ? 'col-span-2 text-[10px] text-rose-500 font-semibold'
+                : 'hidden';
+        }
 
         const mustBtn = modeBox.querySelector('[data-role="must-btn"]');
         const orBtn = modeBox.querySelector('[data-role="or-btn"]');
@@ -625,9 +657,16 @@ function syncDualCriteriaUIState(scope) {
             }
         }
         if (orBtn) {
-            orBtn.className = !isMust
-                ? 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-pink-100 text-[#8f4452] border-pink-300'
-                : 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-white border-gray-200 text-gray-500 hover:bg-gray-50';
+            if (isOr) {
+                orBtn.disabled = false;
+                orBtn.className = 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-pink-100 text-[#8f4452] border-pink-300';
+            } else if (isOrFull) {
+                orBtn.disabled = true;
+                orBtn.className = 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-gray-100 border-gray-200 text-gray-400 opacity-55 cursor-not-allowed';
+            } else {
+                orBtn.disabled = false;
+                orBtn.className = 'py-1 px-1.5 rounded-lg text-[11px] font-bold border transition text-center bg-white border-pink-200 text-[#8f4452] hover:bg-pink-50';
+            }
         }
     });
 
@@ -638,7 +677,7 @@ function syncDualCriteriaUIState(scope) {
                 🔒 必須吻合：${mustCount} / ${MAX_MUST_MATCH_COUNT} 項
             </span>
             <span class="px-2.5 py-0.5 rounded-full font-bold ${orCount > 0 ? 'bg-pink-100 border border-pink-300 text-[#c96a7b]' : 'bg-gray-100 text-gray-500'}">
-                ✨ 選填：${orCount} 項
+                ✨ 選填：${orCount} / ${MAX_MUST_MATCH_COUNT} 項
             </span>
         `;
     }
@@ -648,8 +687,37 @@ window.onDualCriterionCheckChange = function(scope, key) {
     const cfg = getCriteriaDomPrefix(scope);
     const cb = document.querySelector(`input[name="${cfg.checkName}"][value="${key}"]`);
     const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
-    if (cb && flagEl && !cb.checked) {
-        flagEl.value = '0';
+
+    if (cb && cb.checked) {
+        const otherChecked = Array.from(document.querySelectorAll(`input[name="${cfg.checkName}"]:checked`))
+            .map(el => el.value)
+            .filter(k => k !== key);
+        const otherMustCount = otherChecked.filter(k => document.getElementById(`${cfg.mustInputPrefix}${k}`)?.value === '1').length;
+        const otherOrCount = otherChecked.filter(k => document.getElementById(`${cfg.mustInputPrefix}${k}`)?.value === '0').length;
+        if (otherMustCount >= MAX_MUST_MATCH_COUNT && otherOrCount >= MAX_MUST_MATCH_COUNT) {
+            cb.checked = false;
+            if (flagEl) flagEl.value = '';
+            showMiniNotice('⚠️ 配對條件已達上限', '「🔒 必須吻合」與「✨ 任一符合」皆已達上限（各最多 2 項），請先取消其他勾選項目後再設定！');
+            return;
+        }
+        if (flagEl) flagEl.value = '';
+    }
+
+    if (cb && !cb.checked) {
+        if (flagEl) flagEl.value = '';
+        const optMeta = EXACT_MATCH_OPTIONS.find(o => o.key === key);
+        if (optMeta && optMeta.type === 'petTwoStep') {
+            const statusSel = document.getElementById(`${cfg.selectPrefix}${key}_status`);
+            const typeSel = document.getElementById(`${cfg.selectPrefix}${key}_type`);
+            if (statusSel) statusSel.value = '';
+            if (typeSel) {
+                typeSel.disabled = true;
+                typeSel.innerHTML = '<option value="" selected>請先選擇左側...</option>';
+            }
+        } else {
+            const sel = document.getElementById(`${cfg.selectPrefix}${key}`);
+            if (sel) sel.value = '';
+        }
     }
     syncDualCriteriaUIState(scope);
 };
@@ -666,11 +734,18 @@ window.setDualCriterionMode = function(scope, key, makeMust) {
             .map(el => el.value)
             .filter(k => k !== key && document.getElementById(`${cfg.mustInputPrefix}${k}`)?.value === '1');
         if (currentMustKeys.length >= MAX_MUST_MATCH_COUNT) {
-            showMiniNotice('🔒 必須吻合已達上限（2 項）', '「必須吻合」條件最多只能選擇 2 項喔！請先將其中一項切換為「✨ 任一符合」後再設定。');
+            showMiniNotice('🔒 必須吻合已達上限（2 項）', '「必須吻合」條件最多只能選擇 2 項喔！請先將其中一項切換為「✨ 任一符合」或取消勾選後再設定。');
             return;
         }
         flagEl.value = '1';
     } else {
+        const currentOrKeys = Array.from(document.querySelectorAll(`input[name="${cfg.checkName}"]:checked`))
+            .map(el => el.value)
+            .filter(k => k !== key && document.getElementById(`${cfg.mustInputPrefix}${k}`)?.value === '0');
+        if (currentOrKeys.length >= MAX_MUST_MATCH_COUNT) {
+            showMiniNotice('✨ 選填條件已達上限（2 項）', '「✨ 任一符合」條件最多只能選擇 2 項喔！請先將其中一項切換為「🔒 必須吻合」或取消勾選後再設定。');
+            return;
+        }
         flagEl.value = '0';
     }
     syncDualCriteriaUIState(scope);
@@ -682,7 +757,10 @@ window.onDualCriterionPetStatusChange = function(scope, key) {
     const typeSel = document.getElementById(`${cfg.selectPrefix}${key}_type`);
     if (!statusSel || !typeSel) return;
 
-    if (statusSel.value === '沒有養寵物') {
+    if (!statusSel.value) {
+        typeSel.disabled = true;
+        typeSel.innerHTML = '<option value="" selected>請先選擇左側...</option>';
+    } else if (statusSel.value === '沒有養寵物') {
         typeSel.disabled = true;
         typeSel.innerHTML = '<option value="沒有養寵物" selected>沒有養寵物</option>';
     } else {
@@ -690,7 +768,8 @@ window.onDualCriterionPetStatusChange = function(scope, key) {
             ? PET_TYPE_OPTIONS
             : ['狗', '貓', '貓狗都有', '兔子', '倉鼠 / 鼠類', '鳥類', '爬蟲類 / 兩棲', '水族 / 魚蝦', '其他寵物'];
         typeSel.disabled = false;
-        typeSel.innerHTML = '<option value="不限" selected>不限（有養任何寵物皆可）</option>' +
+        typeSel.innerHTML = '<option value="" selected>請選擇寵物類型...</option>' +
+            '<option value="不限">不限（有養任何寵物皆可）</option>' +
             petOptionsList.map(pt => `<option value="${pt}">${pt}</option>`).join('');
     }
 };
@@ -699,37 +778,62 @@ function collectDualCriteriaFromDom(scope) {
     const cfg = getCriteriaDomPrefix(scope);
     const criteria = {};
     const mustMatchKeys = [];
+    const incompleteLabels = [];
     document.querySelectorAll(`input[name="${cfg.checkName}"]:checked`).forEach(cb => {
         const key = cb.value;
         const optMeta = EXACT_MATCH_OPTIONS.find(o => o.key === key);
+        const optLabel = optMeta ? optMeta.label : key;
         const flagEl = document.getElementById(`${cfg.mustInputPrefix}${key}`);
+
+        const modeVal = flagEl ? flagEl.value : '';
+        const hasChosenMode = (modeVal === '1' || modeVal === '0');
 
         if (optMeta && optMeta.type === 'petTwoStep') {
             const statusSel = document.getElementById(`${cfg.selectPrefix}${key}_status`);
             const typeSel = document.getElementById(`${cfg.selectPrefix}${key}_type`);
-            if (statusSel) {
-                if (statusSel.value === '沒有養寵物') {
-                    criteria[key] = '沒有養寵物';
-                } else {
-                    const chosenType = (typeSel && !typeSel.disabled && typeSel.value) ? typeSel.value : '不限';
-                    criteria[key] = `有養寵物（${chosenType}）`;
+            if (!statusSel || !statusSel.value) {
+                incompleteLabels.push(hasChosenMode ? optLabel : `${optLabel}（選項與條件類型）`);
+                return;
+            }
+            if (statusSel.value === '沒有養寵物') {
+                if (!hasChosenMode) {
+                    incompleteLabels.push(`${optLabel}（請選「必須吻合」或「任一符合」）`);
+                    return;
                 }
-                if (flagEl && flagEl.value === '1' && mustMatchKeys.length < MAX_MUST_MATCH_COUNT) {
-                    mustMatchKeys.push(key);
+                criteria[key] = '沒有養寵物';
+            } else {
+                const chosenType = (typeSel && !typeSel.disabled) ? String(typeSel.value || '').trim() : '';
+                if (!chosenType) {
+                    incompleteLabels.push(hasChosenMode ? `${optLabel}（寵物類型）` : `${optLabel}（寵物類型與條件類型）`);
+                    return;
                 }
+                if (!hasChosenMode) {
+                    incompleteLabels.push(`${optLabel}（請選「必須吻合」或「任一符合」）`);
+                    return;
+                }
+                criteria[key] = `有養寵物（${chosenType}）`;
+            }
+            if (modeVal === '1' && mustMatchKeys.length < MAX_MUST_MATCH_COUNT) {
+                mustMatchKeys.push(key);
             }
             return;
         }
 
         const sel = document.getElementById(`${cfg.selectPrefix}${key}`);
-        if (sel && sel.value) {
-            criteria[key] = sel.value;
-            if (flagEl && flagEl.value === '1' && mustMatchKeys.length < MAX_MUST_MATCH_COUNT) {
-                mustMatchKeys.push(key);
-            }
+        if (!sel || !sel.value) {
+            incompleteLabels.push(hasChosenMode ? optLabel : `${optLabel}（選項與條件類型）`);
+            return;
+        }
+        if (!hasChosenMode) {
+            incompleteLabels.push(`${optLabel}（請選「必須吻合」或「任一符合」）`);
+            return;
+        }
+        criteria[key] = sel.value;
+        if (modeVal === '1' && mustMatchKeys.length < MAX_MUST_MATCH_COUNT) {
+            mustMatchKeys.push(key);
         }
     });
-    return { criteria, mustMatchKeys };
+    return { criteria, mustMatchKeys, incompleteLabels };
 }
 
 window.onRegSessionCheckChange = function() {
@@ -889,7 +993,14 @@ async function confirmRegistration() {
         return;
     }
 
-    const { criteria, mustMatchKeys } = collectDualCriteriaFromDom('regular');
+    const { criteria, mustMatchKeys, incompleteLabels } = collectDualCriteriaFromDom('regular');
+    if (selectedSessions.length > 0 && incompleteLabels.length > 0) {
+        showMiniNotice(
+            '⚠️ 請完成配對條件設定',
+            `您已勾選「${incompleteLabels.join('、')}」，請先選擇具體選項及條件類型（🔒 必須吻合 或 ✨ 任一符合），或取消勾選該欄位後再送出報名喔！`
+        );
+        return;
+    }
 
     const prevRegisteredList = Array.isArray(appState.registeredSessions) ? [...appState.registeredSessions] : [];
     const finalCriteria = selectedSessions.length === 0 ? {} : criteria;
@@ -1298,7 +1409,14 @@ async function confirmCustomActivityRegistration() {
         return;
     }
 
-    const { criteria, mustMatchKeys } = collectDualCriteriaFromDom('custom');
+    const { criteria, mustMatchKeys, incompleteLabels } = collectDualCriteriaFromDom('custom');
+    if (incompleteLabels.length > 0) {
+        showMiniNotice(
+            '⚠️ 請完成配對條件設定',
+            `您已勾選「${incompleteLabels.join('、')}」，請先選擇具體選項及條件類型（🔒 必須吻合 或 ✨ 任一符合），或取消勾選該欄位後再送出報名喔！`
+        );
+        return;
+    }
 
     customActivitySyncSuppressUntil = Date.now() + 6000;
     appState.customActivityRegs[act.id] = {
