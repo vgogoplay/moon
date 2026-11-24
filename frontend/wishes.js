@@ -1547,11 +1547,12 @@ function renderWishWallTab(forceRender = false) {
             const authorBadgeStyle = authorG === '男'
                 ? 'bg-sky-100 text-sky-800 border border-sky-200'
                 : 'bg-rose-100 text-[#8f4452]';
-            let authorIdentityLabel = `匿名(${authorG})`;
+            const authorBaseLabel = `匿名(${authorG})`;
+            let statusTagHtml = '';
             if (isMine) {
-                authorIdentityLabel = `匿名(${authorG})(自己的題目)`;
+                statusTagHtml = `<span class="px-2 py-0.5 rounded-full bg-amber-100 border border-amber-200 text-amber-900 text-[10px] font-bold shrink-0 whitespace-nowrap">(自己的題目)</span>`;
             } else if (myResp) {
-                authorIdentityLabel = `匿名(${authorG})(已回答)`;
+                statusTagHtml = `<span class="px-2 py-0.5 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 text-[10px] font-bold shrink-0 whitespace-nowrap">(✅已回答)</span>`;
             }
             const isPubExpanded = expandedPublicWishes.has(String(w.id));
             const isPinnedWish = Boolean(w.isPinned);
@@ -1566,8 +1567,9 @@ function renderWishWallTab(forceRender = false) {
                             ${pinnedPillHtml}
                             <h4 class="text-xs sm:text-sm font-bold font-serif-jp text-[#7a3542] truncate">🏮 ${escapeWishHtml(w.title)}</h4>
                             <span class="px-2 py-0.5 rounded-full ${authorBadgeStyle} text-[10px] font-bold shrink-0 whitespace-nowrap">
-                                ${authorIdentityLabel}
+                                ${authorBaseLabel}
                             </span>
+                            ${statusTagHtml}
                         </div>
                         <span class="text-base text-[#c96a7b] shrink-0 transform transition-transform ${isPubExpanded ? 'rotate-180' : ''}">▾</span>
                     </div>
@@ -1683,14 +1685,17 @@ function renderWishWallTab(forceRender = false) {
                         const pAuthorG = String(w.authorGender || '').trim() === '男' ? '男' : '女';
                         const isMineEnded = myPid && String(w.authorId) === myPid;
                         const myEndedResp = myPid ? resps.find(r => String(r.responderId) === myPid) : null;
-                        let endedAuthorLabel = `匿名(${pAuthorG})`;
-                        if (isMineEnded) endedAuthorLabel = `匿名(${pAuthorG})(自己的題目)`;
-                        else if (myEndedResp) endedAuthorLabel = `匿名(${pAuthorG})(已回答)`;
+                        const endedBaseLabel = `匿名(${pAuthorG})`;
+                        let endedStatusBadgeHtml = '';
+                        if (isMineEnded) endedStatusBadgeHtml = `<span class="px-2 py-0.5 rounded-full bg-amber-100 border border-amber-200 text-amber-900 text-[10px] font-bold shrink-0 whitespace-nowrap">(自己的題目)</span>`;
+                        else if (myEndedResp) endedStatusBadgeHtml = `<span class="px-2 py-0.5 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 text-[10px] font-bold shrink-0 whitespace-nowrap">(✅已回答)</span>`;
                         return `
                             <div class="px-4 py-3 rounded-2xl bg-white/80 border border-pink-100 flex items-center justify-between gap-2 text-xs shadow-2xs">
-                                <div class="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto">
+                                <div class="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-x-auto">
                                     <span class="font-bold text-[#8f4452] truncate">🏮 ${escapeWishHtml(w.title)}</span>
-                                    <span class="text-[11px] text-gray-500 shrink-0 whitespace-nowrap">${endedAuthorLabel}・共 ${resps.length} 人回答</span>
+                                    <span class="text-[11px] text-gray-500 shrink-0 whitespace-nowrap">${endedBaseLabel}</span>
+                                    ${endedStatusBadgeHtml}
+                                    <span class="text-[11px] text-gray-500 shrink-0 whitespace-nowrap">・共 ${resps.length} 人回答</span>
                                 </div>
                                 <div class="shrink-0">${resultBadge}</div>
                             </div>

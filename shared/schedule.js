@@ -169,6 +169,62 @@ function getMaxRegularSessionsForUser(userOrState) {
         : MAX_MALE_REGULAR_SESSIONS;
 }
 
+function getBatchUsedRegularSessionsForUser(userOrState, batchNum) {
+    const targetBatchPrefix = `第${Math.max(1, Number(batchNum || 1))}屆`;
+    const pid = String(
+        (userOrState && (userOrState.playerId || userOrState.id || (userOrState.profile && userOrState.profile.id))) || ''
+    ).trim();
+    const usedSet = new Set();
+    const addLabel = (rawLbl) => {
+        const norm = (typeof normalizeSessionLabel === 'function')
+            ? normalizeSessionLabel(rawLbl)
+            : String(rawLbl || '').trim();
+        if (!norm) return;
+        const bLbl = (typeof extractBatchLabel === 'function')
+            ? extractBatchLabel(norm)
+            : ((norm.match(/^第\s*\d+\s*屆/) || [])[0] || '').replace(/\s+/g, '');
+        if (bLbl === targetBatchPrefix) {
+            usedSet.add(norm);
+        }
+    };
+
+    const curList = Array.isArray(userOrState && userOrState.registeredSessions)
+        ? userOrState.registeredSessions
+        : ((userOrState && userOrState.registeredSession) ? [userOrState.registeredSession] : []);
+    curList.forEach(addLabel);
+
+    const usedFromState = Array.isArray(userOrState && userOrState.batchUsedSessions) ? userOrState.batchUsedSessions : [];
+    usedFromState.forEach(addLabel);
+
+    if (pid) {
+        try {
+            if (typeof ActivityRegArchive !== 'undefined' && typeof ActivityRegArchive.getAllMap === 'function') {
+                const archMap = ActivityRegArchive.getAllMap();
+                Object.values(archMap || {}).forEach(entry => {
+                    if (!entry || entry.kind !== 'regular') return;
+                    if (String(entry.playerId || '').trim() === pid) {
+                        addLabel(entry.session);
+                    }
+                });
+            }
+        } catch (e) {}
+
+        try {
+            const usersRaw = localStorage.getItem(typeof USERS_LOCAL_KEY !== 'undefined' ? USERS_LOCAL_KEY : 'yuelao_users') || '[]';
+            const uArr = JSON.parse(usersRaw);
+            if (Array.isArray(uArr)) {
+                const uRec = uArr.find(u => u && String(u.id).trim() === pid);
+                if (uRec) {
+                    (Array.isArray(uRec.registeredSessions) ? uRec.registeredSessions : []).forEach(addLabel);
+                    (Array.isArray(uRec.batchUsedSessions) ? uRec.batchUsedSessions : []).forEach(addLabel);
+                }
+            }
+        } catch (e) {}
+    }
+
+    return Array.from(usedSet);
+}
+
 // 一次性遷移清理：若男生未在「可選 3 場特權名單」內，且同時選了第3屆 二、四、六（三場全選），
 // 則自動移除「第3屆11/26(四)」，只保留 第3屆11/24(二) 與 第3屆11/28(六)（不影響之後手動改選任意 2 場）
 function applyOneTimeMaleBatch3ThuCleanup(userObj) {
@@ -1387,6 +1443,10 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
                 const clearTs = endTs > 0 ? (endTs + POST_ACTIVITY_REG_CLEAR_DELAY_MS) : 0;
                 if (clearTs > 0 && nowTs >= clearTs) {
                     const label = normalizeSessionLabel(s) || String(s);
+                    if (!Array.isArray(u.batchUsedSessions)) u.batchUsedSessions = [];
+                    if (!u.batchUsedSessions.some(item => isSameSession(item, label))) {
+                        u.batchUsedSessions.push(label);
+                    }
                     if (typeof ActivityRegArchive !== 'undefined') {
                         ActivityRegArchive.recordRegular(u, label, true);
                     }
@@ -1430,6 +1490,7 @@ function cleanupExpiredActivityRegistrations(isFrontendCaller = false, nowTs = D
             const patchFields = {};
             if (regularChanged) {
                 patchFields.registeredSessions = Array.isArray(u.registeredSessions) ? [...u.registeredSessions] : [];
+                patchFields.batchUsedSessions = Array.isArray(u.batchUsedSessions) ? [...u.batchUsedSessions] : [];
                 patchFields.registeredSession = null;
                 if (patchFields.registeredSessions.length === 0) {
                     patchFields.exactMatchCriteria = {};
