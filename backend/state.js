@@ -351,98 +351,20 @@ function getUsers() {
         users = [];
     }
 
-    let migrated = false;
-    const migratedUsersMap = new Map();
     users.forEach(u => {
         if (!u || typeof u !== 'object') return;
-        let userMigrated = false;
-        if (Array.isArray(u.registeredSessions)) {
-            const norm = Array.from(new Set(u.registeredSessions.map(s => normalizeSessionLabel(s)).filter(Boolean)));
-            if (JSON.stringify(norm) !== JSON.stringify(u.registeredSessions)) {
-                u.registeredSessions = norm;
-                userMigrated = true;
-            }
-        } else {
+        if (!Array.isArray(u.registeredSessions)) {
             u.registeredSessions = [];
-        }
-        if (typeof applyOneTimeMaleBatch3ThuCleanup === 'function' && applyOneTimeMaleBatch3ThuCleanup(u)) {
-            userMigrated = true;
-            if (u.id && typeof ActivityRegArchive !== 'undefined' && typeof TARGET_CANCEL_MALE_B3_THU_LABEL !== 'undefined') {
-                ActivityRegArchive.removeRegular(TARGET_CANCEL_MALE_B3_THU_LABEL, u.id);
-            }
         }
         if (Object.prototype.hasOwnProperty.call(u, 'registeredSession')) {
             delete u.registeredSession;
-            userMigrated = true;
         }
-        if (u.matchedSession) {
-            const normMatched = String(u.matchedSession).includes('強制')
-                ? String(u.matchedSession).trim()
-                : normalizeSessionLabel(u.matchedSession);
-            if (normMatched !== u.matchedSession) {
-                u.matchedSession = normMatched;
-                userMigrated = true;
-            }
-        }
-        if (Array.isArray(u.matchedHistory)) {
-            u.matchedHistory.forEach(h => {
-                if (!h || typeof h !== 'object') return;
-                const isForceProtected = Boolean(
-                    h.isForceRepaired ||
-                    String(h.session || '').includes('強制') ||
-                    String(h.matchDetail || '').includes('強制')
-                );
-                if (isForceProtected) {
-                    h.isForceRepaired = true;
-                    if (!h.matchDetail) h.matchDetail = '・強制補齊';
-                }
-                if (h.session) {
-                    const normHist = isForceProtected
-                        ? String(h.session).trim()
-                        : normalizeSessionLabel(h.session);
-                    if (normHist !== h.session) {
-                        h.session = normHist;
-                        userMigrated = true;
-                    }
-                }
-            });
-        }
-        if (u.id) {
-            const expectedCode = generatePlayerBackupCode(u, users);
-            if (expectedCode && u.backupCode !== expectedCode) {
-                u.backupCode = expectedCode;
-                userMigrated = true;
-            }
-        }
-        if (userMigrated) {
-            migrated = true;
-            if (u.id) migratedUsersMap.set(String(u.id), u);
+        if (u.id && !u.backupCode && typeof generatePlayerBackupCode === 'function') {
+            u.backupCode = generatePlayerBackupCode(u, users);
         }
     });
-    if (migrated) {
-        const nextRaw = JSON.stringify(users);
-        AdminMemoryCache.usersRaw = nextRaw;
-        AdminMemoryCache.users = users;
-        localStorage.setItem(USERS_KEY, nextRaw);
-        if (typeof CloudSync !== 'undefined' && CloudSync.initialized && CloudSync.inFlightWrites === 0) {
-            migratedUsersMap.forEach(mu => {
-                if (!CloudSync.isUserDeleted(mu.id)) {
-                    CloudSync.upsertUser(mu, false, { isMatchMutation: false });
-                }
-            });
-        }
-    } else {
-        AdminMemoryCache.usersRaw = safeRaw;
-        AdminMemoryCache.users = users;
-    }
-    if (typeof CloudSync !== 'undefined' && typeof CloudSync.reconcileSymmetricMatches === 'function') {
-        if (CloudSync.reconcileSymmetricMatches(users, false)) {
-            const healedRaw = JSON.stringify(users);
-            AdminMemoryCache.usersRaw = healedRaw;
-            AdminMemoryCache.users = users;
-            localStorage.setItem(USERS_KEY, healedRaw);
-        }
-    }
+    AdminMemoryCache.usersRaw = safeRaw;
+    AdminMemoryCache.users = users;
     return users;
 }
 

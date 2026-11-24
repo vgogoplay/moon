@@ -2402,6 +2402,7 @@ const CloudSync = {
                 await yuelaoAuth.init();
             }
             if (this.isLocalSandboxMode()) {
+                this.isOnline = false;
                 if (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function') {
                     Store.getUsersArray();
                 }

@@ -83,10 +83,8 @@ function getPlayerOpLogs() {
     const key = (typeof PLAYER_OP_LOGS_KEY !== 'undefined') ? PLAYER_OP_LOGS_KEY : 'yuelao_player_op_logs';
     const maxCount = (typeof PLAYER_OP_LOGS_MAX_COUNT !== 'undefined') ? PLAYER_OP_LOGS_MAX_COUNT : 30;
     const raw = localStorage.getItem(key) || '[]';
-    const legacyRaw = localStorage.getItem('yuelao_admin_login_logs') || '[]';
-    const combinedRaw = `${raw}||${legacyRaw}`;
 
-    if (typeof AdminMemoryCache !== 'undefined' && combinedRaw === AdminMemoryCache.playerOpLogsRaw && Array.isArray(AdminMemoryCache.playerOpLogs)) {
+    if (typeof AdminMemoryCache !== 'undefined' && raw === AdminMemoryCache.playerOpLogsRaw && Array.isArray(AdminMemoryCache.playerOpLogs)) {
         return AdminMemoryCache.playerOpLogs;
     }
 
@@ -98,41 +96,10 @@ function getPlayerOpLogs() {
         }
     } catch (e) {}
 
-    // 相容舊版混在 yuelao_admin_login_logs 的 [解除配對] 紀錄，自動併入玩家操作日誌避免歷史資料遺失
-    try {
-        const legacyArr = JSON.parse(legacyRaw);
-        if (Array.isArray(legacyArr)) {
-            const existingKeys = new Set(list.map(x => `${x.createdAt || ''}|${x.detail || ''}`));
-            legacyArr.forEach((lg, idx) => {
-                if (!lg || typeof lg !== 'object') return;
-                const tried = String(lg.accountTried || '');
-                if (!tried.includes('[解除配對]')) return;
-                const pidMatch = tried.match(/ID\s*:\s*([^\s\]]+)/i);
-                const pid = pidMatch ? pidMatch[1] : '';
-                const pName = String(lg.ipAddress || (pid ? `玩家_${pid}` : '未知玩家')).trim();
-                const detail = String(lg.userAgent || '').trim();
-                const createdAt = String(lg.createdAt || '').trim();
-                const dedupKey = `${createdAt}|${detail}`;
-                if (!existingKeys.has(dedupKey)) {
-                    existingKeys.add(dedupKey);
-                    list.push({
-                        id: lg.id || `LEGACY_PO_${idx}_${createdAt}`,
-                        playerId: pid,
-                        playerName: pName,
-                        actionType: '解除配對',
-                        detail,
-                        ts: Number(lg.ts || 0) || (Date.parse(createdAt) || 0),
-                        createdAt
-                    });
-                }
-            });
-        }
-    } catch (e) {}
-
     list.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
     const res = list.slice(0, maxCount);
     if (typeof AdminMemoryCache !== 'undefined') {
-        AdminMemoryCache.playerOpLogsRaw = combinedRaw;
+        AdminMemoryCache.playerOpLogsRaw = raw;
         AdminMemoryCache.playerOpLogs = res;
     }
     return res;

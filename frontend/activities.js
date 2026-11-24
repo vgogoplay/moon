@@ -233,10 +233,12 @@ function renderHomeStatsCharts(forceRender = false) {
         }
     });
 
-    // 前台顯示：男生人數依後台設定固定加成，女生人數固定加 5 人
+    // 前台顯示：男生人數依後台設定固定加成（+x 人），女生人數固定加 5 人，且 (x + 5) 人直接加在 MBTI 的 I 人
+    const extraAddedCount = maleOffset + 5;
     maleCount += maleOffset;
     femaleCount += 5;
-    const displayTotalCount = totalCount + maleOffset + 5;
+    iPersonCount += extraAddedCount;
+    const displayTotalCount = totalCount + extraAddedCount;
 
     const genderTotal = maleCount + femaleCount;
     const malePct = genderTotal > 0 ? Math.round((maleCount / genderTotal) * 100) : 0;
@@ -837,7 +839,8 @@ function collectDualCriteriaFromDom(scope) {
 }
 
 window.onRegSessionCheckChange = function() {
-    const maxAllowed = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
+    const rawMax = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
+    const maxAllowed = (typeof rawMax === 'number' && rawMax >= 0) ? rawMax : Infinity;
     const isMaleLimited = Number.isFinite(maxAllowed);
     const openCheckboxes = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:not([data-time-closed="1"])'));
     let checkedCount = 0;

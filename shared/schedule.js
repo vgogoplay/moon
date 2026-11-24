@@ -169,7 +169,7 @@ function getMaxRegularSessionsForUser(userOrState) {
         : MAX_MALE_REGULAR_SESSIONS;
 }
 
-// 清理規則：若男生未在「可選 3 場特權名單」內，且同時選了第3屆 二、四、六（三場全選），
+// 一次性遷移清理：若男生未在「可選 3 場特權名單」內，且同時選了第3屆 二、四、六（三場全選），
 // 則自動移除「第3屆11/26(四)」，只保留 第3屆11/24(二) 與 第3屆11/28(六)（不影響之後手動改選任意 2 場）
 function applyOneTimeMaleBatch3ThuCleanup(userObj) {
     if (!userObj || typeof userObj !== 'object') return false;
@@ -184,14 +184,17 @@ function applyOneTimeMaleBatch3ThuCleanup(userObj) {
     const hasThu = rawList.some(s => isSameSession(s, TARGET_CANCEL_MALE_B3_THU_LABEL));
     const hasSat = rawList.some(s => isSameSession(s, TARGET_CANCEL_MALE_B3_SAT_LABEL));
 
-    userObj.b3ThuMaleCleared = true;
-    if (!(hasTue && hasThu && hasSat)) return false;
+    if (!(hasTue && hasThu && hasSat)) {
+        userObj.b3ThuMaleCleared = true;
+        return false;
+    }
 
     const filtered = Array.from(new Set(
         rawList
             .map(s => normalizeSessionLabel(s))
             .filter(s => s && !isSameSession(s, TARGET_CANCEL_MALE_B3_THU_LABEL))
     ));
+    userObj.b3ThuMaleCleared = true;
     userObj.registeredSessions = filtered;
     if (Object.prototype.hasOwnProperty.call(userObj, 'registeredSession')) {
         delete userObj.registeredSession;
