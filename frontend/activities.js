@@ -233,9 +233,10 @@ function renderHomeStatsCharts(forceRender = false) {
         }
     });
 
-    // 前台顯示：男生人數依後台設定固定加成，女生人數固定加 5 人
+    // 前台顯示：男生人數依後台設定固定加成，女生人數固定加 5 人，且 (maleOffset + 5) 同步計入 MBTI 的 I 人
     maleCount += maleOffset;
     femaleCount += 5;
+    iPersonCount += (maleOffset + 5);
     const displayTotalCount = totalCount + maleOffset + 5;
 
     const genderTotal = maleCount + femaleCount;
