@@ -233,12 +233,10 @@ function renderHomeStatsCharts(forceRender = false) {
         }
     });
 
-    // 前台顯示：男生人數依後台設定固定加成（+x 人），女生人數固定加 5 人，且 (x + 5) 人直接加在 MBTI 的 I 人
-    const extraAddedCount = maleOffset + 5;
+    // 前台顯示：男生人數依後台設定固定加成，女生人數固定加 5 人
     maleCount += maleOffset;
     femaleCount += 5;
-    iPersonCount += extraAddedCount;
-    const displayTotalCount = totalCount + extraAddedCount;
+    const displayTotalCount = totalCount + maleOffset + 5;
 
     const genderTotal = maleCount + femaleCount;
     const malePct = genderTotal > 0 ? Math.round((maleCount / genderTotal) * 100) : 0;
@@ -355,54 +353,57 @@ function handleApplyClick() {
     openRegisterModal();
 }
 
-function getMaleWeeklyUsedSessionsInCurrentBatch(batchNum, savedSessions = []) {
-    const fromHelper = (typeof getBatchUsedRegularSessionsForUser === 'function')
-        ? getBatchUsedRegularSessionsForUser(appState, batchNum)
-        : [];
-    const merged = new Set([
-        ...(Array.isArray(fromHelper) ? fromHelper : []),
-        ...(Array.isArray(savedSessions) ? savedSessions : [])
-    ].map(s => (typeof normalizeSessionLabel === 'function' ? normalizeSessionLabel(s) : String(s || '').trim())).filter(Boolean));
-    return Array.from(merged);
+function getClosedRegisteredSessionsInCurrentBatch(nowTs = Date.now()) {
+    const sched = getBatchScheduleInfo(getCurrentBatchNumber());
+    const savedSessions = Array.isArray(appState.registeredSessions) ? appState.registeredSessions : [];
+    const seen = new Set();
+    const result = [];
+    savedSessions.forEach(s => {
+        const norm = normalizeSessionLabel(s);
+        if (!norm || seen.has(norm)) return;
+        const inCurrentBatch = sched.sessions.some(target => isSameSession(norm, target));
+        const isClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(norm, nowTs);
+        if (inCurrentBatch && isClosed) {
+            seen.add(norm);
+            result.push(norm);
+        }
+    });
+    return result;
 }
 
 function renderRegisterModalSessionOptions(nowTs = Date.now()) {
     const listEl = document.getElementById('sessionOptionsList');
     if (!listEl) return;
 
-    const batchNum = getCurrentBatchNumber();
-    const sched = getBatchScheduleInfo(batchNum);
+    const sched = getBatchScheduleInfo(getCurrentBatchNumber());
     const tueLabel = sched.tueLabel;
     const thuLabel = sched.thuLabel;
     const satLabel = sched.satLabel;
     const savedSessions = Array.isArray(appState.registeredSessions) ? appState.registeredSessions : [];
     const maxAllowed = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
     const isMaleLimited = Number.isFinite(maxAllowed);
-    const weeklyUsedSessions = isMaleLimited ? getMaleWeeklyUsedSessionsInCurrentBatch(batchNum, savedSessions) : [];
-    const lockedUsedCount = isMaleLimited ? Math.min(maxAllowed, weeklyUsedSessions.length) : 0;
-    const quotaExhausted = isMaleLimited && lockedUsedCount >= maxAllowed;
 
     const step1LabelEl = listEl.previousElementSibling;
     if (step1LabelEl) {
+        const extraCredits = (typeof getUserExtraMatchCredits === 'function') ? getUserExtraMatchCredits(appState) : 0;
         const hasExtraPrivilege = (typeof hasMaleExtraRegularSessionPrivilege === 'function') && hasMaleExtraRegularSessionPrivilege(appState);
-        if (isMaleLimited && quotaExhausted) {
-            step1LabelEl.innerHTML = `1. 本週配對場次額度已用完（已使用 ${lockedUsedCount} / ${maxAllowed} 場）<br><span class="text-[11px] text-rose-600 font-bold">（本屆報名次數已用罄，下週日更新下一屆後才可再報名）</span><br><span class="text-[11px] text-red-600 font-bold">（・🔒贊助 可增加1場選擇）</span>`;
-        } else if (isMaleLimited && hasExtraPrivilege) {
-            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，✨ 已解鎖最多可選 ${maxAllowed} 場；本週已用 ${lockedUsedCount} 場）`;
+        if (isMaleLimited && hasExtraPrivilege) {
+            const creditTag = extraCredits > 0 ? `｜🎟️ 剩餘加場次數：${extraCredits} 次（報名第3場開獎即扣次）` : '';
+            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，✨ 已解鎖最多可選 ${maxAllowed} 場${creditTag}）`;
         } else if (isMaleLimited) {
-            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，最多可選 ${maxAllowed} 場；本週已用 ${lockedUsedCount} 場）<br><span class="text-[11px] text-red-600 font-bold">（・🔒贊助 可增再加1場選擇）</span>`;
+            step1LabelEl.innerHTML = `1. 請選擇要參加的配對場次（選填，最多可選 ${maxAllowed} 場）<br><span class="text-[11px] text-red-600 font-bold">（・🔒贊助 可增加1場選擇）</span>`;
         } else {
             step1LabelEl.innerHTML = '1. 請選擇要參加的配對場次（選填，可複選）';
         }
     }
 
-    let initialCheckedCount = 0;
+    const closedUsedSessions = getClosedRegisteredSessionsInCurrentBatch(nowTs);
+    let initialCheckedCount = closedUsedSessions.length;
     listEl.innerHTML = [tueLabel, thuLabel, satLabel].map(opt => {
         const isClosed = (typeof isRegularSessionRegistrationClosed === 'function')
             ? isRegularSessionRegistrationClosed(opt, nowTs)
             : false;
         const wasRegistered = savedSessions.some(s => isSameSession(s, opt));
-        const usedInBatchThisWeek = isMaleLimited && weeklyUsedSessions.some(s => isSameSession(s, opt));
         let checked = !isClosed && wasRegistered;
         if (checked && initialCheckedCount >= maxAllowed) {
             checked = false;
@@ -410,43 +411,26 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
         if (checked) initialCheckedCount++;
 
         if (isClosed) {
-            const closedBadgeText = usedInBatchThisWeek
-                ? '🚫 已截止（本週已使用此場次）'
+            const closedStatusText = wasRegistered
+                ? '✅ 已報名並結束（計入本週已使用 1 場）'
                 : '🚫 已截止報名（20:00 已過）';
             return `
-                <label data-session-closed="1" title="此場次已於當日 20:00 截止報名，無法再勾選" class="flex items-center gap-2.5 p-3 rounded-2xl border border-gray-200 bg-gray-100/90 text-gray-400 opacity-80 cursor-not-allowed select-none">
-                    <input type="checkbox" name="regSessionCheck" value="${opt}" disabled data-time-closed="1" data-weekly-used="${usedInBatchThisWeek ? '1' : '0'}" class="w-4 h-4 accent-gray-400 cursor-not-allowed">
+                <label data-session-closed="1" ${wasRegistered ? 'data-closed-registered="1"' : ''} title="${wasRegistered ? '此場次已報名並結束，已計入本週場次額度' : '此場次已於當日 20:00 截止報名，無法再勾選'}" class="flex items-center gap-2.5 p-3 rounded-2xl border ${wasRegistered ? 'border-amber-200 bg-amber-50/60 text-gray-500' : 'border-gray-200 bg-gray-100/90 text-gray-400 opacity-80'} cursor-not-allowed select-none">
+                    <input type="checkbox" name="regSessionCheck" value="${opt}" ${wasRegistered ? 'checked' : ''} disabled data-time-closed="1" class="w-4 h-4 accent-amber-500 cursor-not-allowed">
                     <div class="min-w-0">
-                        <div class="font-bold text-xs text-gray-400 line-through">${opt}</div>
-                        <div class="text-[10px] text-rose-500 font-bold mt-0.5">${closedBadgeText}</div>
+                        <div class="font-bold text-xs ${wasRegistered ? 'text-gray-600' : 'text-gray-400 line-through'}">${opt}</div>
+                        <div class="text-[10px] ${wasRegistered ? 'text-amber-700' : 'text-rose-500'} font-bold mt-0.5">${closedStatusText}</div>
                     </div>
                 </label>
             `;
         }
-
-        const isWeeklyLockedUnchecked = quotaExhausted && !checked;
-        if (isWeeklyLockedUnchecked) {
-            return `
-                <label data-session-card="1" data-weekly-locked="1" title="本週 ${maxAllowed} 場報名額度已用完" class="flex items-center gap-2.5 p-3 rounded-2xl border border-gray-200 bg-gray-100/90 text-gray-400 opacity-75 cursor-not-allowed select-none transition">
-                    <input type="checkbox" name="regSessionCheck" value="${opt}" disabled data-weekly-used="0" class="w-4 h-4 accent-gray-400 cursor-not-allowed">
-                    <div class="min-w-0">
-                        <div data-session-title="1" class="font-bold text-xs text-gray-400">${opt}</div>
-                        <div data-session-sub="1" class="text-[10px] text-rose-500 font-bold mt-0.5">🔒 本週額度已用完（${lockedUsedCount}/${maxAllowed} 場）</div>
-                    </div>
-                </label>
-            `;
-        }
-
-        const statusSubText = usedInBatchThisWeek
-            ? '✅ 本週已選場次（可取消或保留）'
-            : '🟢 開放報名中（當日 20:00 截止）';
 
         return `
             <label data-session-card="1" class="flex items-center gap-2.5 p-3 rounded-2xl border border-pink-200 bg-pink-50/40 cursor-pointer hover:bg-pink-50 transition">
-                <input type="checkbox" name="regSessionCheck" value="${opt}" ${checked ? 'checked' : ''} data-weekly-used="${usedInBatchThisWeek ? '1' : '0'}" onchange="onRegSessionCheckChange()" class="accent-[#c96a7b] w-4 h-4">
+                <input type="checkbox" name="regSessionCheck" value="${opt}" ${checked ? 'checked' : ''} onchange="onRegSessionCheckChange()" class="accent-[#c96a7b] w-4 h-4">
                 <div class="min-w-0">
                     <div data-session-title="1" class="font-bold text-xs text-[#8f4452]">${opt}</div>
-                    <div data-session-sub="1" class="text-[10px] text-emerald-700 font-semibold mt-0.5">${statusSubText}</div>
+                    <div data-session-sub="1" class="text-[10px] text-emerald-700 font-semibold mt-0.5">🟢 開放報名中（當日 20:00 截止）</div>
                 </div>
             </label>
         `;
@@ -880,34 +864,21 @@ window.onRegSessionCheckChange = function() {
     const rawMax = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
     const maxAllowed = (typeof rawMax === 'number' && rawMax >= 0) ? rawMax : Infinity;
     const isMaleLimited = Number.isFinite(maxAllowed);
-    const allCheckboxes = Array.from(document.querySelectorAll('input[name="regSessionCheck"]'));
-    const openCheckboxes = allCheckboxes.filter(cb => cb.dataset.timeClosed !== '1');
-
-    const alreadyUsedOtherLabels = new Set();
-    if (isMaleLimited) {
-        allCheckboxes.forEach(cb => {
-            if (cb.dataset.weeklyUsed === '1' && !cb.checked) {
-                alreadyUsedOtherLabels.add(cb.value);
-            }
-        });
-    }
-
-    let checkedCount = 0;
+    const closedUsedCount = getClosedRegisteredSessionsInCurrentBatch(Date.now()).length;
+    const openCheckboxes = Array.from(document.querySelectorAll('input[name="regSessionCheck"]:not([data-time-closed="1"])'));
+    let openCheckedCount = 0;
     openCheckboxes.forEach(cb => {
         if (cb.checked) {
-            if (checkedCount >= maxAllowed) {
+            if ((closedUsedCount + openCheckedCount) >= maxAllowed) {
                 cb.checked = false;
             } else {
-                checkedCount++;
+                openCheckedCount++;
             }
         }
     });
 
-    const totalUsedThisWeek = isMaleLimited
-        ? Math.min(maxAllowed, checkedCount + alreadyUsedOtherLabels.size)
-        : checkedCount;
-    const reachedLimit = isMaleLimited && totalUsedThisWeek >= maxAllowed;
-
+    const totalUsedCount = closedUsedCount + openCheckedCount;
+    const reachedLimit = isMaleLimited && totalUsedCount >= maxAllowed;
     openCheckboxes.forEach(cb => {
         const shouldDisable = reachedLimit && !cb.checked;
         cb.disabled = shouldDisable;
@@ -916,13 +887,13 @@ window.onRegSessionCheckChange = function() {
         const titleEl = cardEl.querySelector('[data-session-title="1"]');
         const subEl = cardEl.querySelector('[data-session-sub="1"]');
         if (shouldDisable) {
-            cardEl.title = `本週最多只能報名 ${maxAllowed} 個場次（額度已用完）`;
+            cardEl.title = `每屆最多只能選 ${maxAllowed} 個場次`;
             cardEl.className = 'flex items-center gap-2.5 p-3 rounded-2xl border border-gray-200 bg-gray-100/90 text-gray-400 opacity-75 cursor-not-allowed select-none transition';
             cb.className = 'w-4 h-4 accent-gray-400 cursor-not-allowed';
             if (titleEl) titleEl.className = 'font-bold text-xs text-gray-400';
             if (subEl) {
-                subEl.className = 'text-[10px] text-rose-500 font-bold mt-0.5';
-                subEl.textContent = `🔒 本週額度已用完（${totalUsedThisWeek}/${maxAllowed} 場）`;
+                subEl.className = 'text-[10px] text-amber-700 font-semibold mt-0.5';
+                subEl.textContent = `🔒 最多選 ${maxAllowed} 場（取消其他場次可改選）`;
             }
         } else {
             cardEl.removeAttribute('title');
@@ -931,20 +902,42 @@ window.onRegSessionCheckChange = function() {
             if (titleEl) titleEl.className = 'font-bold text-xs text-[#8f4452]';
             if (subEl) {
                 subEl.className = 'text-[10px] text-emerald-700 font-semibold mt-0.5';
-                subEl.textContent = cb.dataset.weeklyUsed === '1'
-                    ? '✅ 本週已選場次（可取消或保留）'
-                    : '🟢 開放報名中（當日 20:00 截止）';
+                subEl.textContent = '🟢 開放報名中（當日 20:00 截止）';
             }
         }
     });
 
+    const listEl = document.getElementById('sessionOptionsList');
+    if (listEl) {
+        let quotaBannerEl = document.getElementById('regSessionQuotaStatusBanner');
+        if (!quotaBannerEl) {
+            quotaBannerEl = document.createElement('div');
+            quotaBannerEl.id = 'regSessionQuotaStatusBanner';
+            listEl.parentNode.insertBefore(quotaBannerEl, listEl);
+        }
+        if (isMaleLimited) {
+            const isFull = totalUsedCount >= maxAllowed;
+            quotaBannerEl.className = `px-3 py-2 rounded-xl border text-xs font-bold ${isFull ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-pink-50/70 border-pink-200 text-[#8f4452]'}`;
+            quotaBannerEl.textContent = isFull
+                ? `本週配對場次額度已用完（已使用 ${totalUsedCount} / ${maxAllowed} 場）`
+                : `本週配對場次額度（已使用 ${totalUsedCount} / ${maxAllowed} 場）`;
+            quotaBannerEl.classList.remove('hidden');
+        } else {
+            quotaBannerEl.classList.add('hidden');
+        }
+    }
+
     const checkedSessions = openCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
     const submitBtn = document.querySelector('#registerModal button[onclick="confirmRegistration()"]');
     if (submitBtn) {
-        if (checkedSessions.length === 0) {
+        if (checkedSessions.length === 0 && closedUsedCount === 0) {
             submitBtn.textContent = '💾 保存設定（取消場次報名）';
+        } else if (checkedSessions.length === 0 && closedUsedCount > 0) {
+            submitBtn.textContent = isMaleLimited
+                ? `💾 保存設定（已使用 ${totalUsedCount} / ${maxAllowed} 場）`
+                : '💾 保存設定（取消未結束場次）';
         } else if (isMaleLimited) {
-            submitBtn.textContent = `✨ 確認送出報名（本週已用 ${totalUsedThisWeek} / ${maxAllowed} 場）`;
+            submitBtn.textContent = `✨ 確認送出報名（已使用 ${totalUsedCount} / ${maxAllowed} 場）`;
         } else {
             submitBtn.textContent = `✨ 確認送出報名（已選 ${checkedSessions.length} 場）`;
         }
@@ -997,13 +990,16 @@ function formatCriteriaSummaryText(criteria, mustMatchKeys = []) {
 async function cancelRegularRegistration() {
     const nowTs = Date.now();
     const prevCancelledSessions = Array.isArray(appState.registeredSessions) ? [...appState.registeredSessions] : [];
-    document.querySelectorAll('input[name="regSessionCheck"]').forEach(cb => {
+    const preservedClosedSessions = getClosedRegisteredSessionsInCurrentBatch(nowTs);
+    document.querySelectorAll('input[name="regSessionCheck"]:not([data-time-closed="1"])').forEach(cb => {
         cb.checked = false;
     });
     delete appState.registeredSession;
-    appState.registeredSessions = [];
-    appState.exactMatchCriteria = {};
-    appState.mustMatchKeys = [];
+    appState.registeredSessions = preservedClosedSessions;
+    if (preservedClosedSessions.length === 0) {
+        appState.exactMatchCriteria = {};
+        appState.mustMatchKeys = [];
+    }
     if (appState.playerId && typeof ActivityRegArchive !== 'undefined') {
         prevCancelledSessions.forEach(s => {
             const wasAlreadyClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(s, nowTs);
@@ -1039,24 +1035,13 @@ async function confirmRegistration() {
     const selectedSessions = rawCheckedSessions.filter(s =>
         !(typeof isRegularSessionRegistrationClosed === 'function' && isRegularSessionRegistrationClosed(s, nowSubmitTs))
     );
-    const batchNumNow = getCurrentBatchNumber();
+    const preservedClosedSessions = getClosedRegisteredSessionsInCurrentBatch(nowSubmitTs);
+    const combinedSessions = Array.from(new Set([...preservedClosedSessions, ...selectedSessions]));
     const maxAllowedSessions = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
-    if (Number.isFinite(maxAllowedSessions)) {
-        const prevUsedInBatch = getMaleWeeklyUsedSessionsInCurrentBatch(batchNumNow, []);
-        const combinedWeeklySet = new Set([
-            ...prevUsedInBatch.filter(oldLbl => {
-                const isOldClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(oldLbl, nowSubmitTs);
-                if (isOldClosed) return true;
-                const stillChecked = selectedSessions.some(ns => isSameSession(ns, oldLbl));
-                return stillChecked;
-            }),
-            ...selectedSessions.map(ns => normalizeSessionLabel(ns)).filter(Boolean)
-        ]);
-        if (combinedWeeklySet.size > maxAllowedSessions) {
-            renderRegisterModalSessionOptions(nowSubmitTs);
-            showMiniNotice(`🚫 本週額度最多 ${maxAllowedSessions} 場`, `本週最多只能報名 ${maxAllowedSessions} 個配對場次（含已結束或已選場次），無法再新增其他場次喔！`);
-            return;
-        }
+    if (combinedSessions.length > maxAllowedSessions) {
+        renderRegisterModalSessionOptions(nowSubmitTs);
+        showMiniNotice(`🚫 最多只能選 ${maxAllowedSessions} 場`, `本屆已使用 ${preservedClosedSessions.length} 場，最多只能再勾選 ${Math.max(0, maxAllowedSessions - preservedClosedSessions.length)} 個配對場次！`);
+        return;
     }
     if (blockedClosedSessions.length > 0 && selectedSessions.length === 0) {
         renderRegisterModalSessionOptions(nowSubmitTs);
@@ -1074,14 +1059,10 @@ async function confirmRegistration() {
     }
 
     const prevRegisteredList = Array.isArray(appState.registeredSessions) ? [...appState.registeredSessions] : [];
-    const finalCriteria = selectedSessions.length === 0 ? {} : criteria;
-    const finalMustKeys = selectedSessions.length === 0 ? [] : mustMatchKeys;
+    const finalCriteria = combinedSessions.length === 0 ? {} : criteria;
+    const finalMustKeys = combinedSessions.length === 0 ? [] : mustMatchKeys;
     delete appState.registeredSession;
-    appState.registeredSessions = selectedSessions;
-    appState.batchUsedSessions = Array.from(new Set([
-        ...(Array.isArray(appState.batchUsedSessions) ? appState.batchUsedSessions : []),
-        ...selectedSessions
-    ].map(s => normalizeSessionLabel(s)).filter(Boolean)));
+    appState.registeredSessions = combinedSessions;
     appState.exactMatchCriteria = finalCriteria;
     appState.mustMatchKeys = finalMustKeys;
     if (appState.playerId && typeof ActivityRegArchive !== 'undefined') {
@@ -1664,8 +1645,11 @@ function refreshAllUI() {
         applyBtn.disabled = false;
         applyBtn.textContent = `🌸 開始報名（${sched.batchPrefix}）`;
         const maxRegHintCount = (typeof getMaxRegularSessionsForUser === 'function') ? getMaxRegularSessionsForUser(appState) : Infinity;
+        const homeExtraCredits = (typeof getUserExtraMatchCredits === 'function') ? getUserExtraMatchCredits(appState) : 0;
         const multiHintText = Number.isFinite(maxRegHintCount)
-            ? (maxRegHintCount > 2 ? `✨ 已解鎖最多可選 ${maxRegHintCount} 場` : `最多可選 ${maxRegHintCount} 場`)
+            ? (maxRegHintCount > 2
+                ? `✨ 已解鎖最多可選 ${maxRegHintCount} 場${homeExtraCredits > 0 ? `・剩餘加場 ${homeExtraCredits} 次` : ''}`
+                : `最多可選 ${maxRegHintCount} 場`)
             : '可複選';
         if (closedBatchSessionLabels.length > 0) {
             const closedStrikeHtml = closedBatchSessionLabels.map(lbl => `<span class="text-gray-400 line-through">${lbl}</span>`).join('、');

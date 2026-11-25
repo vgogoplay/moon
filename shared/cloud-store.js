@@ -1761,7 +1761,7 @@ const CloudSync = {
             return [CHAT_META_KEY, USER_INDEX_KEY];
         }
         if (key === 'ops') {
-            return [MAILBOX_KEY, REPORTS_KEY, FATE_WALL_KEY, BANNED_RULES_KEY, SYSTEM_STATE_KEY, USER_INDEX_KEY, FORCE_KEY];
+            return [USERS_KEY, REG_HISTORY_KEY, SESSION_MATCH_RESULTS_KEY, MAILBOX_KEY, REPORTS_KEY, FATE_WALL_KEY, BANNED_RULES_KEY, SYSTEM_STATE_KEY, USER_INDEX_KEY, FORCE_KEY];
         }
         if (key === 'logs') {
             return [PLAYER_OP_LOGS_KEY, WISH_WALL_KEY, MATCH_LOGS_KEY, 'yuelao_admin_login_logs'];
@@ -3193,6 +3193,17 @@ const CloudSync = {
         if (!baseUser && !hasInput('matchedHistory')) return;
         if (baseUser) {
             const diffPatch = this.buildRecordPatch(baseUser, cleanRecord, record);
+            if (Object.prototype.hasOwnProperty.call(record, 'extraMatchCredits')) {
+                diffPatch.extraMatchCredits = Math.max(0, parseInt(cleanRecord.extraMatchCredits, 10) || 0);
+            }
+            if (Object.prototype.hasOwnProperty.call(record, 'extraCreditDeductedBatches')) {
+                diffPatch.extraCreditDeductedBatches = Array.isArray(cleanRecord.extraCreditDeductedBatches) && cleanRecord.extraCreditDeductedBatches.length > 0
+                    ? cleanRecord.extraCreditDeductedBatches
+                    : null;
+            }
+            if (Object.prototype.hasOwnProperty.call(record, 'lastExtraCreditDeductTs')) {
+                diffPatch.lastExtraCreditDeductTs = Number(cleanRecord.lastExtraCreditDeductTs || 0) || null;
+            }
             if (Object.keys(diffPatch).length) {
                 await this.patchNode(`${USERS_KEY}/${pid}`, diffPatch, { throwOnError: Boolean(options && options.throwOnError) });
             }
@@ -3793,6 +3804,17 @@ const Store = {
             state.profile.mbti = resolvedMbti;
             state.profile.mbtiGroup = resolvedMbtiGroup;
 
+            const resolvedExtraCredits = Math.max(0, parseInt(
+                (cloudTreeRec && cloudTreeRec.extraMatchCredits !== undefined)
+                    ? cloudTreeRec.extraMatchCredits
+                    : ((existingRecord && existingRecord.extraMatchCredits !== undefined) ? existingRecord.extraMatchCredits : state.extraMatchCredits),
+                10
+            ) || 0);
+            if (state.profile) state.profile.extraMatchCredits = resolvedExtraCredits;
+            const resolvedDeductedBatches = Array.isArray(cloudTreeRec && cloudTreeRec.extraCreditDeductedBatches)
+                ? cloudTreeRec.extraCreditDeductedBatches
+                : (Array.isArray(existingRecord.extraCreditDeductedBatches) ? existingRecord.extraCreditDeductedBatches : []);
+            state.extraMatchCredits = resolvedExtraCredits;
             const resolvedLockNick = Boolean(
                 (state.profile && state.profile.lockNickname) ||
                 existingRecord.lockNickname ||
@@ -3823,6 +3845,8 @@ const Store = {
                 warningReason: state.warningReason || '',
                 isMatchBanned: Boolean(authMatchSource.isMatchBanned),
                 isChatBanned: Boolean(authMatchSource.isChatBanned),
+                extraMatchCredits: resolvedExtraCredits,
+                extraCreditDeductedBatches: resolvedDeductedBatches,
                 readMailIds: Array.isArray(state.readMailIds) ? Array.from(new Set(state.readMailIds.map(String))) : [],
                 b3ThuMaleCleared: Boolean(state.b3ThuMaleCleared || existingRecord.b3ThuMaleCleared || (typeof isMalePlayerRecord === 'function' && isMalePlayerRecord(state))),
                 registeredSessions: state.isWarnedAccount ? [] : (Array.isArray(state.registeredSessions) ? state.registeredSessions : []),

@@ -341,16 +341,34 @@ function openEditPlayerModal(playerId) {
     const privMap = u.privacy || {};
     const container = document.getElementById('adminEditPlayerFieldsBody');
 
+    const curExtraCredits = Math.max(0, parseInt(u.extraMatchCredits, 10) || 0);
+    const isTargetMale = (typeof isMalePlayerRecord === 'function') ? isMalePlayerRecord(u) : (u.gender === '男' || String(u.id || '').startsWith('1'));
     const adminSettingsHtml = `
         <div class="space-y-3 p-4 rounded-2xl bg-rose-50/40 border-2 border-rose-200">
             <h4 class="text-sm md:text-base font-bold font-serif-jp text-rose-800 border-b border-rose-200/80 pb-1.5">🛡️ 後台管理員專屬設定</h4>
-            <div class="grid grid-cols-1 gap-3.5">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 <div class="p-3.5 rounded-xl bg-white border-2 border-rose-100 space-y-2 shadow-sm">
                     <label class="flex items-center justify-between gap-2 cursor-pointer">
                         <span class="text-xs font-bold text-rose-700">禁止此玩家觸發「20:00 心動抉擇」</span>
                         <input type="checkbox" id="edit-admin-disableConfession" ${u.disableConfession ? 'checked' : ''} class="w-4 h-4 accent-rose-600">
                     </label>
                     <p class="text-[11px] text-gray-500">勾選後，該玩家即使擁有 2 位以上好友，也不會彈出心動抉擇視窗。</p>
+                </div>
+                <div class="p-3.5 rounded-xl bg-white border-2 border-amber-200 space-y-2 shadow-sm">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-xs font-bold text-amber-900">🎟️ 額外加場次數（解鎖每週第 3 場）</span>
+                        <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${curExtraCredits > 0 ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 text-gray-500'}">
+                            ${isTargetMale ? (curExtraCredits > 0 ? '已解鎖 3 場/週' : '預設 2 場/週') : '女生不限場次'}
+                        </span>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="number" id="edit-admin-extraMatchCredits" min="0" max="99" value="${curExtraCredits}" class="w-20 p-1.5 admin-input-box text-center text-sm font-mono font-bold text-[#8f4452]">
+                        <span class="text-xs text-gray-600 font-semibold">次</span>
+                        <button type="button" onclick="adjustAdminEditExtraCredits(1)" class="px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 text-xs font-bold transition">+1 次 ($60)</button>
+                        <button type="button" onclick="adjustAdminEditExtraCredits(4)" class="px-2.5 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 border border-rose-300 text-[#8f4452] text-xs font-bold transition">+4 次 ($200)</button>
+                        <button type="button" onclick="curCreditsReset()" class="px-2 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 text-[11px] font-semibold transition">歸零</button>
+                    </div>
+                    <p class="text-[11px] text-gray-500">剩餘次數 &gt; 0 時，該男會員當週可多選第 3 場；當週報名 3 場開獎時即扣 1 次（未配對成功一樣扣次）。</p>
                 </div>
             </div>
         </div>
@@ -564,6 +582,85 @@ function onAdminEditSelectOtherChange(key, val) {
     }
 }
 
+function applyExtraMatchCreditsToLocalAndCloud(targetId, nextCredVal) {
+    const pidStr = String(targetId || '').trim();
+    if (!pidStr) return;
+    const cleanVal = Math.max(0, parseInt(nextCredVal, 10) || 0);
+
+    const users = getUsers();
+    const idx = users.findIndex(item => item && String(item.id).trim() === pidStr);
+    if (idx >= 0) {
+        users[idx].extraMatchCredits = cleanVal;
+        users[idx].extraCreditDeductedBatches = [];
+        users[idx].lastExtraCreditDeductTs = 0;
+        try {
+            localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
+            if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_LOCAL_KEY);
+            if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+                AdminMemoryCache.invalidate('users');
+            }
+        } catch (e) {}
+    }
+
+    if (typeof CloudSync !== 'undefined') {
+        if (CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][pidStr]) {
+            CloudSync.tree[USERS_KEY][pidStr].extraMatchCredits = cleanVal;
+            CloudSync.tree[USERS_KEY][pidStr].extraCreditDeductedBatches = [];
+            CloudSync.tree[USERS_KEY][pidStr].lastExtraCreditDeductTs = 0;
+        }
+        if (typeof CloudSync.setSharedPendingUser === 'function' && idx >= 0) {
+            CloudSync.setSharedPendingUser(pidStr, { ...users[idx] }, 45000);
+        }
+        if (typeof CloudSync.invalidatePersistedEtag === 'function') {
+            CloudSync.invalidatePersistedEtag(USERS_KEY);
+        }
+        if (CloudSync.initialized && typeof CloudSync.patchUserFields === 'function') {
+            CloudSync.patchUserFields(pidStr, {
+                extraMatchCredits: cleanVal,
+                extraCreditDeductedBatches: [],
+                lastExtraCreditDeductTs: 0
+            }, idx >= 0 ? users[idx] : null);
+        }
+    }
+
+    [PLAYER_STATE_PREFIX + pidStr, FRONTEND_STORAGE_KEY].forEach(stKey => {
+        try {
+            const rawSt = localStorage.getItem(stKey);
+            if (!rawSt) return;
+            const parsedSt = JSON.parse(rawSt);
+            if (parsedSt && String(parsedSt.playerId || '') === pidStr) {
+                parsedSt.extraMatchCredits = cleanVal;
+                if (parsedSt.profile) parsedSt.profile.extraMatchCredits = cleanVal;
+                localStorage.setItem(stKey, JSON.stringify(parsedSt));
+            }
+        } catch (e) {}
+    });
+
+    lastMemberRenderSig = '';
+    if (typeof renderAdminAll === 'function') {
+        renderAdminAll(true);
+    }
+}
+
+function adjustAdminEditExtraCredits(delta) {
+    const inputEl = document.getElementById('edit-admin-extraMatchCredits');
+    if (!inputEl) return;
+    const cur = Math.max(0, parseInt(inputEl.value, 10) || 0);
+    const next = Math.max(0, Math.min(99, cur + Number(delta || 0)));
+    inputEl.value = next;
+}
+
+function curCreditsReset() {
+    const inputEl = document.getElementById('edit-admin-extraMatchCredits');
+    if (inputEl) inputEl.value = 0;
+    const targetId = (document.getElementById('editPlayerTargetId')?.value || '').trim();
+    if (targetId) {
+        applyExtraMatchCreditsToLocalAndCloud(targetId, 0);
+        appendLog(`<span class="text-amber-300">[加場次數歸零]</span> 已將玩家 <strong>ID:${targetId}</strong> 的額外加場次數歸零為 <strong>0 次</strong>，前後台已同步更新！`);
+    }
+    return 0;
+}
+
 function onAdminEditNicknameOptionChange(optVal) {
     if (optVal === 'no_edit') {
         const nickInput = document.getElementById('edit-field-nickname');
@@ -655,6 +752,17 @@ function saveAdminEditedPlayer(e) {
     if (disableConfessionEl) {
         u.disableConfession = disableConfessionEl.checked;
     }
+    const extraCreditsEl = document.getElementById('edit-admin-extraMatchCredits');
+    let forceClearDeductedBatches = false;
+    if (extraCreditsEl) {
+        const nextCredVal = Math.max(0, parseInt(extraCreditsEl.value, 10) || 0);
+        const prevCredVal = Math.max(0, parseInt(prevUser.extraMatchCredits, 10) || 0);
+        u.extraMatchCredits = nextCredVal;
+        if (nextCredVal !== prevCredVal || nextCredVal === 0) {
+            u.extraCreditDeductedBatches = [];
+            forceClearDeductedBatches = true;
+        }
+    }
 
     if (u.mbtiGroup && u.mbtiGroup !== '不知道 / 沒測過' && !u.mbti) {
         alert(`請為該玩家選擇「${u.mbtiGroup}」開頭的具體 MBTI 人格！`);
@@ -689,6 +797,41 @@ function saveAdminEditedPlayer(e) {
             patchFields[k] = u[k];
         }
     });
+    if (forceClearDeductedBatches) {
+        u.lastExtraCreditDeductTs = 0;
+        patchFields.extraCreditDeductedBatches = [];
+        patchFields.extraMatchCredits = u.extraMatchCredits;
+        patchFields.lastExtraCreditDeductTs = 0;
+    }
+    try {
+        localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
+        if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_LOCAL_KEY);
+    } catch (e) {}
+    if (typeof CloudSync !== 'undefined') {
+        const pidStr = String(u.id).trim();
+        if (CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][pidStr]) {
+            CloudSync.tree[USERS_KEY][pidStr].extraMatchCredits = u.extraMatchCredits;
+            if (forceClearDeductedBatches) {
+                CloudSync.tree[USERS_KEY][pidStr].extraCreditDeductedBatches = [];
+                CloudSync.tree[USERS_KEY][pidStr].lastExtraCreditDeductTs = 0;
+            }
+        }
+        if (typeof CloudSync.setSharedPendingUser === 'function') {
+            CloudSync.setSharedPendingUser(pidStr, { ...u }, 45000);
+        }
+    }
+    [PLAYER_STATE_PREFIX + String(u.id).trim(), FRONTEND_STORAGE_KEY].forEach(stKey => {
+        try {
+            const rawSt = localStorage.getItem(stKey);
+            if (!rawSt) return;
+            const parsedSt = JSON.parse(rawSt);
+            if (parsedSt && String(parsedSt.playerId || '') === String(u.id).trim()) {
+                parsedSt.extraMatchCredits = u.extraMatchCredits;
+                if (parsedSt.profile) parsedSt.profile.extraMatchCredits = u.extraMatchCredits;
+                localStorage.setItem(stKey, JSON.stringify(parsedSt));
+            }
+        } catch (e) {}
+    });
     if (typeof saveSingleUserPatch === 'function') {
         saveSingleUserPatch(users, u, patchFields);
     } else {
@@ -702,6 +845,10 @@ function saveAdminEditedPlayer(e) {
         ts: Date.now()
     }));
 
+    lastMemberRenderSig = '';
+    if (typeof renderAdminAll === 'function') {
+        renderAdminAll(true);
+    }
     closeEditPlayerModal();
     appendLog(`<span class="text-sky-300">[管理員編輯資料]</span> 已更新玩家 <strong>${u.nickname} (ID:${u.id})</strong> 的個人資料與備份碼，並即時同步至前台！`);
 }
@@ -832,7 +979,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
         users: users.map(u => [
             u.id, u.nickname, u.gender, u.age, u.ig, u.region, u.city,
             u.registeredSessions, u.customActivityRegs, u.exactMatchCriteria, u.mustMatchKeys,
-            u.isMatchBanned, u.isChatBanned, u.isWarned,
+            u.isMatchBanned, u.isChatBanned, u.isWarned, u.extraMatchCredits,
             u.matchedHistory, u.matchedWithId, u.matchedWithName, u.matchedSession
         ])
     });
@@ -1063,6 +1210,10 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
             if (u.isWarned) {
                 statusParts.push(`<span class="inline-block px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-bold">⚠️ 警告帳號</span>`);
             }
+            const uExtraCredits = Math.max(0, parseInt(u.extraMatchCredits, 10) || 0);
+            if (uExtraCredits > 0) {
+                statusParts.push(`<span class="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 font-bold">🎟️ 加場剩餘 ${uExtraCredits} 次</span>`);
+            }
             if (historyList.length > 0) {
                 historyList.forEach(h => {
                     const isForceProtected = Boolean(
@@ -1179,4 +1330,26 @@ function submitAddNewPlayer(e) {
     setTimeout(() => {
         alert(`✅ 新增會員成功！\n\n唯一玩家 ID：${newId}\n性別：${gender}\n🔑 通行碼：${newBackupCode}\n\n請將此 5 碼通行碼交給玩家，請對方前往前台「個人與隱私 -> 備份/還原碼」輸入並讀取，即可自行完成後續資料填寫。`);
     }, 100);
+}
+
+if (typeof window !== 'undefined' && !window._rosterCreditSyncListenerBound) {
+    window._rosterCreditSyncListenerBound = true;
+    const forceRefreshRosterTable = () => {
+        lastMemberRenderSig = '';
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('users');
+        }
+        if (typeof renderAdminAll === 'function') {
+            renderAdminAll(true);
+        }
+    };
+    window.addEventListener('focus', forceRefreshRosterTable);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) forceRefreshRosterTable();
+    });
+    window.addEventListener('storage', (e) => {
+        if (e && (e.key === USERS_LOCAL_KEY || e.key === PENDING_USERS_SYNC_KEY)) {
+            forceRefreshRosterTable();
+        }
+    });
 }

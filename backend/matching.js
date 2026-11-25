@@ -2109,7 +2109,10 @@ function runSessionMatch(isAuto = false, overrideSession = null, options = {}) {
         if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
             AdminMemoryCache.invalidate('users');
         }
-        const users = getUsers();
+        let users = getUsers();
+        if ((!Array.isArray(users) || users.length === 0) && typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY]) {
+            users = CloudSync.mapToArray(CloudSync.tree[USERS_KEY]);
+        }
         const rules = getForceRules();
 
         // 先確保本場次既有配對皆為嚴格 1 對 1（若有任何歷史殘留 1 對多重複紀錄先自動整理為 1 對 1）
@@ -2227,11 +2230,127 @@ function runSessionMatch(isAuto = false, overrideSession = null, options = {}) {
 
     const bannedSkippedCount = allSessionUsers.filter(u => u.isMatchBanned).length;
 
+    // 扣點機制：男生每週前 2 場使用原本免費額度（不扣加場次數）；只有當該屆「已開獎結算場次」累計達到第 3 場（前 2 場免費額度已用完，本場為第 3 場開獎）時，才扣除 1 次額外加場次數
+    const targetBatchPrefix = (typeof extractBatchLabel === 'function') ? extractBatchLabel(targetSession) : '';
+    const extraCreditDeductedIds = new Set();
+    const smrForCreditCheck = (() => {
+        try {
+            const k = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined') ? SESSION_MATCH_RESULTS_KEY : 'yuelao_session_match_results';
+            return JSON.parse(localStorage.getItem(k) || '{}') || {};
+        } catch (e) { return {}; }
+    })();
+
+    allSessionUsers.forEach(regUser => {
+        if (!regUser || !regUser.id) return;
+        const pid = String(regUser.id).trim();
+        const uObj = userById.get(pid);
+        if (!uObj || typeof isMalePlayerRecord !== 'function' || !isMalePlayerRecord(uObj)) return;
+        const treeRecForCred = (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY]) ? CloudSync.tree[USERS_KEY][pid] : null;
+        const localCredVal = (typeof getUserExtraMatchCredits === 'function') ? getUserExtraMatchCredits(uObj) : Math.max(0, parseInt(uObj.extraMatchCredits, 10) || 0);
+        const treeCredVal = (treeRecForCred && typeof getUserExtraMatchCredits === 'function') ? getUserExtraMatchCredits(treeRecForCred) : (treeRecForCred ? Math.max(0, parseInt(treeRecForCred.extraMatchCredits, 10) || 0) : 0);
+        const curCredits = Math.max(localCredVal, treeCredVal);
+        if (curCredits <= 0) return;
+
+        // 防止 10 秒內重複連點重疊扣次
+        const lastDeductTs = Number(uObj.lastExtraCreditDeductTs || 0);
+        if (lastDeductTs > 0 && (nowTs - lastDeductTs) < 10000) return;
+
+        // 僅統計「已實際開獎結算過」的同屆常規場次（結算快照、配對歷史，加上本次正在開獎的 targetSession）
+        // 尚未開獎的未來報名場次不計入，確保第 1、2 場開獎先消耗原本 2 場免費額度，第 3 場實際開獎時才扣 1 次加場次數
+        const drawnSessionsInBatch = new Set();
+        const addIfDrawnSameBatch = (rawS) => {
+            const normS = (typeof normalizeSessionLabel === 'function') ? normalizeSessionLabel(rawS) : String(rawS || '').trim();
+            if (normS && targetBatchPrefix && typeof extractBatchLabel === 'function' && extractBatchLabel(normS) === targetBatchPrefix) {
+                drawnSessionsInBatch.add(normS);
+            }
+        };
+
+        Object.values(smrForCreditCheck).forEach(snap => {
+            if (!snap || !snap.session) return;
+            const inMatched = Array.isArray(snap.matchedUsers) && snap.matchedUsers.some(m => m && String(m.playerId).trim() === pid);
+            const inUnmatched = Array.isArray(snap.unmatchedUsers) && snap.unmatchedUsers.some(m => m && String(m.playerId).trim() === pid);
+            if (inMatched || inUnmatched) {
+                addIfDrawnSameBatch(snap.session);
+            }
+        });
+
+        (Array.isArray(uObj.matchedHistory) ? uObj.matchedHistory : []).forEach(h => {
+            if (!h || h.activityId) return;
+            const isForce = Boolean(h.isForceRepaired || String(h.session || '').includes('強制') || String(h.matchDetail || '').includes('強制'));
+            if (isForce) return;
+            addIfDrawnSameBatch(h.session);
+        });
+        addIfDrawnSameBatch(targetSession);
+
+        if (drawnSessionsInBatch.size > MAX_MALE_REGULAR_SESSIONS) {
+            uObj.extraMatchCredits = Math.max(0, curCredits - 1);
+            uObj.lastExtraCreditDeductTs = nowTs;
+            uObj.extraCreditDeductedBatches = [];
+            extraCreditDeductedIds.add(pid);
+            const matchedThisRound = pairedThisSessionIds.has(pid);
+            appendLog(`<span class="text-amber-300">[加場扣次]</span> 玩家 <strong>${uObj.nickname} (ID:${uObj.id})</strong> 本屆原本 2 場免費額度已用完，第 ${drawnSessionsInBatch.size} 場開獎（${matchedThisRound ? '配對成功' : '未配對成功，依規則照常扣次'}）自動扣除 1 次加場次數（剩餘 <strong>${uObj.extraMatchCredits}</strong> 次）。`);
+        }
+    });
+
     // 永久保存本場次「配對成功名單」與「配對失敗名單及原因」
     const summaryRec = saveSessionMatchResultRecord(targetSession, allSessionUsers, users, reservedIds, nowTs);
 
+    const allMutatedIds = Array.from(new Set([...pairedThisSessionIds, ...extraCreditDeductedIds]));
     appendLog(`<span class="text-pink-300">[結算完成]</span> 本場次共配對成功 <strong>${pairCount} 對</strong>${bannedSkippedCount > 0 ? `（另有 ${bannedSkippedCount} 名已報名玩家因設定「禁止配對」而未配對）` : ''}。`);
-    saveUsers(users, { isMatchMutation: true, targetIds: Array.from(pairedThisSessionIds) });
+    if (extraCreditDeductedIds.size > 0) {
+        extraCreditDeductedIds.forEach(pid => {
+            const uObj = userById.get(String(pid));
+            if (!uObj) return;
+            const nextCred = Math.max(0, parseInt(uObj.extraMatchCredits, 10) || 0);
+            uObj.extraMatchCredits = nextCred;
+            uObj.extraCreditDeductedBatches = [];
+            uObj.lastExtraCreditDeductTs = nowTs;
+            if (typeof CloudSync !== 'undefined') {
+                if (CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][pid]) {
+                    CloudSync.tree[USERS_KEY][pid].extraMatchCredits = nextCred;
+                    CloudSync.tree[USERS_KEY][pid].extraCreditDeductedBatches = [];
+                    CloudSync.tree[USERS_KEY][pid].lastExtraCreditDeductTs = nowTs;
+                }
+                if (typeof CloudSync.setSharedPendingUser === 'function') {
+                    CloudSync.setSharedPendingUser(pid, { ...uObj }, 45000);
+                }
+                if (typeof CloudSync.invalidatePersistedEtag === 'function') {
+                    CloudSync.invalidatePersistedEtag(USERS_KEY);
+                }
+            }
+            // 同步更新同瀏覽器前台本地玩家狀態快取
+            [PLAYER_STATE_PREFIX + pid, FRONTEND_STORAGE_KEY].forEach(stKey => {
+                try {
+                    const rawSt = localStorage.getItem(stKey);
+                    if (!rawSt) return;
+                    const parsedSt = JSON.parse(rawSt);
+                    if (parsedSt && String(parsedSt.playerId || '') === pid) {
+                        parsedSt.extraMatchCredits = nextCred;
+                        if (parsedSt.profile) parsedSt.profile.extraMatchCredits = nextCred;
+                        localStorage.setItem(stKey, JSON.stringify(parsedSt));
+                    }
+                } catch (e) {}
+            });
+        });
+    }
+    try {
+        localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
+        if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_LOCAL_KEY);
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('users');
+        }
+    } catch (e) {}
+    saveUsers(users, { isMatchMutation: true, targetIds: allMutatedIds });
+    if (!isAuto && !(options && options.preferredPairs)) {
+        const deductedNames = Array.from(extraCreditDeductedIds).map(pid => {
+            const u = userById.get(String(pid));
+            return u ? `${u.nickname} (ID:${u.id}，剩餘 ${u.extraMatchCredits} 次)` : `ID:${pid}`;
+        });
+        const deductedSummary = deductedNames.length > 0
+            ? `\n・本次扣除第 3 場加場次數（${deductedNames.length} 人）：${deductedNames.join('、')}`
+            : '\n・本次扣除第 3 場加場次數：0 人（未達本屆第 3 場或無加場次數）';
+        alert(`🌙【${targetSession}】模擬 20:00 開獎結算完成！\n\n・本場次報名人數：${allSessionUsers.length} 人\n・本場次成功配對：${pairCount} 對（${pairCount * 2} 人）${deductedSummary}`);
+    }
     return summaryRec;
     } finally {
         sessionMatchRunInProgress = false;

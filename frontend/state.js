@@ -399,6 +399,27 @@ function syncFromSharedStorage() {
                 appState.disableConfession = nextDisableConfession;
                 stateChanged = true;
             }
+            const nextExtraCredits = Math.max(0, parseInt(me.extraMatchCredits, 10) || 0);
+            const curAppCred = Math.max(0, parseInt(appState.extraMatchCredits, 10) || 0);
+            const curProfCred = (appState.profile && appState.profile.extraMatchCredits !== undefined)
+                ? Math.max(0, parseInt(appState.profile.extraMatchCredits, 10) || 0)
+                : curAppCred;
+            if (curAppCred !== nextExtraCredits || curProfCred !== nextExtraCredits) {
+                appState.extraMatchCredits = nextExtraCredits;
+                if (appState.profile) appState.profile.extraMatchCredits = nextExtraCredits;
+                stateChanged = true;
+                if (typeof writeStateSafely === 'function') {
+                    if (appState.playerId) writeStateSafely(PLAYER_STATE_PREFIX + String(appState.playerId), appState);
+                    writeStateSafely(STORAGE_KEY, appState);
+                }
+                const regModalEl = document.getElementById('registerModal');
+                if (regModalEl && !regModalEl.classList.contains('hidden') && typeof renderRegisterModalSessionOptions === 'function') {
+                    renderRegisterModalSessionOptions();
+                }
+                if (typeof refreshAllUI === 'function') {
+                    refreshAllUI();
+                }
+            }
 
             // 同步並正規化前後台已儲存的報名場次與條件（Firebase RTDB 會省略空陣列 []，故 undefined 視同 []）
             if (me.b3ThuMaleCleared && !appState.b3ThuMaleCleared) {
