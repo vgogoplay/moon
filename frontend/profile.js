@@ -1031,7 +1031,14 @@ document.getElementById('profileForm').addEventListener('submit', async function
         appState.registeredSessions = [];
 
         if (isProfileComplete() && !appState.playerId) {
-            appState.playerId = IdAllocator.allocate(appState.profile.gender);
+            try {
+                appState.playerId = (typeof IdAllocator.allocateAsync === 'function')
+                    ? await IdAllocator.allocateAsync(appState.profile.gender)
+                    : IdAllocator.allocate(appState.profile.gender);
+            } catch (allocErr) {
+                showMiniNotice('⚠️ 網路連線異常', (allocErr && allocErr.message) || '無法取得玩家編號，請稍後再試。');
+                return;
+            }
         }
 
         const warnClientMeta = await resolveSilentClientMeta();
@@ -1067,17 +1074,50 @@ document.getElementById('profileForm').addEventListener('submit', async function
         return;
     }
 
-    if (!appState.playerId) {
-        appState.playerId = IdAllocator.allocate(appState.profile.gender);
-    }
-
+    const isBrandNewPlayer = !appState.playerId;
     const clientMeta = await resolveSilentClientMeta();
     if (clientMeta && typeof Store.setTransientClientMeta === 'function') {
         Store.setTransientClientMeta(clientMeta);
     }
 
-    hasUnsavedProfileDraft = false;
-    await Store.save(appState, true);
+    if (isBrandNewPlayer) {
+        let savedNewOk = false;
+        for (let attempt = 0; attempt < 5; attempt++) {
+            try {
+                appState.playerId = (typeof IdAllocator.allocateAsync === 'function')
+                    ? await IdAllocator.allocateAsync(appState.profile.gender)
+                    : IdAllocator.allocate(appState.profile.gender);
+            } catch (allocErr) {
+                appState.playerId = null;
+                showMiniNotice('⚠️ 網路連線異常', (allocErr && allocErr.message) || '無法確認雲端會員編號，請稍後再按「保存」重試！');
+                return;
+            }
+            try {
+                hasUnsavedProfileDraft = false;
+                await Store.save(appState, true, false, { isNewRegistration: true, throwOnError: true });
+                savedNewOk = true;
+                break;
+            } catch (saveErr) {
+                if (saveErr && saveErr.code === 'ID_COLLISION') {
+                    appState.playerId = null;
+                    continue;
+                }
+                appState.playerId = null;
+                hasUnsavedProfileDraft = true;
+                showMiniNotice('⚠️ 保存失敗，請重試', (saveErr && saveErr.message) || '網路連線不穩定，請再按一次「保存」！');
+                return;
+            }
+        }
+        if (!savedNewOk || !appState.playerId) {
+            appState.playerId = null;
+            hasUnsavedProfileDraft = true;
+            showMiniNotice('⚠️ 註冊擁擠，請重試', '目前同時註冊人數較多，請再按一次「保存」即可完成建檔！');
+            return;
+        }
+    } else {
+        hasUnsavedProfileDraft = false;
+        await Store.save(appState, true);
+    }
     renderProfileForm();
     if (typeof renderHomeStatsCharts === 'function') {
         renderHomeStatsCharts(true);

@@ -3155,17 +3155,28 @@ const CloudSync = {
             ? cleanRecord.customActivityRegs
             : {};
         // 寫入前以雲端最新單節點為基準（玩家端）；只 PATCH 差異欄位，避免舊快取整包覆寫 matchedHistory
+        const isNewRegistration = Boolean(options && options.isNewRegistration);
         const freshBase = await this.getNodeOnce(`${USERS_KEY}/${pid}`);
         
+        if (freshBase === undefined) {
+            console.warn('[upsertUser] 無法讀取雲端最新資料，略過寫入以免覆蓋 ID:', pid);
+            if (options && options.throwOnError) {
+                throw new Error('無法連線雲端確認帳號狀態，請稍後再試');
+            }
+            return;
+        }
+        const baseUser = (freshBase && typeof freshBase === 'object') ? freshBase : null;
+        if (isNewRegistration && baseUser) {
+            console.warn('[upsertUser] 攔截新註冊寫入已存在的雲端 ID:', pid);
+            const err = new Error('ID_COLLISION');
+            err.code = 'ID_COLLISION';
+            throw err;
+        }
+
         const serialized = JSON.stringify(cleanRecord);
         if (!forcePush && this.lastPushedUsersJson[pid] === serialized) return;
         this.lastPushedUsersJson[pid] = serialized;
         this.setSharedPendingUser(pid, cleanRecord, 25000);
-        if (freshBase === undefined) {
-            console.warn('[upsertUser] 無法讀取雲端最新資料，略過寫入以免覆蓋 ID:', pid);
-            return;
-        }
-        const baseUser = (freshBase && typeof freshBase === 'object') ? freshBase : null;
         
         // 核心修復：寫入前強制將最新雲端的配對名單合併進 cleanRecord，徹底斷絕舊網頁覆蓋好友名單的問題
         if (baseUser) {
@@ -3295,35 +3306,150 @@ const CloudSync = {
 
 };
 
-// 4. 唯一玩家 ID 分配器（男 10001 起 / 女 20001 起）
+// 4. 唯一玩家 ID 分配器（男 10001 起 / 女 20001 起，分配前強制與雲端同步並逐一核對空號，絕不重複）
 const IdAllocator = {
-    allocate(gender) {
-        const counters = JSON.parse(localStorage.getItem(ID_COUNTER_KEY) || '{"male":10001,"female":20001,"other":30001}');
-        const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
-        const usedIds = new Set(users.map(u => String(u.id)));
-
-        if (gender === '男') {
-            let candidate = Math.max(10001, Number(counters.male || 10001));
-            while (usedIds.has(String(candidate))) candidate++;
-            counters.male = candidate + 1;
-            localStorage.setItem(ID_COUNTER_KEY, JSON.stringify(counters));
-            if (typeof CloudSync !== 'undefined') CloudSync.putNode(ID_COUNTER_KEY, counters);
-            return String(candidate);
-        } else if (gender === '女') {
-            let candidate = Math.max(20001, Number(counters.female || 20001));
-            while (usedIds.has(String(candidate))) candidate++;
-            counters.female = candidate + 1;
-            localStorage.setItem(ID_COUNTER_KEY, JSON.stringify(counters));
-            if (typeof CloudSync !== 'undefined') CloudSync.putNode(ID_COUNTER_KEY, counters);
-            return String(candidate);
-        } else {
-            let candidate = Math.max(30001, Number(counters.other || 30001));
-            while (usedIds.has(String(candidate))) candidate++;
-            counters.other = candidate + 1;
-            localStorage.setItem(ID_COUNTER_KEY, JSON.stringify(counters));
-            if (typeof CloudSync !== 'undefined') CloudSync.putNode(ID_COUNTER_KEY, counters);
-            return String(candidate);
+    collectKnownUsedIds() {
+        const usedIds = new Set();
+        try {
+            const users = JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
+            if (Array.isArray(users)) {
+                users.forEach(u => {
+                    if (u && u.id) usedIds.add(String(u.id).trim());
+                });
+            }
+        } catch (e) {}
+        if (typeof CloudSync !== 'undefined' && CloudSync.tree) {
+            [USERS_KEY, USER_INDEX_KEY].forEach(nodeKey => {
+                const mapObj = CloudSync.tree[nodeKey];
+                if (mapObj && typeof mapObj === 'object') {
+                    Object.keys(mapObj).forEach(k => {
+                        const clean = String(k || '').trim();
+                        if (clean) usedIds.add(clean);
+                    });
+                }
+            });
+            const sharedPending = (typeof CloudSync.loadSharedPendingUsers === 'function')
+                ? CloudSync.loadSharedPendingUsers()
+                : {};
+            Object.keys(sharedPending).forEach(k => {
+                if (k) usedIds.add(String(k).trim());
+            });
         }
+        return usedIds;
+    },
+
+    getMinStartForGender(gender) {
+        if (gender === '男') return 10001;
+        if (gender === '女') return 20001;
+        return 30001;
+    },
+
+    getCounterFieldForGender(gender) {
+        if (gender === '男') return 'male';
+        if (gender === '女') return 'female';
+        return 'other';
+    },
+
+    computeMaxUsedInRange(usedIds, minStart) {
+        const maxBound = minStart + 9998;
+        let maxFound = minStart - 1;
+        usedIds.forEach(idStr => {
+            if (/^\d+$/.test(idStr)) {
+                const n = parseInt(idStr, 10);
+                if (n >= minStart && n <= maxBound && n > maxFound) {
+                    maxFound = n;
+                }
+            }
+        });
+        return maxFound;
+    },
+
+    async allocateAsync(gender) {
+        const minStart = this.getMinStartForGender(gender);
+        const counterField = this.getCounterFieldForGender(gender);
+
+        let localCounters = { male: 10001, female: 20001, other: 30001 };
+        try {
+            const parsed = JSON.parse(localStorage.getItem(ID_COUNTER_KEY) || '{}');
+            if (parsed && typeof parsed === 'object') {
+                localCounters = { ...localCounters, ...parsed };
+            }
+        } catch (e) {}
+
+        const isLiveCloud = (typeof CloudSync !== 'undefined' && !CloudSync.isLocalSandboxMode() && CloudSync.dbUrl);
+        if (isLiveCloud) {
+            const [remoteCounters, remoteIndex] = await Promise.all([
+                CloudSync.getNodeOnce(ID_COUNTER_KEY),
+                CloudSync.getNodeOnce(USER_INDEX_KEY)
+            ]);
+            if (remoteCounters === undefined || remoteIndex === undefined) {
+                throw new Error('網路連線不穩定，無法確認雲端會員編號，請稍後再按「保存」重試！');
+            }
+            if (remoteCounters && typeof remoteCounters === 'object') {
+                localCounters.male = Math.max(Number(localCounters.male || 10001), Number(remoteCounters.male || 10001));
+                localCounters.female = Math.max(Number(localCounters.female || 20001), Number(remoteCounters.female || 20001));
+                localCounters.other = Math.max(Number(localCounters.other || 30001), Number(remoteCounters.other || 30001));
+            }
+            if (remoteIndex && typeof remoteIndex === 'object') {
+                CloudSync.applyStreamPatch(USER_INDEX_KEY, remoteIndex);
+            }
+        }
+
+        const usedIds = this.collectKnownUsedIds();
+        const maxUsedInRange = this.computeMaxUsedInRange(usedIds, minStart);
+        let candidate = Math.max(minStart, Number(localCounters[counterField] || minStart), maxUsedInRange + 1);
+        while (usedIds.has(String(candidate))) {
+            candidate++;
+        }
+
+        if (isLiveCloud) {
+            let verifiedFree = false;
+            for (let attempt = 0; attempt < 120; attempt++) {
+                const existingNode = await CloudSync.getNodeOnce(`${USERS_KEY}/${candidate}`);
+                if (existingNode === undefined) {
+                    throw new Error('網路連線不穩定，無法確認雲端會員編號，請稍後再按「保存」重試！');
+                }
+                if (existingNode === null) {
+                    verifiedFree = true;
+                    break;
+                }
+                usedIds.add(String(candidate));
+                candidate++;
+                while (usedIds.has(String(candidate))) {
+                    candidate++;
+                }
+            }
+            if (!verifiedFree) {
+                throw new Error('目前註冊人數較多，請稍後再按一次「保存」重試！');
+            }
+        }
+
+        localCounters[counterField] = candidate + 1;
+        localStorage.setItem(ID_COUNTER_KEY, JSON.stringify(localCounters));
+        if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+            await CloudSync.putNode(ID_COUNTER_KEY, localCounters);
+        }
+        return String(candidate);
+    },
+
+    allocate(gender) {
+        const minStart = this.getMinStartForGender(gender);
+        const counterField = this.getCounterFieldForGender(gender);
+        let counters = { male: 10001, female: 20001, other: 30001 };
+        try {
+            const parsed = JSON.parse(localStorage.getItem(ID_COUNTER_KEY) || '{}');
+            if (parsed && typeof parsed === 'object') counters = { ...counters, ...parsed };
+        } catch (e) {}
+
+        const usedIds = this.collectKnownUsedIds();
+        const maxUsedInRange = this.computeMaxUsedInRange(usedIds, minStart);
+        let candidate = Math.max(minStart, Number(counters[counterField] || minStart), maxUsedInRange + 1);
+        while (usedIds.has(String(candidate))) candidate++;
+
+        counters[counterField] = candidate + 1;
+        localStorage.setItem(ID_COUNTER_KEY, JSON.stringify(counters));
+        if (typeof CloudSync !== 'undefined') CloudSync.putNode(ID_COUNTER_KEY, counters);
+        return String(candidate);
     }
 };
 
@@ -3732,7 +3858,7 @@ const Store = {
         }
     },
 
-    save(state, forceCloudPush = false, skipCloudPush = false) {
+    save(state, forceCloudPush = false, skipCloudPush = false, upsertOptions = {}) {
         state.version = SCHEMA_VERSION;
         FIELD_SECTIONS.forEach(sec => {
             sec.fields.forEach(f => {
@@ -3888,7 +4014,7 @@ const Store = {
             else users.push(usersCacheCopy);
             localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
             if (!skipCloudPush && typeof CloudSync !== 'undefined') {
-                const pushPromise = CloudSync.upsertUser(record, forceCloudPush);
+                const pushPromise = CloudSync.upsertUser(record, forceCloudPush, upsertOptions);
                 if (state.playerId) {
                     sessionStorage.setItem(TAB_PLAYER_ID_KEY, String(state.playerId));
                     writeStateSafely(PLAYER_STATE_PREFIX + String(state.playerId), state);

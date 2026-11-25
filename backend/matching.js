@@ -2771,3 +2771,79 @@ window.manualResolveUnmatchPair = manualResolveUnmatchPair;
 window.manualBatchUnmatchAllDiscrepancies = manualBatchUnmatchAllDiscrepancies;
 window.manualResolveSyncPair = manualResolveSyncPair;
 window.manualBatchSyncAllDiscrepancies = manualBatchSyncAllDiscrepancies;
+
+
+async function runAuditUserIdIntegrity() {
+    const resultEl = document.getElementById('auditUserIdResult');
+    if (!resultEl) return;
+    resultEl.classList.remove('hidden');
+    resultEl.innerHTML = `<div class="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 font-semibold">⏳ 正在掃描全站會員 ID 與資料完整性...</div>`;
+
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.ensureBackendNodes === 'function') {
+        await CloudSync.ensureBackendNodes([USERS_KEY, USER_INDEX_KEY, ID_COUNTER_KEY]);
+    }
+    const users = getUsers();
+    const anomalies = [];
+    const igMap = new Map();
+
+    users.forEach(u => {
+        if (!u || !u.id) return;
+        const pid = String(u.id).trim();
+        const gender = String(u.gender || '').trim();
+        const igClean = String(u.ig || '').trim().replace(/^@+/, '').toLowerCase();
+
+        // 1. 檢查號段與性別不符（男應為 1xxxx，女應為 2xxxx，極高機率為重複分配覆蓋）
+        if ((pid.startsWith('1') && gender === '女') || (pid.startsWith('2') && gender === '男')) {
+            anomalies.push({
+                id: pid,
+                nickname: u.nickname || '-',
+                gender,
+                ig: u.ig || '-',
+                updatedAt: u.updatedAt || '-',
+                reason: `⚠️ ID 號段（${pid.startsWith('1') ? '1xxxx 男號段' : '2xxxx 女號段'}）與目前性別「${gender}」不符，極可能遭重複分配覆蓋！`
+            });
+        }
+
+        if (igClean) {
+            if (!igMap.has(igClean)) igMap.set(igClean, []);
+            igMap.get(igClean).push(u);
+        }
+    });
+
+    igMap.forEach((list, igVal) => {
+        if (list.length > 1) {
+            const idsDesc = list.map(x => `ID:${x.id}(${x.nickname || '-'})`).join('、');
+            anomalies.push({
+                id: list.map(x => x.id).join(' / '),
+                nickname: list.map(x => x.nickname || '-').join(' / '),
+                gender: list.map(x => x.gender || '-').join(' / '),
+                ig: `@${igVal}`,
+                updatedAt: list.map(x => x.updatedAt || '-').join(' / '),
+                reason: `⚠️ 相同 IG（@${igVal}）出現在多個 ID：${idsDesc}`
+            });
+        }
+    });
+
+    if (anomalies.length === 0) {
+        resultEl.innerHTML = `
+            <div class="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 font-semibold">
+                ✅ 掃描完成（共 ${users.length} 位會員）：目前資料庫中無號段性別衝突或重複 IG 帳號；若受影響玩家仍在舊分頁，請對方重新整理網頁並重新填寫保存即可取得全新不重複 ID。
+            </div>
+        `;
+        return;
+    }
+
+    resultEl.innerHTML = `
+        <div class="p-3 rounded-xl bg-rose-50 border border-rose-300 space-y-2 text-xs">
+            <div class="font-bold text-rose-800">🚨 共發現 ${anomalies.length} 筆異常帳號（建議通知玩家重新整理網頁並重新填寫保存取得新 ID）：</div>
+            ${anomalies.map((a, i) => `
+                <div class="p-2.5 rounded-lg bg-white border border-rose-200 space-y-0.5">
+                    <div class="font-bold text-[#8f4452]">#${i + 1} ID：${escapeMaintenanceHtml(a.id)} ｜ 暱稱：${escapeMaintenanceHtml(a.nickname)}（${escapeMaintenanceHtml(a.gender)}）｜ IG：${escapeMaintenanceHtml(a.ig)}</div>
+                    <div class="text-[11px] text-rose-700">${escapeMaintenanceHtml(a.reason)}</div>
+                    <div class="text-[10px] text-gray-400">最後更新：${escapeMaintenanceHtml(a.updatedAt)}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+window.runAuditUserIdIntegrity = runAuditUserIdIntegrity;

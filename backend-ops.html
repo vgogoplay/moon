@@ -173,6 +173,21 @@
             <div>
                 <h2 class="text-base font-bold font-serif-jp text-amber-900">4.資料維護工具</h2>
             </div>
+            <div class="p-3.5 rounded-xl bg-white border border-rose-200 space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <div class="text-xs font-bold text-rose-900">🆔 會員 ID 重複與異常覆蓋檢測</div>
+                        <p class="text-[11px] text-rose-800/80 mt-0.5">
+                            掃描全站會員資料庫，檢查是否存在「性別與 ID 號段不符（例如女會員卻佔用男會員 10xxx 號段，代表曾被重複分配覆蓋）」、「重複通行碼」或「重複 IG／暱稱」的異常帳號。
+                        </p>
+                    </div>
+                    <button type="button" onclick="runAuditUserIdIntegrity()"
+                        class="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-2xs transition shrink-0">
+                        🆔 檢查異常覆蓋帳號
+                    </button>
+                </div>
+                <div id="auditUserIdResult" class="hidden space-y-2"></div>
+            </div>
             <div class="p-3.5 rounded-xl bg-white border border-amber-200 space-y-3">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -555,10 +570,10 @@
     <script src="shared/schedule.js?v=20261125extracredits15"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261123nodup"></script>
-    <script src="shared/cloud-store.js?v=20261125extracredits15"></script>
+    <script src="shared/cloud-store.js?v=20261125idprotectv19"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261125wishlimit5v17"></script>
-    <script src="backend/matching.js?v=20261125extracredits15"></script>
+    <script src="backend/matching.js?v=20261125idprotectv19"></script>
     <script src="backend/ops.js?v=20261124malespon"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261125firelock16"></script>

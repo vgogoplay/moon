@@ -1284,7 +1284,7 @@ function closeAddNewPlayerModal() {
     document.getElementById('addNewPlayerModal').classList.add('hidden');
 }
 
-function submitAddNewPlayer(e) {
+async function submitAddNewPlayer(e) {
     e.preventDefault();
     const gender = document.getElementById('newPlayerGenderSelect').value;
     if (!gender) {
@@ -1292,7 +1292,15 @@ function submitAddNewPlayer(e) {
         return;
     }
     
-    const newId = IdAllocator.allocate(gender);
+    let newId = '';
+    try {
+        newId = (typeof IdAllocator.allocateAsync === 'function')
+            ? await IdAllocator.allocateAsync(gender)
+            : IdAllocator.allocate(gender);
+    } catch (err) {
+        alert('⚠️ 無法取得新會員編號：' + ((err && err.message) || '請檢查網路後重試'));
+        return;
+    }
     const newBackupCode = deriveFixedBackupCode(newId);
     const freshBase = Store.getDefaultState();
     
