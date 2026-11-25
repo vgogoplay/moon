@@ -356,10 +356,12 @@ function handleApplyClick() {
 function getClosedRegisteredSessionsInCurrentBatch(nowTs = Date.now()) {
     const sched = getBatchScheduleInfo(getCurrentBatchNumber());
     const savedSessions = Array.isArray(appState.registeredSessions) ? appState.registeredSessions : [];
+    const pid = String(appState.playerId || '').trim();
     const seen = new Set();
     const result = [];
-    savedSessions.forEach(s => {
-        const norm = normalizeSessionLabel(s);
+
+    const tryAddClosedSession = (sessionLabel) => {
+        const norm = normalizeSessionLabel(sessionLabel);
         if (!norm || seen.has(norm)) return;
         const inCurrentBatch = sched.sessions.some(target => isSameSession(norm, target));
         const isClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(norm, nowTs);
@@ -367,7 +369,51 @@ function getClosedRegisteredSessionsInCurrentBatch(nowTs = Date.now()) {
             seen.add(norm);
             result.push(norm);
         }
-    });
+    };
+
+    // 1. 檢查尚未清理的 registeredSessions
+    savedSessions.forEach(s => tryAddClosedSession(s));
+
+    // 2. 檢查已過 20:03 被清理轉入 ActivityRegArchive 封存歷史的本屆已報名場次
+    if (pid && typeof ActivityRegArchive !== 'undefined') {
+        const archiveMap = (typeof ActivityRegArchive.getAllMap === 'function') ? ActivityRegArchive.getAllMap() : {};
+        sched.sessions.forEach(targetSession => {
+            const isClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(targetSession, nowTs);
+            if (!isClosed) return;
+            const regKey = (typeof ActivityRegArchive.makeRegularKey === 'function')
+                ? ActivityRegArchive.makeRegularKey(targetSession, pid)
+                : '';
+            let wasArchived = Boolean(regKey && archiveMap && archiveMap[regKey]);
+            if (!wasArchived && archiveMap && typeof archiveMap === 'object') {
+                wasArchived = Object.values(archiveMap).some(rec =>
+                    rec && rec.kind === 'regular' &&
+                    String(rec.playerId || '').trim() === pid &&
+                    rec.session && isSameSession(rec.session, targetSession)
+                );
+            }
+            if (wasArchived) {
+                tryAddClosedSession(targetSession);
+            }
+        });
+    }
+
+    // 3. 檢查本屆常規場次配對紀錄（matchedHistory / 場次結算快照），防止封存尚未寫入時漏計
+    if (pid) {
+        try {
+            const users = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function')
+                ? Store.getUsersArray()
+                : JSON.parse(localStorage.getItem(USERS_LOCAL_KEY) || '[]');
+            const me = Array.isArray(users) ? users.find(u => u && String(u.id).trim() === pid) : null;
+            if (me && Array.isArray(me.matchedHistory)) {
+                me.matchedHistory.forEach(h => {
+                    if (!h || h.activityId || !h.session) return;
+                    const isForce = Boolean(h.isForceRepaired || String(h.session).includes('強制') || String(h.matchDetail || '').includes('強制'));
+                    if (!isForce) tryAddClosedSession(h.session);
+                });
+            }
+        } catch (e) {}
+    }
+
     return result;
 }
 
@@ -403,7 +449,7 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
         const isClosed = (typeof isRegularSessionRegistrationClosed === 'function')
             ? isRegularSessionRegistrationClosed(opt, nowTs)
             : false;
-        const wasRegistered = savedSessions.some(s => isSameSession(s, opt));
+        const wasRegistered = savedSessions.some(s => isSameSession(s, opt)) || closedUsedSessions.some(s => isSameSession(s, opt));
         let checked = !isClosed && wasRegistered;
         if (checked && initialCheckedCount >= maxAllowed) {
             checked = false;

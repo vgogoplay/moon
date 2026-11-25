@@ -198,7 +198,7 @@ function renderAdminSharedShell() {
                         <span class="text-2xl">⛩️</span>
                         <div>
                             <h2 class="text-base font-bold font-serif-jp text-[#8f4452] leading-tight">月老神社後台</h2>
-                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261123tue46</span></p>
+                            <p class="text-[10px] tracking-widest text-[#c96a7b]">YUELAO ADMIN ・ <span class="font-mono font-bold text-emerald-700">v20261125firelock16</span></p>
                         </div>
                     </div>
                 </div>
@@ -230,9 +230,13 @@ function renderAdminSharedShell() {
                             <span>📥 單次同步正式庫快照</span>
                         </button>
                     ` : ''}
+                    <button type="button" onclick="openAdminFirebaseUsageWithPassword()" class="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-xl bg-amber-50 border border-amber-200 text-[#8f4452] text-xs font-semibold hover:bg-amber-100 transition">
+                        <span>🔥</span>
+                        <span>Fire</span>
+                    </button>
                     <button type="button" onclick="openAdminGitRepoWithPassword()" class="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-xl bg-pink-50 border border-pink-200 text-[#8f4452] text-xs font-semibold hover:bg-pink-100 transition">
                         <span>🐙</span>
-                        <span>Git</span>
+                        <span>G</span>
                     </button>
                     <a href="index.html" target="_blank" class="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-xl bg-pink-50 border border-pink-200 text-[#8f4452] text-xs font-semibold hover:bg-pink-100 transition">
                         <span>🌸</span>
@@ -285,9 +289,12 @@ function renderAdminSharedShell() {
 }
 
 const ADMIN_GIT_REPO_URL = 'https://github.com/vgogoplay/moon';
+const ADMIN_FIREBASE_USAGE_URL = 'https://console.firebase.google.com/project/moon1-cb403/database/usage/current-billing/connections';
 const ADMIN_GIT_REPO_PASS = 'aaa';
+let pendingAdminExternalTargetUrl = ADMIN_GIT_REPO_URL;
 
-function openAdminGitRepoWithPassword() {
+function openAdminExternalLinkWithPassword(targetUrl) {
+    pendingAdminExternalTargetUrl = targetUrl || ADMIN_GIT_REPO_URL;
     const modal = document.getElementById('adminGitPasswordModal');
     const inputEl = document.getElementById('adminGitPwdInput');
     const errEl = document.getElementById('adminGitPwdError');
@@ -304,7 +311,15 @@ function openAdminGitRepoWithPassword() {
         alert('密碼錯誤');
         return;
     }
-    window.open(ADMIN_GIT_REPO_URL, '_blank', 'noopener,noreferrer');
+    window.open(pendingAdminExternalTargetUrl, '_blank', 'noopener,noreferrer');
+}
+
+function openAdminGitRepoWithPassword() {
+    openAdminExternalLinkWithPassword(ADMIN_GIT_REPO_URL);
+}
+
+function openAdminFirebaseUsageWithPassword() {
+    openAdminExternalLinkWithPassword(ADMIN_FIREBASE_USAGE_URL);
 }
 
 function closeAdminGitPasswordModal() {
@@ -332,9 +347,10 @@ function submitAdminGitPassword(e) {
     }
 
     closeAdminGitPasswordModal();
-    window.open(ADMIN_GIT_REPO_URL, '_blank', 'noopener,noreferrer');
+    window.open(pendingAdminExternalTargetUrl || ADMIN_GIT_REPO_URL, '_blank', 'noopener,noreferrer');
 }
 
+window.openAdminFirebaseUsageWithPassword = openAdminFirebaseUsageWithPassword;
 window.openAdminGitRepoWithPassword = openAdminGitRepoWithPassword;
 window.closeAdminGitPasswordModal = closeAdminGitPasswordModal;
 window.submitAdminGitPassword = submitAdminGitPassword;
