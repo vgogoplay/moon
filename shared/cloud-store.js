@@ -1489,9 +1489,7 @@ const CloudSync = {
     _hiddenRoomPath: '',
     activeRoomEs: null,
     activeRoomFallbackTimer: null,
-    _chatIndexUnsupported: (() => {
-        try { return sessionStorage.getItem('yuelao_chat_idx_unsupported_v1') === '1'; } catch (e) { return false; }
-    })(),
+    _chatIndexUnsupported: true,
     playerTimersStarted: false,
     lastUserActivityAt: Date.now(),
     isPlayerIdlePaused: false,
