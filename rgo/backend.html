@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>會員列表與系統設定 ⛩️ 月老神社後台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20261123fontopt">
+</head>
+<body data-admin-page="member">
+    <div id="adminLayoutMount" class="space-y-6">
+        <!-- ==================== 各屆報名名單 & 禁止配對 / 禁止發話 / 解除配對 / 刪除資料 ==================== -->
+        <div class="card-jp rounded-2xl border-2 border-pink-200">
+            <div class="p-5 rounded-t-2xl border-b border-pink-200 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                <h2 class="text-lg font-bold font-serif-jp text-[#8f4452] shrink-0 whitespace-nowrap">📋 玩家完整資料庫與管理操作</h2>
+                <div class="flex flex-wrap items-center gap-2.5 text-xs">
+                    <button type="button" onclick="openAddNewPlayerModal()" class="h-[46px] px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold hover:opacity-95 transition shadow-sm inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
+                        <span>➕</span><span>新增會員</span>
+                    </button>
+                    <button type="button" onclick="openInstantMatchModal()" class="h-[46px] px-4 rounded-2xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white font-bold hover:opacity-95 transition shadow-sm inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
+                        <span>⚡</span><span>新增配對</span>
+                    </button>
+                    <button type="button" onclick="manualBatchSyncAllDiscrepancies(this)" title="掃描聊天紀錄與會員列表，一鍵補齊所有遺漏的雙向配對好友" class="h-[46px] px-4 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold transition shadow-sm inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
+                        <span>🔄</span><span>一鍵補齊遺漏配對</span>
+                    </button>
+                    <div class="admin-field-box h-[46px] !py-1.5 !px-3.5 inline-flex items-center gap-2 shrink-0">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">🔍 搜尋：</span>
+                        <input type="text" id="rosterSearchInput" oninput="onRosterSearchInput(this.value)" placeholder="搜尋 ID、暱稱、IG、居住地、場次或配對..." class="h-8 w-44 sm:w-56 px-2.5 admin-input-box text-xs text-[#8f4452]">
+                        <button type="button" id="clearRosterSearchBtn" onclick="clearRosterSearch()" title="清除搜尋" class="hidden text-gray-400 hover:text-rose-600 font-bold px-1">✕</button>
+                    </div>
+                    <div class="admin-field-box h-[46px] !py-1.5 !px-3.5 inline-flex items-center gap-2 shrink-0">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">每頁顯示：</span>
+                        <select id="rosterPageSizeSelect" onchange="onRosterPageSizeChange(this.value)" class="h-8 px-2.5 admin-input-box font-bold text-[#8f4452]">
+                            <option value="5" selected>5 人（預設）</option>
+                            <option value="10">10 人</option>
+                            <option value="50">50 人</option>
+                            <option value="all">全部</option>
+                        </select>
+                    </div>
+                    <div class="admin-field-box min-h-[46px] !py-1.5 !px-3.5 inline-flex flex-wrap items-center gap-2 shrink-0">
+                        <span class="font-bold text-[#8f4452] whitespace-nowrap">篩選選項：</span>
+                        <div id="rosterMultiFilterWrap" class="relative inline-flex items-center gap-1.5">
+                            <button type="button" id="rosterMultiFilterBtn" onclick="toggleRosterMultiFilterMenu(event)" class="min-h-[32px] px-2.5 py-1 admin-input-box font-semibold text-[#8f4452] inline-flex flex-wrap items-center gap-1.5 text-left">
+                                <span id="rosterMultiFilterSummary" class="inline-flex flex-wrap items-center gap-1">
+                                    <span class="text-gray-500">全部（可複選）</span>
+                                </span>
+                                <span class="text-[10px] text-[#c96a7b] ml-0.5">▼</span>
+                            </button>
+                            <button type="button" id="clearRosterMultiFilterBtn" onclick="clearRosterMultiFilters()" title="清除所有篩選條件" class="hidden h-8 px-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 font-bold hover:bg-rose-100 transition whitespace-nowrap">
+                                清除
+                            </button>
+                            <div id="rosterMultiFilterMenu" class="hidden absolute right-0 sm:left-0 sm:right-auto top-[calc(100%+6px)] w-64 p-3.5 rounded-2xl bg-white border-2 border-pink-200 shadow-2xl z-50 space-y-3">
+                                <div class="space-y-1.5">
+                                    <div class="text-[11px] font-bold text-[#8f4452] flex items-center justify-between">
+                                        <span>👫 性別（可複選）</span>
+                                        <span class="text-[10px] text-gray-400 font-normal">同類聯集</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-1.5">
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="gender" value="男" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>男生</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="gender" value="女" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>女生</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="space-y-1.5 border-t border-pink-100 pt-2.5">
+                                    <div class="text-[11px] font-bold text-[#8f4452] flex items-center justify-between">
+                                        <span>📍 居住地區（可複選）</span>
+                                        <span class="text-[10px] text-gray-400 font-normal">跨類交集</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-1.5">
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="region" value="北部" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>北部</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="region" value="中部" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>中部</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="region" value="南部" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>南部</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-pink-200 bg-pink-50/40 hover:bg-pink-50 cursor-pointer text-xs font-semibold text-[#5e464a]">
+                                            <input type="checkbox" data-roster-filter-type="region" value="東部" onchange="onRosterMultiFilterCheckboxChange(this)" class="accent-[#c96a7b] rounded">
+                                            <span>東部</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="border-t border-pink-100 pt-2.5 space-y-2">
+                                    <p class="text-[10px] text-gray-500 leading-relaxed">💡 同時勾選性別與地區（例如：女生＋中部），將列出<strong>同時符合</strong>的玩家。</p>
+                                    <div class="flex items-center justify-between gap-2">
+                                        <button type="button" onclick="clearRosterMultiFilters()" class="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 text-[11px] font-semibold">
+                                            全部清除
+                                        </button>
+                                        <button type="button" onclick="closeRosterMultiFilterMenu()" class="px-3 py-1 rounded-lg bg-[#c96a7b] text-white text-[11px] font-bold hover:opacity-95">
+                                            完成
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" onclick="renderAdminAll(true)" class="h-8 px-3 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-100 transition whitespace-nowrap">
+                            ↻ 立即刷新名單
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="overflow-x-auto p-3 bg-white">
+                <table class="admin-grid-table text-left text-xs md:text-sm">
+                    <thead>
+                        <tr class="text-xs">
+                            <th class="p-3.5">唯一玩家 ID</th>
+                            <th class="p-3.5">暱稱 / IG / 年齡 / 性別 / 居住地</th>
+                            <th class="p-3.5">報名場次</th>
+                            <th class="p-3.5">希望吻合條件</th>
+                            <th class="p-3.5">配對與限制狀態</th>
+                            <th class="p-3.5">管理操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="playersTableBody"></tbody>
+                </table>
+            </div>
+            <!-- 分頁控制列（每頁 5 人） -->
+            <div id="rosterPaginationBar" class="p-4 rounded-b-2xl border-t border-pink-200 bg-pink-50/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"></div>
+        </div>
+
+    </div>
+
+    <!-- 玩家完整資料檢視 Modal -->
+    <div id="playerDetailModal" class="hidden fixed inset-0 bg-black/45 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-6 md:p-8 shadow-2xl border border-pink-100">
+            <div class="flex justify-between items-center border-b border-pink-100 pb-3 mb-4">
+                <h3 class="text-lg font-bold font-serif-jp text-[#8f4452]" id="detailModalTitle">玩家完整檔案記錄</h3>
+                <button onclick="closePlayerDetailModal()" class="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+            </div>
+            <div id="detailModalBody" class="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs text-gray-700"></div>
+        </div>
+    </div>
+
+    <!-- 🔐 管理員敏感操作密碼驗證 Modal（禁止配對 / 禁止發話 / 刪除資料） -->
+    <div id="adminActionPasswordModal" class="hidden fixed inset-0 bg-black/55 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border-2 border-rose-300 space-y-4">
+            <div class="flex items-center justify-between border-b border-rose-100 pb-2.5">
+                <div class="flex items-center gap-2">
+                    <span class="text-xl">🔐</span>
+                    <div>
+                        <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">管理員密碼驗證</h3>
+                        <p class="text-[11px] text-gray-500" id="adminActionPwdSubtitle">請輸入後台管理員密碼以繼續操作</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeAdminActionPasswordModal()" class="text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
+            </div>
+
+            <form onsubmit="submitAdminActionPassword(event)" class="space-y-3">
+                <div class="admin-field-box !border-rose-200">
+                    <label class="block text-xs font-bold text-[#8f4452] mb-1.5">後台管理員密碼 <span class="text-rose-500">*</span></label>
+                    <input type="password" id="adminActionPwdInput" placeholder="請輸入管理員密碼" class="w-full p-2.5 admin-input-box text-sm" required>
+                </div>
+
+                <div id="adminActionPwdError" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-700 font-bold text-center">
+                    🚫 管理員密碼錯誤，無法執行此操作！
+                </div>
+
+                <div class="flex justify-end gap-2 pt-1">
+                    <button type="button" onclick="closeAdminActionPasswordModal()" class="px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-5 py-2 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition">
+                        🔓 確認驗證
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ✏️ 管理員編輯玩家個人資料 Modal -->
+    <div id="editPlayerModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6 md:p-8 shadow-2xl border-2 border-pink-200 space-y-5">
+            <div class="flex items-center justify-between border-b border-pink-100 pb-3 sticky top-0 bg-white/95 z-10">
+                <div>
+                    <h3 class="text-lg md:text-xl font-bold font-serif-jp text-[#8f4452]" id="editPlayerModalTitle">✏️ 編輯玩家個人資料</h3>
+                    <p class="text-xs text-gray-500">管理員修改後按下「保存修改並同步」，將立即更新資料庫、備份還原碼並同步至前台</p>
+                </div>
+                <button type="button" onclick="closeEditPlayerModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+
+            <form id="adminEditPlayerForm" onsubmit="saveAdminEditedPlayer(event)" class="space-y-6">
+                <input type="hidden" id="editPlayerTargetId">
+                <div id="adminEditPlayerFieldsBody" class="space-y-6"></div>
+
+                <div class="sticky bottom-0 bg-white/95 pt-3 pb-1 border-t border-pink-100 flex flex-wrap justify-end gap-2.5">
+                    <button type="button" onclick="closeEditPlayerModal()" class="px-5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs md:text-sm font-bold shadow-md hover:opacity-95 transition">
+                        💾 保存修改並同步至前台
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+        <!-- ➕ 管理員新增空白會員 Modal -->
+    <div id="addNewPlayerModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl border-2 border-emerald-200 space-y-5">
+            <div class="flex items-center justify-between border-b border-emerald-100 pb-3">
+                <div>
+                    <h3 class="text-lg md:text-xl font-bold font-serif-jp text-emerald-800">➕ 新增會員帳號</h3>
+                    <p class="text-xs text-gray-500 mt-1">建立空白會員並產生通行碼，其餘資料由玩家自行填寫（不受人數上限限制）</p>
+                </div>
+                <button type="button" onclick="closeAddNewPlayerModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+
+            <form id="adminAddNewPlayerForm" onsubmit="submitAddNewPlayer(event)" class="space-y-4">
+                <div class="admin-field-box !bg-emerald-50/30 !border-emerald-200">
+                    <label class="block text-xs font-bold text-emerald-800 mb-1.5">選擇性別 <span class="text-rose-500">*</span></label>
+                    <select id="newPlayerGenderSelect" class="w-full p-2.5 admin-input-box text-sm font-bold text-[#8f4452]" required>
+                        <option value="">請選擇性別...</option>
+                        <option value="男">男</option>
+                        <option value="女">女</option>
+                    </select>
+                </div>
+                
+                <div class="flex flex-wrap justify-end gap-2.5 pt-2 border-t border-emerald-100">
+                    <button type="button" onclick="closeAddNewPlayerModal()" class="px-5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs md:text-sm font-bold shadow-md hover:opacity-95 transition">
+                        ✨ 確認新增並產生通行碼
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ⚡ 管理員專屬：即時手動配對 Modal -->
+    <div id="instantMatchModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl border-2 border-emerald-200 space-y-5">
+            <div class="flex items-start justify-between gap-2 border-b border-emerald-100 pb-3">
+                <div>
+                    <h3 class="text-lg md:text-xl font-bold font-serif-jp text-emerald-800">⚡ 管理員專屬：即時手動配對（立即生效）</h3>
+                    <p class="text-xs text-gray-500 mt-1">輸入雙方 ID 並執行後，兩位玩家將立刻成為配對好友並開啟專屬聊天室，不受 20:00 排程限制。</p>
+                </div>
+                <button type="button" onclick="closeInstantMatchModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0">✕</button>
+            </div>
+
+            <form id="adminInstantMatchForm" onsubmit="triggerInstantManualMatch(event)" class="space-y-4">
+                <div class="admin-field-box !bg-emerald-50/30 !border-emerald-200 space-y-1.5">
+                    <label class="block text-xs font-bold text-emerald-800">玩家 A 的 ID <span class="text-rose-500">*</span></label>
+                    <input type="text" id="instantMatchIdA" oninput="updateInstantMatchPreview()" placeholder="例如：10001" class="w-full p-2.5 admin-input-box text-sm font-mono" required>
+                    <p id="instantMatchPreviewA" class="text-[11px] text-gray-500 min-h-[16px]"></p>
+                </div>
+
+                <div class="admin-field-box !bg-emerald-50/30 !border-emerald-200 space-y-1.5">
+                    <label class="block text-xs font-bold text-emerald-800">玩家 B 的 ID <span class="text-rose-500">*</span></label>
+                    <input type="text" id="instantMatchIdB" oninput="updateInstantMatchPreview()" placeholder="例如：20001" class="w-full p-2.5 admin-input-box text-sm font-mono" required>
+                    <p id="instantMatchPreviewB" class="text-[11px] text-gray-500 min-h-[16px]"></p>
+                </div>
+
+                <div id="instantMatchPairStatusHint" class="hidden p-2.5 rounded-xl text-xs font-semibold"></div>
+
+                <div class="flex flex-wrap justify-end gap-2.5 pt-2 border-t border-emerald-100">
+                    <button type="button" onclick="closeInstantMatchModal()" class="px-5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                        取消
+                    </button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs md:text-sm font-bold shadow-md hover:opacity-95 transition">
+                        ⚡ 立即強制配對成好友
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 前後台共用核心層 -->
+    <script src="shared/schedule.js?v=20261126automatch1959v23"></script>
+    <script src="shared/schema.js?v=20261120opt"></script>
+    <script src="shared/auth.js?v=20261123nodup"></script>
+    <script src="shared/cloud-store.js?v=20261125idprotectv19"></script>
+    <!-- 後台共用狀態與頁面模組 -->
+    <script src="backend/state.js?v=20261125wishlimit5v17"></script>
+    <script src="backend/matching.js?v=20261125idprotectv19"></script>
+    <script src="backend/roster.js?v=20261125idprotectv19"></script>
+    <!-- 渲染左側選單與登入驗證 -->
+    <script src="backend/layout.js?v=20261125firelock16"></script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>玩家聊天紀錄查詢 💬 月老神社後台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20261123fontopt">
+</head>
+<body data-admin-page="chats">
+    <div id="adminLayoutMount" class="space-y-6">
+        <!-- 頂部標題與搜尋控制列 -->
+        <div class="card-jp rounded-2xl p-5 border-2 border-pink-200 space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">💬 玩家聊天紀錄查詢</h2>
+                        <span id="chatRoomsSummaryBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                            聊天室 0 間 ／ 訊息 0 則
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">點選左側配對聊天室展開對話紀錄；若聊天室超過 <strong>3 天</strong>無更新或無新訊息，系統將於每日 <strong>07:00、15:00、22:00</strong> 自動檢查並刪除聊天紀錄（不保存）及解除會員列表雙方好友配對</p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="admin-field-box !py-1.5 !px-3 flex items-center gap-2">
+                        <span class="text-[#8f4452] font-bold shrink-0">🔍 搜尋：</span>
+                        <input type="text" id="adminChatSearchInput" oninput="onAdminChatSearchInput(this.value)" placeholder="輸入玩家 ID、暱稱或關鍵字..." class="w-44 sm:w-56 p-1.5 admin-input-box text-xs">
+                        <button type="button" id="clearAdminChatSearchBtn" onclick="clearAdminChatSearch()" class="hidden text-gray-400 hover:text-rose-600 font-bold px-1">✕</button>
+                    </div>
+                    <div class="admin-field-box !py-1.5 !px-3 flex items-center gap-1.5">
+                        <span class="text-[#8f4452] font-bold shrink-0">每頁顯示：</span>
+                        <select id="adminChatRoomsPerPageSelect" onchange="onAdminChatRoomsPerPageChange(this.value)" class="h-7 px-2 admin-input-box font-bold text-[#8f4452]">
+                            <option value="10" selected>10 間（預設）</option>
+                            <option value="20">20 間</option>
+                            <option value="50">50 間</option>
+                        </select>
+                    </div>
+                    <button type="button" id="openLowRemainCleanupBtn" onclick="openLowRemainHoursCleanupModal()" title="檢查剩餘小時低於 6 小時的聊天室，列出清單並二次確認後解除雙方好友與清空聊天紀錄" class="px-3.5 py-2.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 font-bold hover:bg-rose-100 transition shadow-2xs">
+                        🧹 檢查剩餘 &lt; 6 小時
+                    </button>
+                    <button type="button" id="syncAllChatMetaBtn" onclick="syncAllChatMetaFromCloudNow()" title="從雲端完整重建所有配對聊天室摘要索引" class="px-3.5 py-2.5 rounded-xl bg-pink-50 border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-100 transition">
+                        ☁️ 同步全部索引
+                    </button>
+                    <button type="button" onclick="renderAdminAll(true)" class="px-3.5 py-2.5 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-50 transition">
+                        ↻ 重新整理
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 雙欄式聊天室查詢工作區（左側房間列表 ／ 右側對話內容） -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            <!-- 左側：配對聊天房間列表 -->
+            <div class="lg:col-span-5 card-jp rounded-2xl border-2 border-pink-200 overflow-hidden">
+                <div class="px-4 py-3 bg-pink-50/70 border-b border-pink-200 flex items-center justify-between">
+                    <span id="adminChatRoomsListHeaderTitle" class="text-xs font-bold text-[#8f4452]">💞 配對聊天室列表（每頁 10 間）</span>
+                    <span id="filteredChatRoomsCountText" class="text-[11px] text-gray-500">共 0 間</span>
+                </div>
+                <div id="adminChatRoomsList" class="divide-y divide-pink-100 bg-white"></div>
+                <div id="adminChatRoomsPaginationBar" class="px-3.5 py-2.5 bg-pink-50/50 border-t border-pink-200 flex flex-wrap items-center justify-between gap-2 text-[11px]"></div>
+            </div>
+
+            <!-- 右側：選中房間的對話紀錄明細 -->
+            <div class="lg:col-span-7 card-jp rounded-2xl border-2 border-pink-200 overflow-hidden bg-white">
+                <div id="adminChatDetailHeader" class="px-5 py-3.5 bg-gradient-to-r from-pink-50/80 to-rose-50/60 border-b border-pink-200 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <h3 class="text-sm font-bold text-[#8f4452]">對話內容檢視視窗</h3>
+                        <p class="text-[11px] text-gray-400">請從左側點選任一組配對查看對話紀錄</p>
+                    </div>
+                </div>
+                <div id="adminChatDetailMessages" class="p-4 bg-[#fffafb] min-h-[420px] max-h-[540px] overflow-y-auto space-y-2.5">
+                    <div class="h-80 flex flex-col items-center justify-center text-center text-xs text-gray-400 space-y-2">
+                        <span class="text-3xl">💌</span>
+                        <p>點選左側配對聊天室後，將在此顯示雙方的對話紀錄</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== 🧹 剩餘小時低於 6 小時手動清除與二次確認 Modal ==================== -->
+        <div id="lowRemainChatsModal" onclick="if(event.target === this) closeLowRemainHoursCleanupModal()" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[65] flex items-center justify-center p-4">
+            <div onclick="event.stopPropagation()" class="bg-white rounded-3xl w-full max-w-2xl max-h-[88vh] flex flex-col shadow-2xl border-2 border-pink-200 overflow-hidden">
+                <!-- Modal 頂部標題列 -->
+                <div class="px-5 py-4 bg-gradient-to-r from-rose-50 to-pink-50 border-b border-pink-200 flex items-center justify-between gap-3 shrink-0">
+                    <div>
+                        <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🧹 檢查剩餘小時低於 6 小時・手動清除</h3>
+                        <p class="text-[11px] text-gray-500 mt-0.5">清除後將同步解除雙方好友配對並永久清空聊天紀錄（聊天紀錄不保存）</p>
+                    </div>
+                    <button type="button" id="closeLowRemainModalXBtn" onclick="closeLowRemainHoursCleanupModal()" class="text-gray-400 hover:text-rose-600 text-lg font-bold px-1.5 leading-none">✕</button>
+                </div>
+
+                <!-- 第一步：列出清單並勾選 -->
+                <div id="lowRemainStep1View" class="p-5 flex-1 overflow-y-auto space-y-3.5">
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-pink-50/70 px-3.5 py-2.5 rounded-xl border border-pink-200 text-xs">
+                        <label class="inline-flex items-center gap-2 font-bold text-[#8f4452] cursor-pointer select-none">
+                            <input type="checkbox" id="lowRemainSelectAllCheckbox" onchange="toggleSelectAllLowRemainRooms(this.checked)" class="w-4 h-4 accent-[#c96a7b] rounded cursor-pointer" checked>
+                            <span>全選 / 取消全選</span>
+                        </label>
+                        <span id="lowRemainFoundCountBadge" class="px-2.5 py-0.5 rounded-full bg-rose-100 text-[#8f4452] font-bold text-[11px]">
+                            共找到 0 間（已勾選 0 間）
+                        </span>
+                    </div>
+
+                    <div id="lowRemainRoomsListContainer" class="divide-y divide-pink-100 border border-pink-200 rounded-2xl bg-white max-h-[340px] overflow-y-auto"></div>
+
+                    <div class="p-3 rounded-xl bg-amber-50/80 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+                        ⚠️ <strong>注意事項：</strong>執行清除後，系統會同步移除雙方會員列表的好友配對關係，並永久刪除雲端與本地聊天室紀錄（<strong>聊天紀錄不保存，亦不會自動回補</strong>）。
+                    </div>
+
+                    <div class="flex items-center justify-end gap-2 pt-2 border-t border-pink-100">
+                        <button type="button" onclick="closeLowRemainHoursCleanupModal()" class="px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition">
+                            取消
+                        </button>
+                        <button type="button" id="lowRemainToStep2Btn" onclick="proceedLowRemainSecondConfirm()" class="px-5 py-2 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                            🗑️ 下一步：二次確認清除 (0 間)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 第二步：二次確認畫面 -->
+                <div id="lowRemainStep2View" class="hidden p-5 flex-1 overflow-y-auto space-y-4">
+                    <div class="p-4 rounded-2xl bg-rose-50 border-2 border-rose-300 space-y-2">
+                        <div class="flex items-center gap-2 text-rose-700 font-bold text-sm">
+                            <span class="text-lg">🚨</span>
+                            <span>二次確認：確定要永久解除以下雙方好友並清空聊天紀錄嗎？</span>
+                        </div>
+                        <ul class="text-xs text-rose-800 space-y-1 list-disc list-inside leading-relaxed">
+                            <li><strong>解除雙方好友：</strong>前後台將同步解除以下所有組合的配對關係，且不再自動回補。</li>
+                            <li><strong>清空聊天紀錄（不保存）：</strong>雙方聊天室對話將永久清空，<strong>不會保留任何備份紀錄</strong>，執行後無法復原。</li>
+                        </ul>
+                    </div>
+
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between text-xs font-bold text-[#8f4452] px-1">
+                            <span>📋 本次確認清除名單：</span>
+                            <span id="lowRemainConfirmCountText" class="text-rose-600">共 0 間</span>
+                        </div>
+                        <div id="lowRemainConfirmTargetList" class="divide-y divide-pink-100 border border-rose-200 rounded-2xl bg-[#fffafb] max-h-[260px] overflow-y-auto"></div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-pink-100">
+                        <button type="button" id="lowRemainBackStep1Btn" onclick="backToLowRemainStep1()" class="px-4 py-2 rounded-xl border border-pink-200 bg-white text-xs font-bold text-[#8f4452] hover:bg-pink-50 transition">
+                            ← 返回上一步修改
+                        </button>
+                        <button type="button" id="lowRemainExecuteBtn" onclick="executeLowRemainRoomsCleanup()" class="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition">
+                            🔥 確認解除雙方好友並清空聊天紀錄
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 前後台共用核心層 -->
+    <script src="shared/schedule.js?v=20261126automatch1959v23"></script>
+    <script src="shared/schema.js?v=20261120opt"></script>
+    <script src="shared/auth.js?v=20261123nodup"></script>
+    <script src="shared/cloud-store.js?v=20261125idprotectv19"></script>
+    <!-- 後台共用狀態與頁面模組 -->
+    <script src="backend/state.js?v=20261125wishlimit5v17"></script>
+    <script src="backend/matching.js?v=20261125idprotectv19"></script>
+    <script src="backend/chats.js?v=20261122limit30"></script>
+    <!-- 渲染左側選單與登入驗證 -->
+    <script src="backend/layout.js?v=20261125firelock16"></script>
+</body>
+</html>

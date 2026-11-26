@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>月老牽線計畫 🌸 戀愛手札與七日紅線</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20261123fontopt">
+</head>
+<body class="pb-28 md:pb-28">
+    <!-- 櫻花飄落背景容器 -->
+    <div id="sakuraContainer" class="sakura-bg" aria-hidden="true"></div>
+
+    <!-- 頂部品牌與狀態列 -->
+    <header class="sticky top-0 z-30 glass-header px-4 py-3">
+        <div class="max-w-4xl mx-auto flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2.5">
+                <span class="text-2xl animate-pulse-slow">🌸</span>
+                <div>
+                    <h1 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452] leading-tight">月老牽線計畫</h1>
+                    <p class="text-[11px] text-[#c96a7b] tracking-widest">THREADS 單身七日紅線企劃</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-1.5 sm:gap-2">
+                <button type="button" onclick="openMailboxModal()" class="relative text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 transition shadow-2xs font-medium">
+                    ✉️ 信件
+                    <span id="mailboxUnreadBadge" class="hidden -top-1.5 -right-1.5 absolute min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow">0</span>
+                </button>
+                <button type="button" onclick="openReportModal()" class="relative text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 transition shadow-2xs font-medium">
+                    📮 問題回報
+                    <span id="reportReplyUnreadBadge" class="hidden -top-1.5 -right-1.5 absolute min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow">0</span>
+                </button>
+                <div id="headerStatusBadge" class="hidden sm:block text-xs px-3 py-1.5 rounded-full bg-pink-50 border border-pink-200 text-[#8f4452] font-medium">
+                    讀取緣分狀態中...
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 輕量化小視窗通知氣泡 -->
+    <div id="miniNoticeWindow" class="hidden mini-window !max-w-sm border-pink-300 !z-[99]">
+        <div class="flex items-start justify-between gap-3">
+            <div class="space-y-1">
+                <h4 id="miniNoticeTitle" class="text-sm font-bold font-serif-jp text-[#8f4452]">🌸 系統提示</h4>
+                <p id="miniNoticeBody" class="text-xs text-gray-600 leading-relaxed whitespace-pre-line"></p>
+            </div>
+            <button type="button" onclick="closeMiniNotice()" class="text-gray-400 hover:text-gray-700 text-base leading-none">✕</button>
+        </div>
+        <div class="mt-3 text-right">
+            <button type="button" onclick="closeMiniNotice()" class="btn-sakura px-4 py-1.5 rounded-xl text-xs font-bold">
+                我知道了
+            </button>
+        </div>
+    </div>
+
+    <!-- 主內容區 -->
+    <main class="max-w-4xl mx-auto px-4 pt-6 relative z-10">
+
+        <!-- 警告帳號橫幅 -->
+        <div id="warningAccountBanner" class="hidden mb-6 p-4 rounded-2xl bg-rose-50 border-2 border-rose-400 text-center space-y-1 shadow-sm">
+            <p class="text-sm md:text-base font-bold text-rose-700">⚠️ 目前警告帳號 不提供配對</p>
+            <p id="warningAccountReason" class="text-xs text-rose-600">系統偵測到您的個人資料包含受限制的內容，請修正後重新保存。</p>
+        </div>
+
+        <!-- ==================== 分頁 1：緣分首頁與報名 ==================== -->
+        <section id="tab-home" class="tab-view active space-y-6">
+            <!-- 隨機戀愛點滴時刻卡片 -->
+            <div id="momentCard" class="glass-card rounded-3xl p-6 md:p-8 relative overflow-hidden transition-all duration-500">
+                <div class="flex items-center justify-between mb-4">
+                    <span id="momentTag" class="text-xs px-3 py-1 rounded-full bg-rose-100/80 text-[#9e4756] font-medium tracking-wider">
+                        ✨ 心動時刻
+                    </span>
+                    <button type="button" onclick="renderRandomMoment()" class="text-xs text-[#b6737d] hover:text-[#8f4452] flex items-center gap-1 transition">
+                        <span>換一段戀愛語錄</span> ↻
+                    </button>
+                </div>
+                <div class="flex flex-col md:flex-row items-center gap-6">
+                    <div id="momentArt" class="w-24 h-24 md:w-28 md:h-28 rounded-2xl bg-gradient-to-br from-pink-50 to-rose-100 border border-pink-200/80 flex items-center justify-center text-5xl shrink-0 shadow-inner">
+                        💌
+                    </div>
+                    <div class="text-center md:text-left space-y-2 flex-1">
+                        <h2 id="momentTitle" class="text-lg md:text-xl font-bold font-serif-jp text-[#7a3542]">
+                            在幾千人的擦肩裡，剛好停在了你面前
+                        </h2>
+                        <p id="momentText" class="text-sm text-gray-600 leading-relaxed font-serif-jp">
+                            有些相遇不需要太長的開場白，只要在週二、週四或週六的晚上，兩條紅線輕輕交會就夠了。
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 即時緣分動態牆（位於心動時刻下方，以隨機順序跑馬燈呈現，不顯示時間） -->
+            <div id="homeFateWallCard" class="glass-card rounded-2xl px-3.5 py-2.5 md:px-4 md:py-3 border border-pink-200/90 flex items-center gap-2.5 md:gap-3 overflow-hidden shadow-sm">
+                <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-[11px] md:text-xs font-bold shrink-0 shadow-2xs">
+                    <span>✨</span>
+                    <span>通知</span>
+                </div>
+                <div id="homeFateWallMarqueeBox" class="fate-marquee-viewport flex-1 min-w-0">
+                    <div class="fate-marquee-track" style="--marquee-duration: 18s;">
+                        <div class="fate-marquee-group">
+                            <span class="fate-marquee-item text-xs md:text-sm text-[#6e3a43] font-medium">
+                                🌸 目前尚無最新動態，管理月老隨時會在此分享最新喜訊！
+                            </span>
+                        </div>
+                        <div class="fate-marquee-group" aria-hidden="true">
+                            <span class="fate-marquee-item text-xs md:text-sm text-[#6e3a43] font-medium">
+                                🌸 目前尚無最新動態，管理月老隨時會在此分享最新喜訊！
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 報名與活動排程主控制台 -->
+            <div class="glass-card rounded-3xl p-6 md:p-8 text-center space-y-5">
+                <div class="inline-flex flex-col items-center justify-center gap-1.5 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-200 text-[#8f4452] shadow-sm">
+                    <span class="text-sm font-extrabold text-black tracking-wide"><span class="text-rose-600">每週日-更新下一屆</span>(星期二/四/六）的月老牽線活動</span>
+                    <span class="text-sm font-bold text-black"><span class="text-rose-600">⚠️ 每週需「手動」報名下一屆</span>，月老才會知道「弟子＆信女」的心意喔！</span>
+                </div>
+
+                <div>
+                    <p class="text-xs text-gray-500 mb-1">距離下一次月老牽線開獎還有</p>
+                    <div id="nextMatchCountdown" class="text-2xl md:text-3xl font-bold font-serif-jp text-[#c96a7b] tracking-wider">
+                        計算中...
+                    </div>
+                </div>
+
+                <div id="registrationAlertBox" class="max-w-lg mx-auto p-4 rounded-2xl bg-white/80 border border-pink-100 text-sm text-gray-600 leading-relaxed"></div>
+
+                <div class="pt-1 flex justify-center">
+                    <button id="mainApplyBtn" type="button" onclick="handleApplyClick()" class="btn-sakura px-10 py-4 rounded-2xl font-bold text-base md:text-lg shadow-lg tracking-wider">
+                        🌸 我要報名參加配對
+                    </button>
+                </div>
+
+                <!-- 獨立專屬活動區（拆分顯示於常規場次報名按鈕下方，加深分隔線） -->
+                <div id="customActivitySection" class="hidden pt-6 mt-2 border-t-2 border-[#c96a7b] space-y-4">
+                    <div id="customActivityAlertBox" class="hidden max-w-lg mx-auto p-4 rounded-2xl bg-amber-50/75 border border-amber-200 text-sm text-[#7a3b46] leading-relaxed"></div>
+
+                    <div id="customActivitiesBtnContainer" class="hidden flex flex-wrap justify-center items-center gap-3"></div>
+                </div>
+            </div>
+
+            <!-- 即時社群數據統計圖表（抓取後台真實玩家名單：男女比例 & I人/E人與MBTI 分布） -->
+            <div id="homeStatsCard" class="glass-card rounded-3xl p-6 md:p-8 space-y-5">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-pink-100 pb-4">
+                    <div>
+                        <h3 class="text-base md:text-lg font-bold font-serif-jp text-[#8f4452]">📊 紅線企劃・即時參與人數統計</h3>
+                        <p class="text-xs text-[#c96a7b] font-semibold mt-1 leading-relaxed">
+                            💖 有成功脫單的弟子＆信女 記得回報給管理月老💖 幫你們添加幸福牆 讓大家沾沾喜氣 獻上滿滿的祝福 💖
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="homeStatsTotalBadge" class="text-xs px-3 py-1 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                            總計 0 人
+                        </span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+                    <!-- 左側：男女生人數統計圓環圖 -->
+                    <div class="lg:col-span-6 p-5 rounded-2xl bg-white/85 border border-pink-100 flex flex-col justify-between space-y-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-bold text-[#8f4452]">👫 男／女人數統計</span>
+                            <span id="genderRatioSummaryTag" class="text-xs font-bold text-[#c96a7b] bg-pink-50 px-2.5 py-0.5 rounded-full border border-pink-200">
+                                男 0 女 0
+                            </span>
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row lg:flex-col items-center justify-center gap-5 py-1">
+                            <div id="genderDonutChartBox" class="relative w-36 h-36 shrink-0 flex items-center justify-center"></div>
+
+                            <div class="w-full space-y-3">
+                                <div class="space-y-1">
+                                    <div class="flex items-center justify-between text-xs font-bold">
+                                        <span class="text-sky-700 flex items-center gap-1.5">
+                                            <span class="w-2.5 h-2.5 rounded-full bg-sky-400 inline-block"></span>
+                                            男生人數
+                                        </span>
+                                        <span id="statMaleText" class="text-sky-700 font-mono">0 人 (0%)</span>
+                                    </div>
+                                    <div class="w-full h-2.5 rounded-full bg-sky-100/80 overflow-hidden">
+                                        <div id="statMaleBar" class="h-full rounded-full bg-gradient-to-r from-sky-400 to-blue-500 transition-all duration-500" style="width: 0%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1">
+                                    <div class="flex items-center justify-between text-xs font-bold">
+                                        <span class="text-rose-700 flex items-center gap-1.5">
+                                            <span class="w-2.5 h-2.5 rounded-full bg-rose-400 inline-block"></span>
+                                            女生人數
+                                        </span>
+                                        <span id="statFemaleText" class="text-rose-700 font-mono">0 人 (0%)</span>
+                                    </div>
+                                    <div class="w-full h-2.5 rounded-full bg-rose-100/80 overflow-hidden">
+                                        <div id="statFemaleBar" class="h-full rounded-full bg-gradient-to-r from-pink-400 to-rose-500 transition-all duration-500" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 右側：MBTI 人格統計圖表（I人 / E人 / 不知道 / 沒測過） -->
+                    <div class="lg:col-span-6 p-5 rounded-2xl bg-white/85 border border-pink-100 flex flex-col justify-between space-y-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-bold text-[#8f4452]">🧠 MBTI 人格統計圖表</span>
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row lg:flex-col items-center justify-center gap-5 py-1">
+                            <div id="ieDonutChartBox" class="relative w-36 h-36 shrink-0 flex items-center justify-center"></div>
+
+                            <div class="w-full space-y-2.5">
+                                <div class="space-y-1">
+                                    <div class="flex items-center justify-between text-xs font-bold">
+                                        <span class="text-indigo-700 flex items-center gap-1.5">
+                                            <span class="w-2.5 h-2.5 rounded-full bg-indigo-400 inline-block"></span>
+                                            I人（內向型）
+                                        </span>
+                                        <span id="statMbtiIText" class="text-indigo-700 font-mono">0 人 (0%)</span>
+                                    </div>
+                                    <div class="w-full h-2.5 rounded-full bg-indigo-100/80 overflow-hidden">
+                                        <div id="statMbtiIBar" class="h-full rounded-full bg-gradient-to-r from-indigo-400 to-purple-500 transition-all duration-500" style="width: 0%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1">
+                                    <div class="flex items-center justify-between text-xs font-bold">
+                                        <span class="text-amber-700 flex items-center gap-1.5">
+                                            <span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>
+                                            E人（外向型）
+                                        </span>
+                                        <span id="statMbtiEText" class="text-amber-700 font-mono">0 人 (0%)</span>
+                                    </div>
+                                    <div class="w-full h-2.5 rounded-full bg-amber-100/80 overflow-hidden">
+                                        <div id="statMbtiEBar" class="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all duration-500" style="width: 0%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1">
+                                    <div class="flex items-center justify-between text-xs font-bold">
+                                        <span class="text-slate-600 flex items-center gap-1.5">
+                                            <span class="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span>
+                                            不知道 / 沒測過
+                                        </span>
+                                        <span id="statMbtiUntestedText" class="text-slate-600 font-mono">0 人 (0%)</span>
+                                    </div>
+                                    <div class="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                                        <div id="statMbtiUntestedBar" class="h-full rounded-full bg-gradient-to-r from-slate-400 to-gray-500 transition-all duration-500" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 首頁下方：原創暖心語錄與紅線小約定 -->
+            <div class="glass-card rounded-3xl p-6 md:p-8 space-y-6">
+                <div class="text-center space-y-3 font-serif-jp">
+                    <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 border border-pink-200/80 text-xs text-[#b55868]">
+                        <span>🕯️</span>
+                        <span>寫給正在等待相遇的你</span>
+                    </div>
+                    <p class="text-sm md:text-base text-[#6d3b43] leading-loose">
+                        微涼的晚風裡，總有一盞燈是為晚歸的人留著。<br class="hidden sm:inline">
+                        與其在無止盡的滑動裡消耗期待，不如花幾分鐘寫下真實的自己，讓月老在週二、週四與週六的夜色裡，為你牽起一段為期七天的溫柔相遇。<br class="hidden sm:inline">
+                        或許就在下個轉角，會有人端著熱飲、帶著剛剛好的笑容，走進你的日常。
+                    </p>
+                </div>
+
+                <div class="border-t border-dashed border-pink-200 pt-6 space-y-4">
+                    <h3 class="text-center text-sm md:text-base font-bold font-serif-jp text-[#8f4452] tracking-widest">
+                        ── 寫下紅線之前，給彼此的小約定 ──
+                    </h3>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs md:text-sm text-gray-600">
+                        <div class="p-4 rounded-2xl bg-white/80 border border-pink-100 flex items-start gap-3">
+                            <span class="w-6 h-6 rounded-full bg-pink-100 text-[#8f4452] font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">1</span>
+                            <p class="leading-relaxed"><strong class="text-[#8f4452]">一人一封紅線：</strong>請由本人真誠填寫資料，若重複註冊或填寫異常資訊，系統將列入警告帳號並取消配對資格。</p>
+                        </div>
+
+                        <div class="p-4 rounded-2xl bg-white/80 border border-pink-100 flex items-start gap-3">
+                            <span class="w-6 h-6 rounded-full bg-pink-100 text-[#8f4452] font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">2</span>
+                            <p class="leading-relaxed"><strong class="text-[#8f4452]">七日限定的溫柔：</strong>每一次牽線都是難得的相遇，請帶著尊重與禮貌開啟第一句破冰對話。</p>
+                        </div>
+
+                        <div class="p-4 rounded-2xl bg-white/80 border border-pink-100 flex items-start gap-3">
+                            <span class="w-6 h-6 rounded-full bg-pink-100 text-[#8f4452] font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">3</span>
+                            <p class="leading-relaxed"><strong class="text-[#8f4452]">守護彼此的安全：</strong>若決定從線上走到線下見面，請務必約在明亮人多的公共場所，並讓親友知道行程。</p>
+                        </div>
+
+                        <div class="p-4 rounded-2xl bg-white/80 border border-pink-100 flex items-start gap-3">
+                            <span class="w-6 h-6 rounded-full bg-pink-100 text-[#8f4452] font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">4</span>
+                            <p class="leading-relaxed"><strong class="text-[#8f4452]">把步調交給時間：</strong>七天後無論選擇繼續同行或各自祝福，每一次真誠交流都是更認識自己的過程。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 分頁 2：好友名單與七日對話 ==================== -->
+        <section id="tab-friends" class="tab-view hidden space-y-6">
+            <div class="glass-card rounded-3xl p-5 md:p-6">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+                    <div>
+                        <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">💌 我的七日限定好友名單</h2>
+                        <p class="text-xs text-gray-500">
+                            每天 20:00 剩餘天數 -1；降至 0 天時雙方皆按繼續才保留，否則雙方清空好友。<br>
+                            ✨ 特別提醒：當好友名單擁有 2 個以上好友時，每隔 2 天 20:00 將會觸發「心動抉擇」全新事件！<br>
+                            <span class="text-rose-600 font-medium">🚨 安全提醒：若發現好友有任何異常行為、不當言語或疑似詐騙...等等，可通知管理員🚨<br>👮‍♀️👮‍♂️若情節重大，我們亦可協助提供相關紀錄與證據供給您自行報警處理👮🏻👮🏿</span>
+                        </p>
+                    </div>
+                    <span id="friendCountBadge" class="text-xs px-3 py-1 rounded-full bg-pink-100 text-[#8f4452] font-semibold">0 位好友</span>
+                </div>
+                <div id="friendsListContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+            </div>
+
+            <!-- 選定好友的互動空間 -->
+            <div id="activeChatWorkspace" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <!-- 左側：對方公開檔案卡片 -->
+                <div class="lg:col-span-5 glass-card rounded-3xl p-5 space-y-4 h-fit">
+                    <div class="flex items-center justify-between border-b border-pink-100 pb-3">
+                        <div>
+                            <h3 id="partnerCardName" class="text-lg font-bold font-serif-jp text-[#8f4452]">對方檔案</h3>
+                            <p id="partnerCardTimer" class="text-xs text-[#c96a7b] font-medium mt-0.5">剩餘 7 天</p>
+                        </div>
+                        <span class="text-2xl">🎀</span>
+                    </div>
+                    <div class="bg-pink-50/70 p-3 rounded-xl text-xs text-[#7a3b46] leading-relaxed">
+                        💌 讓彼此慢慢認識：對方開放資料將逐步解鎖，待明日顯示，IG 則於滿 7 天若成功配對後將會自動開放。
+                    </div>
+                    <div id="partnerUnlockedFields" class="space-y-2.5 max-h-[420px] overflow-y-auto pr-1 text-xs"></div>
+                </div>
+
+                <!-- 右側：戀愛對話窗 -->
+                <div class="lg:col-span-7 glass-card rounded-3xl p-5 flex flex-col h-[560px]">
+                    <!-- 管理員禁止發話提示橫幅 -->
+                    <div id="chatBannedBanner" class="hidden mb-3 p-3.5 rounded-2xl bg-rose-100 border border-rose-400 text-center">
+                        <p class="text-xs font-bold text-rose-700">🚫 目前聊天室已禁止發話，請聯繫管理員</p>
+                    </div>
+
+                    <!-- 剩餘 0 天到期續緣詢問橫幅（觸發時聊天室禁止發話） -->
+                    <div id="sevenDayDecisionBanner" class="hidden mb-3 p-4 rounded-2xl bg-gradient-to-r from-rose-50 to-pink-100 border border-pink-300 space-y-2.5">
+                        <p class="text-sm font-bold font-serif-jp text-[#8f4452]">⏳ 剩餘 0 天！你們要不要繼續配對？</p>
+                        <p id="sevenDayDecisionStatus" class="text-xs text-gray-600">目前聊天室已暫停發話；兩個人都按「繼續配對」才配對成功，其中一人沒按則兩邊好友名單清空刪除。</p>
+                        <div class="flex gap-2 pt-1">
+                            <button type="button" onclick="respondSevenDayDecision(true)" class="btn-sakura px-4 py-2 rounded-xl text-xs font-semibold">
+                                💖 繼續配對
+                            </button>
+                            <button type="button" onclick="respondSevenDayDecision(false)" class="px-4 py-2 rounded-xl bg-white border border-gray-200 text-gray-600 text-xs hover:bg-gray-50">
+                                🍃 不繼續（雙方清空好友）
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between border-b border-pink-100 pb-3 mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                            <span id="chatHeaderTitle" class="font-bold text-sm text-[#8f4452]">與對方的專屬對話</span>
+                        </div>
+                        <span class="text-[11px] text-[#c96a7b] font-medium">✨ 系統為維持順暢，每個聊天室最多保留最近 200 則對話內容</span>
+                    </div>
+
+                    <div id="chatMessagesBox" class="flex-1 overflow-y-auto space-y-3 p-2 bg-[#fffafb] rounded-2xl border border-pink-100/60"></div>
+
+                    <form id="chatSendForm" onclick="handleLockedChatClick()" class="mt-3 flex items-center gap-1.5 sm:gap-2">
+                        <button type="button" id="randomTopicBtn" onclick="openRandomTopicModal()" title="選擇「感情」或「生活」互動題目並發送至對話窗（發送後冷卻 5 秒）" class="px-3 sm:px-3.5 py-2.5 rounded-xl bg-pink-50 border border-pink-300 text-[#8f4452] hover:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-bold shrink-0 transition whitespace-nowrap">
+                            🎲 互動
+                        </button>
+                        <input type="text" id="chatInput" class="input-jp flex-1 min-w-0" placeholder="寫下想對他說的話..." required>
+                        <button type="submit" id="chatSendBtn" class="btn-sakura px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold shrink-0 whitespace-nowrap">
+                            傳送 💌
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 分頁 3：我的個人檔案與隱私設定 ==================== -->
+        <section id="tab-profile" class="tab-view hidden space-y-6">
+            <div class="glass-card rounded-3xl p-6 md:p-8">
+                <div class="flex flex-col gap-4 border-b border-pink-100 pb-5 mb-6">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div>
+                            <h2 class="text-xl font-bold font-serif-jp text-[#8f4452]">📝 我的個人資料與隱私控制</h2>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <span class="text-rose-600 font-bold">A區.</span>「預設不開放」，<span class="text-emerald-600 font-bold">B、C、D區.</span>「預設開放」，可自行調整開啟/隱藏資訊
+                            </p>
+                        </div>
+                        <div class="flex flex-wrap gap-2 shrink-0">
+                            <button type="button" onclick="exportBackupCode()" class="text-xs px-3 py-2 rounded-xl bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
+                                🔑 備份/還原碼
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 一鍵全開 / 全隱藏隱私快速控制列（不受資料鎖定影響） -->
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-pink-50/70 p-3.5 rounded-2xl border border-pink-200/80">
+                        <span class="text-xs font-semibold text-[#8f4452]">🎛️ 隱私快速批次設定：</span>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="setAllFieldsPrivacy('open')" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-semibold shadow-2xs hover:opacity-95 transition">
+                                🌸 欄位全部開啟
+                            </button>
+                            <button type="button" onclick="setAllFieldsPrivacy('closed')" class="px-3.5 py-1.5 rounded-xl bg-white border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 transition">
+                                🙈 欄位全部隱藏
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <form id="profileForm" class="space-y-8" novalidate>
+                    <div id="dynamicProfileSections" class="space-y-8"></div>
+
+                    <div class="sticky bottom-20 md:bottom-4 z-20 glass-card p-4 rounded-2xl border border-pink-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <span id="profileCompletenessText" class="text-xs font-medium text-[#8f4452]">
+                            尚未完成所有必填資料
+                        </span>
+                        <button type="submit" class="w-full sm:w-auto btn-sakura px-8 py-3 rounded-xl font-bold text-sm shadow-md">
+                            保存
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <!-- ==================== 分頁 4：紅線祈願牆 ==================== -->
+        
+        <!-- ==================== 📋 櫻花粉嫩風 PTT 討論區 ==================== -->
+        <section id="tab-forum" class="tab-view hidden space-y-4 pb-12 md:pb-16">
+            <div class="flex items-center justify-between pb-1 border-b-2 border-pink-200">
+                <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">📋 月老交友看板</h2>
+                <div class="flex gap-2">
+                    <button onclick="openForumPostModal()" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold hover:opacity-95 transition shadow-sm">➕ 發文</button>
+                </div>
+            </div>
+            
+            <div class="flex gap-2 pb-1 overflow-x-auto hide-scrollbar">
+                <button onclick="filterForum('公告')" class="forum-filter-btn active px-3 py-1 rounded-full text-xs font-bold bg-[#8f4452] text-white whitespace-nowrap">📌 公告</button>
+                <button onclick="filterForum('最新')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">✨ 最新</button>
+                <button onclick="filterForum('熱門')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">🔥 熱門</button>
+                <button onclick="filterForum('感情')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">🌸 感情</button>
+                <button onclick="filterForum('心情')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">💭 心情</button>
+                <button onclick="filterForum('女孩')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">🎀 女孩</button>
+                <button onclick="filterForum('追星')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">⭐ 追星</button>
+                <button onclick="filterForum('男孩')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">⚾ 男孩</button>
+                <button onclick="filterForum('討論')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">💬 討論</button>
+                <button onclick="filterForum('閒聊')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">☕ 閒聊</button>
+                <button onclick="filterForum('寵物')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">🐾 寵物</button>
+                <button onclick="filterForum('自己')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">👤 自己</button>
+            </div>
+
+            <!-- PTT 緊湊列表風 -->
+            <div id="forumPostList" class="bg-white/80 rounded-xl border-2 border-pink-200 divide-y divide-pink-200 shadow-sm overflow-hidden min-h-[300px]">
+                <div class="p-6 text-center text-gray-400 text-xs font-medium">載入中...</div>
+            </div>
+            
+            <div id="forumPaginationBar" class="flex justify-between items-center px-1 text-xs"></div>
+        </section>
+
+        <section id="tab-wishes" class="tab-view hidden space-y-6 pb-12 md:pb-16">
+            <!-- 頂部說明橫幅 -->
+            <div class="glass-card rounded-3xl p-6 md:p-7 border border-pink-200 space-y-2.5">
+                <div class="flex flex-wrap items-center justify-between gap-2.5">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">🏮</span>
+                        <div>
+                            <h2 class="text-lg md:text-xl font-bold font-serif-jp text-[#8f4452]">紅線祈願牆・二選一默契問答</h2>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 shrink-0">
+                        <span id="wishWallOpenCountBadge" class="text-xs px-3 py-1.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">
+                            開放中 0 則
+                        </span>
+                        <button type="button" id="headerAddWishBtn" onclick="handleHeaderAddWishClick()" class="btn-sakura px-4 py-2 rounded-xl text-xs font-bold shadow-sm inline-flex items-center gap-1.5">
+                            <span>➕</span>
+                            <span>新增祈願題目</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="p-3 rounded-2xl bg-rose-50/70 border border-pink-200/80 text-[11px] md:text-xs text-[#6e3a43] leading-relaxed">
+                    💡 <strong>玩法規則：</strong>男／女玩家每次皆可新增 <strong>1 組祈願題目</strong>（內含 N 題 2 選 1，開放 N 天，<strong>每日 20:00 計算 1 天</strong>），於時間結束後可挑選最心動的匿名答案直接配對成七日好友！
+                </div>
+            </div>
+
+            <!-- 女性玩家專屬：我的祈願管理（新增題目 / 進行中關閉 / 到期後挑選配對） -->
+            <div id="wishWallFemaleCreatorSection"></div>
+
+            <!-- 所有玩家皆可瀏覽與回答的祈願牆列表（每頁最多顯示 5 個，第 6 個在第二頁） -->
+            <div class="space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 px-1">
+                    <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🎐 祈願牆題目列表（需點擊後展開）</h3>
+                    <div id="wishWallGenderFilterGroup" class="inline-flex items-center gap-1.5 shrink-0" role="group" aria-label="篩選發起人性別">
+                        <button type="button" data-wish-gender="ALL" onclick="onWishPublicGenderFilterChange('ALL')" class="text-xs px-3 py-1.5 rounded-full bg-[#c96a7b] text-white border border-[#c96a7b] font-bold shadow-2xs transition">
+                            全部
+                        </button>
+                        <button type="button" data-wish-gender="男" onclick="onWishPublicGenderFilterChange('男')" class="text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] font-bold hover:bg-pink-50 transition">
+                            男
+                        </button>
+                        <button type="button" data-wish-gender="女" onclick="onWishPublicGenderFilterChange('女')" class="text-xs px-3 py-1.5 rounded-full bg-white border border-pink-200 text-[#8f4452] font-bold hover:bg-pink-50 transition">
+                            女
+                        </button>
+                    </div>
+                </div>
+                <div id="wishWallPublicList" class="space-y-2.5"></div>
+                <div id="wishWallPublicPaginationBar" class="hidden pt-1 flex flex-wrap items-center justify-between gap-2 text-xs"></div>
+            </div>
+
+            <!-- 已結束祈願歷史紀錄（僅記錄近 10 筆，每頁最多顯示 5 個，第 6 個在第二頁） -->
+            <div id="wishWallPastHistorySection" class="hidden space-y-3 pt-2 border-t border-dashed border-pink-200"></div>
+
+            <!-- 電腦版與手機版底部安全留白區塊：確保展開長題目時可完整往下捲動，不被下方導航列遮擋 -->
+            <div class="h-24 md:h-28 pointer-events-none" aria-hidden="true"></div>
+        </section>
+    </main>
+
+    <!-- 底部導航列 -->
+    <nav class="fixed bottom-0 inset-x-0 z-30 glass-header border-t border-pink-200/80 px-2 sm:px-4 py-2">
+        <div class="max-w-xl mx-auto grid grid-cols-5 gap-1 sm:gap-2">
+            <button type="button" onclick="switchTab('home')" data-tab-btn="home" class="nav-btn active">
+                <span class="text-base sm:text-lg">🌸</span>
+                <span class="text-[10px] sm:text-xs font-medium leading-tight mt-0.5">緣分首頁</span>
+            </button>
+            <button type="button" onclick="switchTab('forum')" data-tab-btn="forum" class="nav-btn relative">
+                <span class="text-base sm:text-lg">📋</span>
+                <span class="text-[10px] sm:text-xs font-medium leading-tight mt-0.5">討論區</span>
+            </button>
+            <button type="button" onclick="switchTab('wishes')" data-tab-btn="wishes" class="nav-btn relative">
+                <span class="text-base sm:text-lg">🏮</span>
+                <span class="text-[10px] sm:text-xs font-medium leading-tight mt-0.5">祈願牆</span>
+                <span id="navWishDot" class="hidden absolute top-1.5 right-3 sm:right-5 w-2 h-2 rounded-full bg-rose-500"></span>
+            </button>
+            <button type="button" onclick="switchTab('friends')" data-tab-btn="friends" class="nav-btn relative">
+                <span class="text-base sm:text-lg">💌</span>
+                <span class="text-[10px] sm:text-xs font-medium leading-tight mt-0.5">好友清單</span>
+                <span id="navFriendDot" class="hidden absolute top-1.5 right-3 sm:right-5 w-2 h-2 rounded-full bg-rose-500"></span>
+            </button>
+            <button type="button" onclick="switchTab('profile')" data-tab-btn="profile" class="nav-btn">
+                <span class="text-base sm:text-lg">🔐</span>
+                <span class="text-[10px] sm:text-xs font-medium leading-tight mt-0.5">個人設定</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- 輕量化小視窗 0：玩家信件箱（接收管理員發送的信件與文字） -->
+    <div id="mailboxModal" class="hidden mini-window !max-w-md max-h-[82vh] overflow-y-auto space-y-3.5">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">✉️ 月老信箱（管理員信件）</h3>
+                <p class="text-[11px] text-gray-400">點擊信件可查看管理員發送的完整內容</p>
+            </div>
+            <button type="button" onclick="closeMailboxModal()" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+        </div>
+
+        <div id="mailboxListView" class="space-y-2 max-h-72 overflow-y-auto pr-0.5"></div>
+
+        <div id="mailboxDetailView" class="hidden space-y-3">
+            <button type="button" onclick="backToMailboxList()" class="text-xs text-[#c96a7b] hover:underline font-semibold">
+                ← 返回信件列表
+            </button>
+            <div class="p-3.5 rounded-2xl bg-pink-50/70 border border-pink-200 space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                    <h4 id="mailDetailTitle" class="text-sm font-bold text-[#8f4452]"></h4>
+                    <span id="mailDetailTime" class="text-[10px] text-gray-400 shrink-0"></span>
+                </div>
+                <div id="mailDetailBody" class="text-xs text-gray-700 leading-relaxed whitespace-pre-line pt-1 border-t border-pink-100"></div>
+            </div>
+        </div>
+
+        <div class="pt-1 text-right border-t border-pink-100">
+            <button type="button" onclick="closeMailboxModal()" class="px-4 py-1.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                關閉信箱
+            </button>
+        </div>
+    </div>
+
+    <!-- 輕量化小視窗 1：報名場次與完全吻合條件 -->
+    <div id="registerModal" class="hidden mini-window !max-w-lg max-h-[82vh] overflow-y-auto space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🌸 報名參加配對</h3>
+                <p class="text-[11px] text-gray-500">有報名的玩家才會進入配對池，未報名者不會參與配對</p>
+            </div>
+            <button type="button" onclick="closeRegisterModal()" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+        </div>
+
+        <div class="space-y-1.5">
+            <label class="block text-xs font-bold text-[#8f4452]">
+                1. 請選擇要參加的配對場次（選填，可複選）
+            </label>
+            <div id="sessionOptionsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1"></div>
+        </div>
+
+        <div class="space-y-2 pt-2.5 border-t border-pink-100">
+            <div class="space-y-1">
+                <label class="block text-xs font-bold text-[#8f4452]">
+                    2. 希望對方的配對條件設定（全部不勾選則隨機配對）
+                </label>
+                <p class="text-[11px] text-gray-500 leading-relaxed">
+                    ・<strong class="text-[#8f4452]">🔒 必須吻合（最多選 2 項）</strong>：勾選的項目<strong>全部皆須符合</strong>才會配對<br>
+                    ・<strong class="text-[#c96a7b]">✨ 選填</strong>：只要符合其中一項即可配對
+                </p>
+                <div id="regMatchCriteriaSummaryBar" class="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]"></div>
+            </div>
+            <div id="exactMatchOptionsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1"></div>
+        </div>
+
+        <div class="flex flex-wrap gap-2 pt-2.5 border-t border-pink-100">
+            <button type="button" id="cancelRegularRegBtn" onclick="cancelRegularRegistration()" class="hidden py-2.5 px-3 rounded-xl border border-rose-300 bg-rose-50 text-rose-700 text-xs font-bold hover:bg-rose-100">
+                🍃 取消本屆報名
+            </button>
+            <button type="button" onclick="closeRegisterModal()" class="flex-1 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                關閉
+            </button>
+            <button type="button" onclick="confirmRegistration()" class="flex-[2] btn-sakura py-2.5 rounded-xl text-xs font-bold shadow">
+                ✨ 確認送出報名
+            </button>
+        </div>
+    </div>
+
+    <!-- 輕量化小視窗 1B：第 2 種活動（支援 3 種活動類型：原本條件機制 / 月老籤詩 1~5 / 默契大考驗二選一） -->
+    <div id="customActivityModal" class="hidden mini-window !max-w-lg max-h-[82vh] overflow-y-auto space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 id="customActModalTitle" class="text-base font-bold font-serif-jp text-[#8f4452]">🎪 專屬活動報名</h3>
+                <p id="customActModalSubtitle" class="text-[11px] text-gray-500">此為後台創建的獨立專屬活動，與週二／週四／週六常規自動配對互不影響</p>
+            </div>
+            <button type="button" onclick="closeCustomActivityModal()" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+        </div>
+
+        <input type="hidden" id="customActModalId" value="">
+        <input type="hidden" id="customActModalType" value="classic">
+        <input type="hidden" id="customActSelectedFortune" value="">
+        <input type="hidden" id="customActSelectedTwoChoice" value="">
+
+        <div id="customActStatusBadgeBox" class="p-3 rounded-2xl bg-amber-50/70 border border-amber-200 text-xs text-[#7a3b46] leading-relaxed"></div>
+
+        <!-- 類型 1：原本機制報名（可自選 2 項必須吻合 ＋ 選填任一符合） -->
+        <div id="customActClassicSection" class="space-y-2 pt-2 border-t border-pink-100">
+            <div class="space-y-1">
+                <label class="block text-xs font-bold text-[#8f4452]">
+                    希望對方的配對條件設定（全部不勾選則隨機配對）
+                </label>
+                <p class="text-[11px] text-gray-500 leading-relaxed">
+                    ・<strong class="text-[#8f4452]">🔒 必須吻合（最多選 2 項）</strong>：勾選的項目<strong>全部皆須符合</strong>才會配對<br>
+                    ・<strong class="text-[#c96a7b]">✨ 選填</strong>：只要符合其中一項即可配對
+                </p>
+                <div id="customActCriteriaSummaryBar" class="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]"></div>
+            </div>
+            <div id="customActExactOptionsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1"></div>
+        </div>
+
+        <!-- 類型 2：月老籤詩請選擇 1~5 首號碼 -->
+        <div id="customActFortuneSection" class="hidden space-y-3 pt-2 border-t border-pink-100">
+            <div class="space-y-1 text-center">
+                <span class="inline-block text-xs px-3 py-1 rounded-full bg-rose-100 text-[#8f4452] font-bold">🎋 專屬號碼配對</span>
+                <p class="text-sm font-bold font-serif-jp text-[#8f4452]">月老籤詩請選擇1~5首號碼</p>
+            </div>
+            <div id="customActFortuneGrid" class="grid grid-cols-5 gap-2 pt-1"></div>
+        </div>
+
+        <!-- 類型 3：默契大考驗二選一 -->
+        <div id="customActTwoChoiceSection" class="hidden space-y-3 pt-2 border-t border-pink-100">
+            <div class="space-y-1 text-center">
+                <span class="inline-block text-xs px-3 py-1 rounded-full bg-amber-100 text-amber-900 font-bold">⚖️ 靈魂默契測試</span>
+                <p class="text-sm font-bold font-serif-jp text-[#8f4452]">默契大考驗二選一</p>
+                <p class="text-[11px] text-gray-500">請憑直覺二選一，系統將從選擇相同答案的異性玩家（男 ⇄ 女）中為你隨機牽線！（同性或單獨選項則不配對）</p>
+            </div>
+            <div id="customActTwoChoiceGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1"></div>
+        </div>
+
+        <div class="flex flex-wrap gap-2 pt-2.5 border-t border-pink-100">
+            <button type="button" id="cancelCustomActRegBtn" onclick="cancelCustomActivityRegistration()" class="hidden py-2.5 px-3 rounded-xl border border-rose-300 bg-rose-50 text-rose-700 text-xs font-bold hover:bg-rose-100">
+                🍃 取消報名
+            </button>
+            <button type="button" onclick="closeCustomActivityModal()" class="flex-1 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                關閉
+            </button>
+            <button type="button" id="confirmCustomActRegBtn" onclick="confirmCustomActivityRegistration()" class="flex-[2] btn-sakura py-2.5 rounded-xl text-xs font-bold shadow">
+                ✨ 確認報名此活動
+            </button>
+        </div>
+    </div>
+
+    <!-- 輕量化小視窗 2：問題回報與管理員回覆查看 -->
+    <div id="reportModal" class="hidden mini-window !max-w-lg max-h-[85vh] overflow-y-auto space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5 sticky top-0 bg-white/95 z-10">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">📮 玩家問題回報與進度查詢</h3>
+                <p class="text-[11px] text-gray-400">送出後可於下方即時查看送出內容、處理狀態與管理員回覆</p>
+            </div>
+            <button type="button" onclick="closeReportModal()" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+        </div>
+
+        <form id="issueReportForm" class="space-y-3">
+            <div>
+                <label class="block text-xs font-semibold text-[#8f4452] mb-1">問題類型 <span class="text-rose-500">*</span></label>
+                <select id="reportCategory" class="input-jp !py-2 !text-xs" required>
+                    <option value="配對與報名問題">配對與報名問題</option>
+                    <option value="好友名單與聊天異常">好友名單與聊天異常</option>
+                    <option value="個人資料與隱私顯示">個人資料與隱私顯示</option>
+                    <option value="🌸功能建議與許願">🌸功能建議與許願</option>
+                    <option value="其他問題">其他問題</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-[#8f4452] mb-1">你的玩家 ID 或暱稱（選填）</label>
+                <input type="text" id="reportContact" class="input-jp !py-2 !text-xs" placeholder="若已產生玩家 ID 會自動帶入">
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-[#8f4452] mb-1">問題內容描述 <span class="text-rose-500">*</span></label>
+                <textarea id="reportContent" rows="3" class="input-jp !text-xs resize-none" placeholder="請描述你遇到的狀況..." required></textarea>
+            </div>
+
+            <div class="flex gap-2 pt-1">
+                <button type="button" onclick="closeReportModal()" class="w-1/3 py-2 rounded-xl border border-gray-200 text-xs text-gray-500 hover:bg-gray-50">
+                    關閉
+                </button>
+                <button type="submit" class="w-2/3 btn-sakura py-2 rounded-xl text-xs font-bold shadow">
+                    📤 送出問題回報
+                </button>
+            </div>
+        </form>
+
+        <!-- 我送出的問題回報與管理員回覆列表 -->
+        <div id="myIssueReportsSection" class="pt-3 border-t border-pink-100 space-y-2.5">
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5">
+                    <h4 class="text-xs font-bold text-[#8f4452]">📋 我的回報紀錄與管理員回覆</h4>
+                    <span id="myReportsCountBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-[#8f4452] font-bold">0 筆</span>
+                </div>
+                <button type="button" onclick="refreshMyIssueReports()" class="text-[11px] px-2.5 py-1 rounded-lg bg-white border border-pink-200 text-[#c96a7b] font-semibold hover:bg-pink-50 transition">
+                    ↻ 刷新進度
+                </button>
+            </div>
+            <div id="myIssueReportsList" class="space-y-2.5 max-h-60 overflow-y-auto pr-0.5"></div>
+        </div>
+    </div>
+
+    <!-- 輕量化小視窗 3：每隔 2 天 20:00 心動抉擇 -->
+    <div id="confessionModal" class="hidden mini-window !max-w-sm space-y-4">
+        <div class="text-center space-y-1">
+            <span class="text-2xl">🌙</span>
+            <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">20:00 心動抉擇</h3>
+            <p class="text-[11px] text-gray-500 leading-relaxed">
+                你擁有 2 位以上好友且已到達每隔 2 天 20:00 結算時刻，<strong>請選擇一人</strong>說出今天讓人心動的話。<br>
+                <span class="text-rose-500">（完成選擇前無法聊天；其餘好友將收到你已發送好感給「另外一位好友」的通知）</span>
+            </p>
+        </div>
+
+        <div class="space-y-2">
+            <label class="block text-xs font-semibold text-[#8f4452]">1. 選擇今天最讓你心動的對象：</label>
+            <div id="confessionTargetList" class="space-y-1.5 max-h-40 overflow-y-auto"></div>
+        </div>
+
+        <div>
+            <label class="block text-xs font-semibold text-[#8f4452] mb-1">2. 寫下今天讓人心動的一句話：</label>
+            <textarea id="confessionMessageInput" rows="2" class="input-jp !text-xs resize-none" placeholder="寫下心動的話..."></textarea>
+        </div>
+
+        <div class="flex gap-2">
+            <button type="button" onclick="closeEveningConfessionModal()" class="w-1/3 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">
+                稍後再選
+            </button>
+            <button type="button" onclick="submitEveningConfession()" class="w-2/3 btn-sakura py-2 rounded-xl text-xs font-bold shadow">
+                💘 確認發送
+            </button>
+        </div>
+    </div>
+
+    <!-- 輕量化小視窗 4：紅線 5 碼英數通行碼（備份 / 跨瀏覽器還原） -->
+    <div id="backupModal" class="hidden mini-window !max-w-md max-h-[85vh] overflow-y-auto space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🔑 紅線專屬通行碼（備份／還原）</h3>
+                <p class="text-[11px] text-gray-500">填好資料按保存後自動產生 5 碼英數通行碼，換瀏覽器輸入即可讀取紀錄</p>
+            </div>
+            <button type="button" onclick="closeBackupModal()" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+        </div>
+
+        <!-- 區塊 1：我的 5 碼專屬備份碼與一鍵複製 -->
+        <div class="p-3.5 rounded-2xl bg-pink-50/60 border border-pink-200 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+                <label class="text-xs font-bold text-[#8f4452]">1. 我的專屬備份碼（5 碼英數混合）</label>
+                <button type="button" onclick="copyBackupCodeToClipboard()" class="btn-sakura px-3 py-1 rounded-xl text-[11px] font-bold shadow-2xs shrink-0">
+                    📋 一鍵複製
+                </button>
+            </div>
+            <input type="text" id="backupExportTextarea" readonly onclick="this.select()" class="input-jp !text-lg font-mono font-bold tracking-[0.28em] text-center !text-[#8f4452]" placeholder="保存資料後自動產生">
+            <p class="text-[11px] text-gray-500">💡 此 5 碼英數通行碼在資料保存後會永久綁定您的帳號，修改資料也不會變動。</p>
+        </div>
+
+        <!-- 區塊 2：輸入 5 碼還原 -->
+        <div class="p-3.5 rounded-2xl bg-white border border-pink-200 space-y-2">
+            <label class="block text-xs font-bold text-[#8f4452]">2. 在新瀏覽器／新手機輸入 5 碼讀取紀錄</label>
+            <input type="text" id="backupImportTextarea" maxlength="10" oninput="this.value = this.value.toUpperCase()" class="input-jp !text-base font-mono font-bold tracking-[0.22em] text-center uppercase" placeholder="請輸入 5 碼英數通行碼（例：K8M2P）">
+            <div class="flex gap-2 pt-1">
+                <button type="button" onclick="closeBackupModal()" class="w-1/3 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                    取消
+                </button>
+                <button type="button" onclick="restoreFromBackupCode()" class="w-2/3 btn-sakura py-2 rounded-xl text-xs font-bold shadow">
+                    ✨ 確認讀取紀錄
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 輕量化小視窗 5：月老互動選項視窗（感情 / 生活 各 30 題單身認識話題） -->
+    <div id="randomTopicModal" class="hidden mini-window !max-w-sm space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">🎲 月老互動</h3>
+                <p class="text-[11px] text-gray-500">請選擇「感情」或「生活」分類後，按下「確認」發送題目</p>
+            </div>
+            <button type="button" onclick="closeRandomTopicModal()" class="text-gray-400 hover:text-gray-700 text-lg leading-none">✕</button>
+        </div>
+
+        <div class="space-y-2.5">
+            <label id="randomTopicCard_love" onclick="selectRandomTopicCategory('love')" class="flex items-center gap-3 p-3.5 rounded-2xl border-2 border-pink-200 bg-white hover:border-[#c96a7b] cursor-pointer transition select-none">
+                <input type="radio" id="randomTopicRadio_love" name="interactiveTopicCategory" value="love" class="w-4 h-4 accent-[#c96a7b] shrink-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-bold text-[#8f4452]">💕 感情</div>
+                    <p class="text-[11px] text-gray-500 mt-0.5 leading-relaxed">隨機抽出一道認識彼此感情觀與心動細節的話題</p>
+                </div>
+            </label>
+            <label id="randomTopicCard_life" onclick="selectRandomTopicCategory('life')" class="flex items-center gap-3 p-3.5 rounded-2xl border-2 border-pink-200 bg-white hover:border-[#c96a7b] cursor-pointer transition select-none">
+                <input type="radio" id="randomTopicRadio_life" name="interactiveTopicCategory" value="life" class="w-4 h-4 accent-[#c96a7b] shrink-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-bold text-[#8f4452]">🌿 生活</div>
+                    <p class="text-[11px] text-gray-500 mt-0.5 leading-relaxed">隨機抽出一道認識彼此日常習慣與興趣喜好的話題</p>
+                </div>
+            </label>
+            <p id="randomTopicSelectHint" class="hidden text-[11px] text-rose-600 font-semibold px-1">
+                ⚠️ 請先選擇「💕 感情」或「🌿 生活」選項，再按確認喔！
+            </p>
+        </div>
+
+        <div class="flex gap-2 pt-2 border-t border-pink-100">
+            <button type="button" onclick="closeRandomTopicModal()" class="w-1/3 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                取消
+            </button>
+            <button type="button" id="confirmRandomTopicBtn" onclick="confirmSendRandomLoveTopic()" class="w-2/3 btn-sakura py-2.5 rounded-xl text-xs font-bold shadow opacity-60">
+                ✨ 確認
+            </button>
+        </div>
+    </div>
+
+    <!-- 輕量化小視窗 6：配對第二天起手動解除好友二次確認視窗 -->
+    <div id="manualUnfriendModal" class="hidden mini-window !max-w-sm space-y-4">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">💔 確認解除好友？</h3>
+                <p class="text-[11px] text-gray-500">解除後雙方好友名單與對話紀錄將同步清空</p>
+            </div>
+            <button type="button" onclick="closeManualUnfriendModal()" class="text-gray-400 hover:text-gray-700 text-lg leading-none">✕</button>
+        </div>
+
+        <div class="p-3.5 rounded-2xl bg-rose-50/75 border border-rose-200 space-y-1.5 text-xs text-[#6e3a43] leading-relaxed">
+            <p id="manualUnfriendConfirmText" class="font-semibold"></p>
+            <p class="text-[11px] text-rose-600">⚠️ 此操作會即時同步更新前後台名單並清空雙方聊天室紀錄，解除後無法復原。</p>
+        </div>
+
+        <div class="flex gap-2 pt-1 border-t border-pink-100">
+            <button type="button" onclick="closeManualUnfriendModal()" class="w-1/2 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 font-semibold hover:bg-gray-50">
+                取消
+            </button>
+            <button type="button" onclick="confirmManualUnfriend()" class="w-1/2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow transition">
+                💔 確認解除好友
+            </button>
+        </div>
+    </div>
+
+    
+    
+    <!-- 編輯文章/留言 Modal -->
+    <div id="editContentModal" class="hidden mini-window !max-w-sm space-y-4 !z-[99]">
+        <div class="flex items-center justify-between border-b border-pink-100 pb-2.5">
+            <div>
+                <h3 class="text-base font-bold font-serif-jp text-[#8f4452]">✏️ 編輯內容</h3>
+            </div>
+            <button type="button" onclick="closeEditContentModal()" class="text-gray-400 hover:text-gray-700 text-lg leading-none">✕</button>
+        </div>
+
+        <div id="editContentTitleWrap" class="space-y-1.5 hidden">
+            <label class="block text-xs font-bold text-[#8f4452]">文章標題 (上限 15 字)</label>
+            <input type="text" id="editContentTitle" maxlength="15" class="w-full px-3 py-2.5 rounded-xl border border-pink-200 bg-white focus:border-[#c96a7b] outline-none transition text-sm">
+        </div>
+
+        <div class="space-y-1.5">
+            <label class="block text-xs font-bold text-[#8f4452]">內文 (上限 300 字)</label>
+            <textarea id="editContentTextarea" rows="4" maxlength="300" class="w-full px-3 py-2.5 rounded-xl border border-pink-200 bg-white focus:border-[#c96a7b] outline-none transition text-sm resize-none"></textarea>
+        </div>
+
+        <div class="flex gap-2 pt-1 border-t border-pink-100">
+            <button type="button" onclick="closeEditContentModal()" class="w-1/3 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                取消
+            </button>
+            <button type="button" onclick="submitEditContent()" class="w-2/3 btn-sakura py-2 rounded-xl text-xs font-bold shadow">
+                💾 儲存修改
+            </button>
+        </div>
+    </div>
+
+    <!-- 發文 Modal -->
+    <div id="forumPostModal" class="hidden fixed inset-0 bg-black/45 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl w-full max-w-lg p-5 sm:p-6 shadow-2xl border-2 border-pink-100 transform transition-all flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold font-serif-jp text-[#8f4452]">📝 發表新文章</h3>
+                <button onclick="closeForumPostModal()" class="text-gray-400 hover:text-[#8f4452] p-1 transition"><span class="text-xl">✕</span></button>
+            </div>
+            <div class="space-y-4 overflow-y-auto pr-1 flex-1 hide-scrollbar">
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-500 mb-1 ml-1">分類標籤</label>
+                    <div class="flex flex-wrap gap-2">
+                        <label class="cursor-pointer flex-1 min-w-[70px]">
+                            <input type="radio" name="forumPostTag" value="感情" class="peer hidden" checked>
+                            <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">🌸 感情</div>
+                        </label>
+                        <label class="cursor-pointer flex-1 min-w-[70px]">
+                            <input type="radio" name="forumPostTag" value="心情" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">💭 心情</div>
+                        </label>
+                        <label class="cursor-pointer flex-1 min-w-[70px]">
+                            <input type="radio" name="forumPostTag" value="女孩" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">🎀 女孩</div>
+                        </label>
+                        <label class="cursor-pointer flex-1 min-w-[70px]">
+                            <input type="radio" name="forumPostTag" value="追星" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">⭐ 追星</div>
+                        </label>
+                        <label class="cursor-pointer flex-1 min-w-[70px]">
+                            <input type="radio" name="forumPostTag" value="男孩" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">⚾ 男孩</div>
+                        </label>
+                        <label class="cursor-pointer flex-1 min-w-[70px]">
+                            <input type="radio" name="forumPostTag" value="討論" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">💬 討論</div>
+                        </label>
+                        <label class="cursor-pointer flex-1 min-w-[70px]">
+                            <input type="radio" name="forumPostTag" value="閒聊" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">☕ 閒聊</div>
+                        </label>
+                        <label class="cursor-pointer flex-1 min-w-[70px]">
+                            <input type="radio" name="forumPostTag" value="寵物" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">🐾 寵物</div>
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-500 mb-1 ml-1">誰可以留言？</label>
+                    <div class="flex gap-2">
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="forumReplyLimit" value="ALL" class="peer hidden" checked>
+                            <div class="text-center py-2 rounded-xl bg-gray-50 border border-gray-200 peer-checked:bg-gray-600 peer-checked:text-white peer-checked:border-gray-600 text-gray-600 text-xs font-bold transition">🌍 全部人</div>
+                        </label>
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="forumReplyLimit" value="MALE" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-blue-50 border border-blue-200 peer-checked:bg-blue-600 peer-checked:text-white peer-checked:border-blue-600 text-blue-600 text-xs font-bold transition">⚾ 僅限男生</div>
+                        </label>
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="forumReplyLimit" value="FEMALE" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-rose-50 border border-rose-200 peer-checked:bg-rose-500 peer-checked:text-white peer-checked:border-rose-500 text-rose-500 text-xs font-bold transition">🎀 僅限女生</div>
+                        </label>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-500 mb-1 ml-1">發文身分</label>
+                    <div class="flex gap-2">
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="forumPostIdentity" value="nickname" class="peer hidden" checked>
+                            <div class="text-center py-2 rounded-xl bg-gray-50 border border-gray-200 peer-checked:bg-emerald-600 peer-checked:text-white peer-checked:border-emerald-600 text-gray-600 text-xs font-bold transition flex items-center justify-center gap-1.5"><span id="forumPostIdentityNick">暱稱</span></div>
+                        </label>
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="forumPostIdentity" value="anon" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-gray-50 border border-gray-200 peer-checked:bg-purple-600 peer-checked:text-white peer-checked:border-purple-600 text-gray-600 text-xs font-bold transition flex items-center justify-center gap-1.5"><span id="forumPostIdentityAnon">匿名.?</span></div>
+                        </label>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-500 mb-1 ml-1">文章標題 (上限 15 字)</label>
+                    <input type="text" id="forumPostTitle" maxlength="15" placeholder="請輸入吸睛的標題..." class="w-full px-4 py-3 rounded-2xl border border-pink-200 bg-white focus:bg-pink-50/50 outline-none focus:border-pink-400 focus:ring-4 focus:ring-pink-100 transition text-sm font-medium">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-500 mb-1 ml-1">內文 (上限 300 字)</label>
+                    <textarea id="forumPostContent" rows="6" maxlength="300" placeholder="分享你的想法，文字越真誠越能吸引人喔..." class="w-full px-4 py-3 rounded-2xl border border-pink-200 bg-white focus:bg-pink-50/50 outline-none focus:border-pink-400 focus:ring-4 focus:ring-pink-100 transition text-sm leading-relaxed resize-none"></textarea>
+                </div>
+                
+            </div>
+            <button onclick="submitForumPost()" class="w-full mt-4 py-3.5 rounded-2xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-sm font-bold shadow-md hover:opacity-95 transition-opacity active:scale-[0.98]">
+                發佈文章
+            </button>
+        </div>
+    </div>
+
+    <!-- 觀看內文與推文 Modal -->
+    <div id="forumViewModal" onclick="if(event.target === this) closeForumViewModal()" class="hidden fixed inset-0 bg-black/45 backdrop-blur-sm z-[55] flex flex-col justify-end sm:items-center sm:justify-center cursor-pointer">
+        <div class="bg-white w-full sm:max-w-2xl sm:rounded-3xl h-[85vh] sm:h-[80vh] flex flex-col shadow-2xl overflow-hidden transform transition-transform translate-y-full sm:translate-y-0" id="forumViewPanel" onclick="event.stopPropagation()">
+            
+            <div class="px-4 py-3.5 border-b border-pink-100 bg-white/90 backdrop-blur flex justify-between items-center shrink-0 z-10 sticky top-0">
+                <button onclick="closeForumViewModal()" class="text-[#8f4452] font-bold text-sm flex items-center gap-1.5 hover:text-pink-600 transition"><span class="text-lg leading-none">‹</span> 返回列表</button>
+                
+            </div>
+            
+            <div class="flex-1 overflow-y-auto bg-[#faf7f8] hide-scrollbar" id="forumPostDetailArea">
+                <div class="p-4 sm:p-6 space-y-5 bg-white shadow-sm mb-2" id="forumPostHeader">
+                    <!-- 內文注入區 -->
+                </div>
+                <div class="px-2 pb-4">
+                    <div class="text-xs font-bold text-gray-500 ml-2 mb-2">💬 留言推文區</div>
+                    <div id="forumRepliesList" class="space-y-1.5">
+                        <!-- 推文注入區 -->
+                    </div>
+                </div>
+            </div>
+            
+            <div id="forumReplyFooter" class="p-3 bg-white border-t border-pink-100 shrink-0">
+                <div id="forumReplyInputBar" class="flex gap-1.5 sm:gap-2 items-end max-w-2xl mx-auto">
+                    <textarea id="forumReplyContent" rows="1" maxlength="50" placeholder="留個言吧 (上限50字)..." class="flex-1 min-w-0 h-[42px] min-h-[42px] px-3 py-3 rounded-xl border border-pink-200 bg-white outline-none focus:border-pink-400 transition text-sm resize-none overflow-hidden" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'"></textarea>
+                    <label class="h-[42px] px-2.5 sm:px-3 rounded-xl border border-pink-200 bg-pink-50/70 hover:bg-pink-100/80 text-[#8f4452] text-xs font-bold flex items-center gap-1 cursor-pointer select-none shrink-0 transition has-[:checked]:bg-purple-600 has-[:checked]:border-purple-600 has-[:checked]:text-white" title="勾選後將以「匿名.男 / 匿名.女」顯示留言名稱">
+                        <input type="checkbox" id="forumReplyAnonCheckbox" class="w-3.5 h-3.5 accent-purple-600 rounded cursor-pointer">
+                        <span class="whitespace-nowrap">是否匿名</span>
+                    </label>
+                    <button onclick="submitForumReply()" class="h-[42px] px-3.5 sm:px-4 rounded-xl bg-[#8f4452] text-white text-xs font-bold shadow hover:bg-[#753541] shrink-0 transition whitespace-nowrap">
+                        送出
+                    </button>
+                </div>
+                <div id="forumReplyGuestBar" class="hidden flex items-center justify-between gap-2 max-w-2xl mx-auto py-0.5">
+                    <span class="text-xs text-gray-500">🔒 訪客僅供瀏覽文章，建立個人資料並保存後即可留言與按愛心</span>
+                    <button type="button" onclick="closeForumViewModal(); switchTab('profile');" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow-2xs shrink-0 hover:opacity-95 transition">
+                        📝 前往建檔
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 前後台共用核心層 -->
+    <script src="shared/schedule.js?v=20261126automatch1959v23"></script>
+    <script src="shared/schema.js?v=20261120opt"></script>
+    <script src="shared/auth.js?v=20261123nodup"></script>
+    <script src="shared/cloud-store.js?v=20261125chat400fixv20"></script>
+    <!-- 前台功能模組 -->
+    <script src="frontend/forum.js?v=20261126forumstarv22"></script>
+  <script src="frontend/state.js?v=20261125extracredits15"></script>
+    <script src="frontend/profile.js?v=20261125idprotectv19"></script>
+    <script src="frontend/activities.js?v=20261126automatch1959v23"></script>
+    <script src="frontend/friends-chat.js?v=20261123coldfatemail"></script>
+    <script src="frontend/wishes.js?v=20261126wishmaledays47v21"></script>
+</body>
+</html>
