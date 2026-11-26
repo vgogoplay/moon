@@ -1,0 +1,37 @@
+name: Yuelao Auto Match 20:00 (Taipei)
+
+on:
+  schedule:
+    # UTC 12:00 = 台灣時間 (UTC+8) 20:00，每週二(2)、週四(4)、週六(6)自動執行
+    - cron: '0 12 * * 2,4,6'
+  workflow_dispatch:
+    inputs:
+      force_session:
+        description: '（選填）手動指定測試場次名稱，例如 第3屆11/26(四)，留空則自動抓當日場次'
+        required: false
+        default: ''
+      dry_run:
+        description: '是否為試算模式（1 = 僅預覽不寫入資料庫，0 = 正式執行寫入）'
+        required: false
+        default: '0'
+
+jobs:
+  auto-match:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run 20:00 Auto Match
+        env:
+          FIREBASE_ADMIN_EMAIL: ${{ secrets.FIREBASE_ADMIN_EMAIL }}
+          FIREBASE_ADMIN_PASSWORD: ${{ secrets.FIREBASE_ADMIN_PASSWORD }}
+          FORCE_RUN_SESSION: ${{ github.event.inputs.force_session }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: node scripts/auto-match-2000.js
