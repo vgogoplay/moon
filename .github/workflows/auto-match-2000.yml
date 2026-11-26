@@ -2,8 +2,8 @@ name: Yuelao Auto Match 20:00 (Taipei)
 
 on:
   schedule:
-    # UTC 12:00 = 台灣時間 (UTC+8) 20:00，每週二(2)、週四(4)、週六(6)自動執行
-    - cron: '0 12 * * 2,4,6'
+    # UTC 12:00 = 台灣時間 (UTC+8) 20:02，每週二(2)、週四(4)、週六(6)自動執行
+    - cron: '2 12 * * 2,4,6'
   workflow_dispatch:
     inputs:
       force_session:
