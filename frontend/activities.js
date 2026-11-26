@@ -2102,7 +2102,7 @@ function renderDailyFortuneCard(forceRender = false) {
 
     const matchCount = drawn.matchCount;
     const hasProfile = Boolean(typeof appState !== 'undefined' && appState && appState.playerId);
-    const ctaText = hasProfile ? '🌸去報名' : '📝 免費建檔領取紅線';
+    const ctaText = hasProfile ? '🌸 去報名' : '📝 免費建檔領取紅線';
 
     bodyEl.innerHTML = `
         <div class="p-4 rounded-2xl bg-gradient-to-br from-rose-50/90 via-white to-pink-50/90 border border-pink-200/90 space-y-3 shadow-2xs">
@@ -2128,11 +2128,11 @@ function renderDailyFortuneCard(forceRender = false) {
                 </div>
             </div>
 
-            <div class="flex flex-wrap items-center gap-2 pt-1">
-                <button type="button" onclick="copyDailyFortuneShareText()" class="px-3 py-2 rounded-xl bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 text-xs font-bold transition shrink-0">
+            <div class="grid grid-cols-2 gap-2 pt-1">
+                <button type="button" onclick="copyDailyFortuneShareText()" class="w-full py-2 px-3 rounded-xl bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 text-xs font-bold transition whitespace-nowrap flex items-center justify-center">
                     📋 分享籤詩
                 </button>
-                <button type="button" onclick="handleFortuneCtaClick()" class="flex-1 btn-sakura py-2 px-3 rounded-xl text-xs font-bold shadow-sm">
+                <button type="button" onclick="handleFortuneCtaClick()" class="w-full btn-sakura py-2 px-3 rounded-xl text-xs font-bold shadow-sm whitespace-nowrap flex items-center justify-center">
                     ${ctaText}
                 </button>
             </div>
@@ -2447,12 +2447,12 @@ function renderDailyLovePollCard(forceRender = false) {
             </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2 pt-1">
-            <button type="button" onclick="if(typeof switchTab==='function') switchTab('forum');" class="flex-1 py-2 px-3 rounded-xl bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 text-xs font-bold transition">
-                🔥 去討論區看大家怎麼聊
+        <div class="grid grid-cols-2 gap-2 pt-1">
+            <button type="button" onclick="if(typeof switchTab==='function') switchTab('forum');" class="w-full py-2 px-3 rounded-xl bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 text-xs font-bold transition whitespace-nowrap flex items-center justify-center">
+                🔥 看大家怎麼聊
             </button>
-            <button type="button" onclick="handleFortuneCtaClick()" class="flex-1 btn-sakura py-2 px-3 rounded-xl text-xs font-bold shadow-sm">
-                🌸去報名
+            <button type="button" onclick="handleFortuneCtaClick()" class="w-full btn-sakura py-2 px-3 rounded-xl text-xs font-bold shadow-sm whitespace-nowrap flex items-center justify-center">
+                🌸 去報名
             </button>
         </div>
     `;
