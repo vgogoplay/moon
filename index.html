@@ -445,6 +445,7 @@
                 <button onclick="filterForum('感情')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">🌸 感情</button>
                 <button onclick="filterForum('心情')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">💭 心情</button>
                 <button onclick="filterForum('女孩')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">🎀 女孩</button>
+                <button onclick="filterForum('追星')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">⭐ 追星</button>
                 <button onclick="filterForum('男孩')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">⚾ 男孩</button>
                 <button onclick="filterForum('討論')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">💬 討論</button>
                 <button onclick="filterForum('閒聊')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">☕ 閒聊</button>
@@ -929,6 +930,10 @@
                             <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">🎀 女孩</div>
                         </label>
                         <label class="cursor-pointer flex-1 min-w-[70px]">
+                            <input type="radio" name="forumPostTag" value="追星" class="peer hidden">
+                            <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">⭐ 追星</div>
+                        </label>
+                        <label class="cursor-pointer flex-1 min-w-[70px]">
                             <input type="radio" name="forumPostTag" value="男孩" class="peer hidden">
                             <div class="text-center py-2 rounded-xl bg-pink-50 border border-pink-100 peer-checked:bg-[#8f4452] peer-checked:text-white peer-checked:border-[#8f4452] text-[#8f4452] text-xs font-bold transition">⚾ 男孩</div>
                         </label>
@@ -1042,11 +1047,11 @@
     <script src="shared/auth.js?v=20261123nodup"></script>
     <script src="shared/cloud-store.js?v=20261125chat400fixv20"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/forum.js?v=20261121guest"></script>
+    <script src="frontend/forum.js?v=20261126forumstarv22"></script>
   <script src="frontend/state.js?v=20261125extracredits15"></script>
     <script src="frontend/profile.js?v=20261125idprotectv19"></script>
     <script src="frontend/activities.js?v=20261125mbtiioffsetv18"></script>
     <script src="frontend/friends-chat.js?v=20261123coldfatemail"></script>
-    <script src="frontend/wishes.js?v=20261125wishlimit5v17"></script>
+    <script src="frontend/wishes.js?v=20261126wishmaledays47v21"></script>
 </body>
 </html>

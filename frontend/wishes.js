@@ -17,6 +17,10 @@ const WISH_PAST_PER_PAGE = 5;
 const WISH_PAST_MAX_RECORDS = 5;
 const WISH_MIN_OPEN_DAYS = 3;
 const WISH_MAX_OPEN_DAYS = 7;
+
+function getMinWishOpenDaysForGender(gender) {
+    return String(gender || '').trim() === '男' ? 4 : WISH_MIN_OPEN_DAYS;
+}
 const WISH_MAX_EXTRA_QUESTIONS = 4;
 let wishDraftQuestions = [
     { question: '', optionA: '', optionB: '' }
@@ -390,7 +394,8 @@ function onWishDraftTitleInput(val) {
 }
 
 function onWishDraftDaysChange(val) {
-    const n = Math.max(WISH_MIN_OPEN_DAYS, Math.min(WISH_MAX_OPEN_DAYS, parseInt(val, 10) || WISH_MIN_OPEN_DAYS));
+    const minDays = getMinWishOpenDaysForGender(resolveWishWallUserGender());
+    const n = Math.max(minDays, Math.min(WISH_MAX_OPEN_DAYS, parseInt(val, 10) || minDays));
     wishDraftOpenDays = n;
     const previewEl = document.getElementById('wishDraftExpiryPreview');
     if (previewEl) {
@@ -514,7 +519,8 @@ async function submitCreateWishPost(e) {
     }
 
     const titleText = String(wishDraftTitle || '').trim() || cleanQuestions[0].question;
-    const openDays = Math.max(WISH_MIN_OPEN_DAYS, Math.min(WISH_MAX_OPEN_DAYS, parseInt(wishDraftOpenDays, 10) || WISH_MIN_OPEN_DAYS));
+    const minOpenDaysForUser = getMinWishOpenDaysForGender(myGender);
+    const openDays = Math.max(minOpenDaysForUser, Math.min(WISH_MAX_OPEN_DAYS, parseInt(wishDraftOpenDays, 10) || minOpenDaysForUser));
 
     // 禁止關鍵字檢查
     if (typeof Store !== 'undefined' && typeof Store.checkProfileBanned === 'function') {
@@ -572,7 +578,7 @@ async function submitCreateWishPost(e) {
 
     // 重置草稿表單並收合建立區
     wishDraftTitle = '';
-    wishDraftOpenDays = 3;
+    wishDraftOpenDays = getMinWishOpenDaysForGender(myGender);
     wishDraftQuestions = [{ question: '', optionA: '', optionB: '' }];
     isWishCreatorFormOpen = false;
 
@@ -941,13 +947,23 @@ async function selectWishResponderAndMatch(wishId, anonNumber) {
         ChatStore.ensureThread(myPid, partnerPid, initialThread);
     }
 
-    // 標記祈願已完成配對結算
+    // 標記祈願已完成配對結算，且「已結束並已選擇匿名x號配對」僅保留近 5 則，超過自動刪除最舊紀錄
     targetWish.settled = true;
     targetWish.settledWithoutMatch = false;
     targetWish.matchedAnonNumber = targetAnonNum;
     targetWish.matchedResponderId = partnerPid;
     targetWish.settledAtTs = nowTs;
-    localStorage.setItem(WISH_WALL_KEY, JSON.stringify(wishes));
+
+    const matchedEndedSorted = wishes
+        .filter(w => w && isWishWallEnded(w, nowTs) && Boolean(w.settled) && Boolean(w.matchedAnonNumber))
+        .sort((a, b) => Number(b.settledAtTs || b.closedAtTs || b.expiresAtTs || b.createdAtTs || 0)
+            - Number(a.settledAtTs || a.closedAtTs || a.expiresAtTs || a.createdAtTs || 0));
+    const overflowMatchedIds = new Set(matchedEndedSorted.slice(5).map(w => String(w.id || '').trim()).filter(Boolean));
+    const prunedWishes = overflowMatchedIds.size > 0
+        ? wishes.filter(w => !w || !overflowMatchedIds.has(String(w.id || '').trim()))
+        : wishes;
+
+    localStorage.setItem(WISH_WALL_KEY, JSON.stringify(prunedWishes));
 
     if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
         await CloudSync.patchNode(`${WISH_WALL_KEY}/${wid}`, {
@@ -957,6 +973,12 @@ async function selectWishResponderAndMatch(wishId, anonNumber) {
             matchedResponderId: partnerPid,
             settledAtTs: nowTs
         });
+        for (const delWid of overflowMatchedIds) {
+            if (CloudSync.tree && CloudSync.tree[WISH_WALL_KEY] && typeof CloudSync.tree[WISH_WALL_KEY] === 'object') {
+                delete CloudSync.tree[WISH_WALL_KEY][delWid];
+            }
+            await CloudSync.deleteNode(`${WISH_WALL_KEY}/${delWid}`);
+        }
     }
 
     syncFromSharedStorage();
@@ -1306,6 +1328,10 @@ function renderWishWallTab(forceRender = false) {
         } else if ((myGender === '男' && maleQuota.isFull) || !isWishCreatorFormOpen) {
             creatorBox.innerHTML = pendingSelectionHtml ? `<div class="space-y-4">${pendingSelectionHtml}</div>` : '';
         } else {
+            const minDaysForForm = getMinWishOpenDaysForGender(myGender);
+            if (wishDraftOpenDays < minDaysForForm) {
+                wishDraftOpenDays = minDaysForForm;
+            }
             const expPreviewTs = calcWishExpiresAtTs(nowTs, wishDraftOpenDays);
             const resetTimeStr = formatWishShortDateTime(maleQuota.resetAtTs);
             const genderRuleBadgeHtml = myGender === '男'
@@ -1335,7 +1361,11 @@ function renderWishWallTab(forceRender = false) {
 
             const addedExtraCount = Math.max(0, wishDraftQuestions.length - 1);
             const canAddMoreQuestions = addedExtraCount < WISH_MAX_EXTRA_QUESTIONS;
-            const safeSelectedDays = Math.max(WISH_MIN_OPEN_DAYS, Math.min(WISH_MAX_OPEN_DAYS, Number(wishDraftOpenDays) || WISH_MIN_OPEN_DAYS));
+            const safeSelectedDays = Math.max(minDaysForForm, Math.min(WISH_MAX_OPEN_DAYS, Number(wishDraftOpenDays) || minDaysForForm));
+            const dayOptionsList = [];
+            for (let d = minDaysForForm; d <= WISH_MAX_OPEN_DAYS; d++) {
+                dayOptionsList.push(`<option value="${d}" ${safeSelectedDays === d ? 'selected' : ''}>${d} 天</option>`);
+            }
 
             creatorBox.innerHTML = `
                 <div class="space-y-4">
@@ -1365,14 +1395,10 @@ function renderWishWallTab(forceRender = false) {
                                         placeholder="例如：想找一個三觀合拍、週末能一起探店的對象～" class="input-jp !py-2 !text-xs">
                                 </div>
                                 <div class="md:col-span-4 space-y-1">
-                                    <label class="block text-xs font-bold text-[#8f4452]">開放天數（3～7 天・每日 20:00 計算）</label>
+                                    <label class="block text-xs font-bold text-[#8f4452]">開放天數（${minDaysForForm}～7 天・每日 20:00 計算）</label>
                                     <div class="flex items-center gap-2">
                                         <select onchange="onWishDraftDaysChange(this.value)" class="input-jp !py-2 !text-xs font-bold text-center text-[#8f4452]" required>
-                                            <option value="3" ${safeSelectedDays === 3 ? 'selected' : ''}>3 天</option>
-                                            <option value="4" ${safeSelectedDays === 4 ? 'selected' : ''}>4 天</option>
-                                            <option value="5" ${safeSelectedDays === 5 ? 'selected' : ''}>5 天</option>
-                                            <option value="6" ${safeSelectedDays === 6 ? 'selected' : ''}>6 天</option>
-                                            <option value="7" ${safeSelectedDays === 7 ? 'selected' : ''}>7 天</option>
+                                            ${dayOptionsList.join('')}
                                         </select>
                                     </div>
                                     <p id="wishDraftExpiryPreview" class="text-[10px] text-[#c96a7b] font-semibold">

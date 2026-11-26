@@ -20,6 +20,7 @@ const ADMIN_FORUM_TAG_META = {
     '感情': { icon: '🌸', badgeClass: 'bg-pink-50 text-pink-600 border-pink-200' },
     '心情': { icon: '💭', badgeClass: 'bg-purple-50 text-purple-600 border-purple-200' },
     '女孩': { icon: '🎀', badgeClass: 'bg-rose-50 text-rose-500 border-rose-200' },
+    '追星': { icon: '⭐', badgeClass: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
     '男孩': { icon: '⚾', badgeClass: 'bg-blue-50 text-blue-600 border-blue-200' },
     '討論': { icon: '💬', badgeClass: 'bg-amber-50 text-amber-600 border-amber-200' },
     '閒聊': { icon: '☕', badgeClass: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
