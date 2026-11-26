@@ -68,30 +68,6 @@
 
         <!-- ==================== 分頁 1：緣分首頁與報名 ==================== -->
         <section id="tab-home" class="tab-view active space-y-6">
-            <!-- 隨機戀愛點滴時刻卡片 -->
-            <div id="momentCard" class="glass-card rounded-3xl p-6 md:p-8 relative overflow-hidden transition-all duration-500">
-                <div class="flex items-center justify-between mb-4">
-                    <span id="momentTag" class="text-xs px-3 py-1 rounded-full bg-rose-100/80 text-[#9e4756] font-medium tracking-wider">
-                        ✨ 心動時刻
-                    </span>
-                    <button type="button" onclick="renderRandomMoment()" class="text-xs text-[#b6737d] hover:text-[#8f4452] flex items-center gap-1 transition">
-                        <span>換一段戀愛語錄</span> ↻
-                    </button>
-                </div>
-                <div class="flex flex-col md:flex-row items-center gap-6">
-                    <div id="momentArt" class="w-24 h-24 md:w-28 md:h-28 rounded-2xl bg-gradient-to-br from-pink-50 to-rose-100 border border-pink-200/80 flex items-center justify-center text-5xl shrink-0 shadow-inner">
-                        💌
-                    </div>
-                    <div class="text-center md:text-left space-y-2 flex-1">
-                        <h2 id="momentTitle" class="text-lg md:text-xl font-bold font-serif-jp text-[#7a3542]">
-                            在幾千人的擦肩裡，剛好停在了你面前
-                        </h2>
-                        <p id="momentText" class="text-sm text-gray-600 leading-relaxed font-serif-jp">
-                            有些相遇不需要太長的開場白，只要在週二、週四或週六的晚上，兩條紅線輕輕交會就夠了。
-                        </p>
-                    </div>
-                </div>
-            </div>
 
             <!-- 即時緣分動態牆（位於心動時刻下方，以隨機順序跑馬燈呈現，不顯示時間） -->
             <div id="homeFateWallCard" class="glass-card rounded-2xl px-3.5 py-2.5 md:px-4 md:py-3 border border-pink-200/90 flex items-center gap-2.5 md:gap-3 overflow-hidden shadow-sm">
@@ -111,6 +87,37 @@
                                 🌸 目前尚無最新動態，管理月老隨時會在此分享最新喜訊！
                             </span>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 🌸 每日緣分小互動（雙欄設計：每日一抽月老戀愛籤詩 + 每日戀愛價值觀快問快答共鳴牆） -->
+            <div id="homeDailyInteractiveGrid" class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                <!-- 左側：每日一抽月老戀愛籤詩卡 -->
+                <div class="lg:col-span-6 glass-card rounded-3xl p-5 md:p-6 border border-pink-200/90 flex flex-col justify-between space-y-4 relative overflow-hidden">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-xs px-3 py-1 rounded-full bg-rose-100/90 text-[#8f4452] font-bold tracking-wider">
+                            🎋 每日月老戀愛籤
+                        </span>
+                        <span id="dailyFortuneDateBadge" class="text-[11px] text-gray-400 font-medium">今日限定 1 籤</span>
+                    </div>
+
+                    <div id="dailyFortuneCardBody" class="flex-1 flex flex-col justify-center">
+                        <!-- 由 frontend/activities.js 動態渲染抽籤前 / 抽籤後精緻籤詩卡 -->
+                    </div>
+                </div>
+
+                <!-- 右側：匿名戀愛價值觀快問快答即時共鳴牆 -->
+                <div class="lg:col-span-6 glass-card rounded-3xl p-5 md:p-6 border border-pink-200/90 flex flex-col justify-between space-y-4 relative overflow-hidden">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-xs px-3 py-1 rounded-full bg-amber-100/90 text-[#8f4452] font-bold tracking-wider">
+                            💘 每日戀愛二選一・共鳴牆
+                        </span>
+                        <span id="dailyPollBadge" class="text-[11px] text-[#c96a7b] font-bold">免建檔即時投票</span>
+                    </div>
+
+                    <div id="dailyLovePollBody" class="flex-1 flex flex-col justify-between space-y-3.5">
+                        <!-- 由 frontend/activities.js 動態渲染今日投票題目與男女比例 -->
                     </div>
                 </div>
             </div>
@@ -1047,10 +1054,10 @@
     <script src="shared/auth.js?v=20261123nodup"></script>
     <script src="shared/cloud-store.js?v=20261125chat400fixv20"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/forum.js?v=20261126forumhot30dv24"></script>
-  <script src="frontend/state.js?v=20261125extracredits15"></script>
+    <script src="frontend/forum.js?v=20261126forumstarv22"></script>
+  <script src="frontend/state.js?v=20261126dailyfortunetweakv26"></script>
     <script src="frontend/profile.js?v=20261125idprotectv19"></script>
-    <script src="frontend/activities.js?v=20261126automatch1959v23"></script>
+    <script src="frontend/activities.js?v=20261126pollthresholdtextv35"></script>
     <script src="frontend/friends-chat.js?v=20261123coldfatemail"></script>
     <script src="frontend/wishes.js?v=20261126wishmaledays47v21"></script>
 </body>

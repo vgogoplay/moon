@@ -879,11 +879,16 @@ function initSakuraPetals() {
 }
 
 function renderRandomMoment() {
+    const tagEl = document.getElementById('momentTag');
+    if (!tagEl) return;
     const item = ROMANCE_MOMENTS[Math.floor(Math.random() * ROMANCE_MOMENTS.length)];
-    document.getElementById('momentTag').textContent = item.category;
-    document.getElementById('momentArt').textContent = item.art;
-    document.getElementById('momentTitle').textContent = item.title;
-    document.getElementById('momentText').textContent = item.text;
+    tagEl.textContent = item.category;
+    const artEl = document.getElementById('momentArt');
+    const titleEl = document.getElementById('momentTitle');
+    const textEl = document.getElementById('momentText');
+    if (artEl) artEl.textContent = item.art;
+    if (titleEl) titleEl.textContent = item.title;
+    if (textEl) textEl.textContent = item.text;
 }
 
 function updateSakuraAnimationState(activeTabName = null) {

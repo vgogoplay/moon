@@ -1867,5 +1867,644 @@ function refreshAllUI() {
         renderHomeFateWall();
     }
     renderHomeStatsCharts();
+    if (typeof renderDailyFortuneCard === 'function') renderDailyFortuneCard();
+    if (typeof renderDailyLovePollCard === 'function') renderDailyLovePollCard();
     renderFriendsSection();
 }
+
+
+// ==================== 🌸 前台首頁：每日一抽月老戀愛籤詩 ＋ 每日戀愛價值觀二選一共鳴牆（v27・Firebase 原子遞增真實計票・滿10票純真實比例） ====================
+const DAILY_FORTUNE_STORAGE_KEY = 'yuelao_daily_fortune_draw_v1';
+const DAILY_LOVE_POLL_STORAGE_KEY = 'yuelao_daily_love_poll_v1';
+const DAILY_POLL_CLOUD_BASE_PATH = 'yuelao_fate_wall/_daily_poll_stats';
+const DAILY_POLL_REAL_THRESHOLD = 10; // 累積滿 10 票後顯示 100% 純真實站內投票比例
+
+const YUELAO_DAILY_FORTUNE_LEVELS = [
+    '🔮大吉🔮',
+    '🔮吉🔮', '🔮吉🔮', '🔮吉🔮', '🔮吉🔮', '🔮吉🔮', '🔮吉🔮', '🔮吉🔮',
+    '🔮中吉🔮', '🔮中吉🔮',
+    '🔮小吉🔮', '🔮小吉🔮', '🔮小吉🔮', '🔮小吉🔮',
+    '🔮末吉🔮', '🔮末吉🔮'
+];
+
+const YUELAO_DAILY_FORTUNE_POEMS = [
+    { keyword: '雙向奔赴', poem: '春風拂柳正當時，莫問前程幾許遲；今日回眸微笑處，恰逢心動那個人。' },
+    { keyword: '不期而遇', poem: '千山萬水一線牽，靜待花開月正圓；無須刻意尋覓去，溫柔自會到身邊。' },
+    { keyword: '一拍即合', poem: '靈犀一點通心意，笑語盈盈夜未央；莫道相逢猶太晚，良緣從來不打烊。' },
+    { keyword: '溫柔治癒', poem: '月色如水照歸人，一盞清茶話夜深；懂你沉默與歡喜，便是此生有緣人。' },
+    { keyword: '靈魂共鳴', poem: '星河璀璨落凡塵，萬千人海唯見君；心有靈犀無需猜，紅線早已繫三分。' },
+    { keyword: '真誠相待', poem: '和風吹散舊時愁，新綠枝頭喜事留；但將真心付明月，明月自然照溝渠。' },
+    { keyword: '心想事成', poem: '喜鵲枝頭報佳音，春風得意遇知音；莫負良辰與美景，勇敢邁出第一步。' },
+    { keyword: '自然心動', poem: '風鈴輕響喚良緣，心靜自然福氣連；自在做回真自我，自有欣賞在眼前。' },
+    { keyword: '細水長流', poem: '細雨潤物無聲處，日久見心最真誠；一句晚安勝千語，便是人間好時節。' },
+    { keyword: '輕鬆自在', poem: '人間煙火最撫心，並肩同行笑意深；不求轟烈驚天地，只願三餐共黃昏。' },
+    { keyword: '安心陪伴', poem: '慢火細熬茶更香，真心不急在一朝；循序漸進相知暖，方得長久伴身旁。' },
+    { keyword: '貼心細節', poem: '細微之處見真情，風雨無阻伴君行；平淡日常藏浪漫，便是人間最美風景。' },
+    { keyword: '默契升溫', poem: '燈火闌珊映笑顏，棋逢對手話投緣；卸下防備輕聲語，微光之中見真情。' },
+    { keyword: '微甜日常', poem: '柴米油鹽皆詩意，一粥一飯總關情；平凡日子添暖色，便是人間小確幸。' },
+    { keyword: '靜待花開', poem: '雲開霧散終有時，莫為一時起波瀾；先把自己照顧好，良人自會在轉彎。' },
+    { keyword: '循序漸進', poem: '好事多磨莫心急，春風尚在路途中；多一份耐心與微笑，緣分自會慢慢靠近。' }
+];
+
+const YUELAO_DAILY_FORTUNE_MBTIS = [
+    'ENFP', 'INFJ', 'ENTP', 'INFP',
+    'INTJ', 'ENFJ', 'ESFJ', 'ISFP',
+    'ISFJ', 'ESFP', 'ISTJ', 'ISTP',
+    'ENTJ', 'ESTJ', 'INTP', 'ESTP'
+];
+
+const YUELAO_DAILY_FORTUNE_SPOTS = [
+    '星巴克門市',
+    '手搖飲料店排隊時',
+    '麥當勞點餐區',
+    '7-11 或全家便利商店',
+    '全聯或家樂福生鮮區',
+    '夜市小吃攤前',
+    '捷運車廂或月台',
+    '路易莎咖啡廳',
+    '百貨美食街座位區',
+    '社區公園散步步道',
+    '誠品書店或文具店',
+    '早午餐店窗邊座位',
+    '電影院售票處旁',
+    '健身房或運動公園',
+    '公車站牌候車亭',
+    '拉麵店或深夜食堂'
+];
+
+const YUELAO_DAILY_LOVE_POLLS = [
+    { id: 'p01', q: '曖昧期訊息「隔 3 小時以上才回」，你能接受嗎？', optA: '能接受，大家都有各自的生活與工作', optB: '很難接受，喜歡一個人再忙也會抽空回', baseM: [58, 42], baseF: [36, 64] },
+    { id: 'p02', q: '第一次跟網友見面約會，餐費怎麼分最舒服？', optA: '各自付清（AA 制），互不相欠最自在', optB: '一人請吃飯、另一人請喝飲料或甜點', baseM: [44, 56], baseF: [38, 62] },
+    { id: 'p03', q: '另一半手機裡「還留著前任的合照」，你會在意嗎？', optA: '很在意，希望交往後能整理刪除乾淨', optB: '不太在意，那只是過去生活的一部分', baseM: [52, 48], baseF: [71, 29] },
+    { id: 'p04', q: '吵架冷戰時，你比較傾向哪一種處理方式？', optA: '當天睡前一定要把話講開、不留隔夜仇', optB: '先各自冷靜半天，等情緒平復再好好溝通', baseM: [49, 51], baseF: [66, 34] },
+    { id: 'p05', q: '理想中的週末約會，你更喜歡哪一種？', optA: '出門踩點美食、看展或到外縣市小旅行', optB: '宅在家一起煮飯、看電影耍廢一整天', baseM: [47, 53], baseF: [55, 45] },
+    { id: 'p06', q: '你相信「日久生情」還是「一見鍾情」？', optA: '日久生情，相處後的默契與細節才可靠', optB: '一見鍾情，第一眼的眼緣與感覺最重要', baseM: [61, 39], baseF: [68, 32] },
+    { id: 'p07', q: '伴侶有關係很好的「異性純友誼」，你的底線是？', optA: '只要透明報備、不單獨過夜都能尊重', optB: '有伴侶後應該自動保持距離、避免單獨約', baseM: [45, 55], baseF: [32, 68] },
+    { id: 'p08', q: '感情裡「儀式感（節日驚喜、手寫卡片）」重要嗎？', optA: '很重要，生活需要特別的日子留下回憶', optB: '還好，平常日常的貼心陪伴比節日更實際', baseM: [35, 65], baseF: [63, 37] },
+    { id: 'p09', q: '遇到非常有好感的對象，你會選擇主動出擊嗎？', optA: '會！主動丟球約見面，不想留下遺憾', optB: '偏被動，會先默默觀察並給予暗示等對方約', baseM: [64, 36], baseF: [28, 72] },
+    { id: 'p10', q: '選伴侶時，「三觀契合」與「外貌心動」哪個優先？', optA: '三觀與溝通頻率契合，相處不累最重要', optB: '外貌與氣質要先過關，才有動力深入了解', baseM: [54, 46], baseF: [69, 31] },
+    { id: 'p11', q: '睡前習慣跟另一半「講電話掛睡」還是「文字道晚安」？', optA: '講電話聊聊天，聽見聲音特別有安全感', optB: '傳訊息互道晚安就好，保留一點睡前空間', baseM: [39, 61], baseF: [48, 52] },
+    { id: 'p12', q: '交往後公開放閃（發限動合照）是必須的嗎？', optA: '偶爾發一下很好，代表大方承認彼此存在', optB: '低調派，感情是兩個人的事不需要刻意曬', baseM: [41, 59], baseF: [57, 43] },
+    { id: 'p13', q: '你能夠接受「遠距離戀愛（不同縣市）」嗎？', optA: '可以，只要有共同目標與信任就能克服距離', optB: '比較難，希望難過或想見面時能很快見到對方', baseM: [53, 47], baseF: [44, 56] },
+    { id: 'p14', q: '交往後會想跟另一半「互看手機密碼或定位」嗎？', optA: '不需要，彼此保留隱私與信任感更健康', optB: '希望可以知道密碼或定位，會更有安全感', baseM: [62, 38], baseF: [46, 54] },
+    { id: 'p15', q: '如果另一半比你大或小「5 歲以上」，你在意年齡差嗎？', optA: '不在意，心智成熟與聊得來比實際年齡重要', optB: '會在意，希望年齡相近、成長背景比較有共鳴', baseM: [67, 33], baseF: [58, 42] },
+    { id: 'p16', q: '你比較喜歡「互補型（一靜一動）」還是「相似型（興趣相同）」伴侶？', optA: '相似型，喜歡一樣的事物能一起分享超快樂', optB: '互補型，彼此帶對方體驗不同的生活視角', baseM: [56, 44], baseF: [60, 40] },
+    { id: 'p17', q: '曖昧多久沒有確認關係，你就會選擇慢慢下船？', optA: '1～2 個月內沒結果就會果斷止損', optB: '順其自然，只要相處愉快願意多觀察幾個月', baseM: [51, 49], baseF: [59, 41] },
+    { id: 'p18', q: '出門旅行時，你是「事前排滿行程派」還是「睡飽隨興走走派」？', optA: '規劃派，先查好美食與交通才不會浪費時間', optB: '隨興派，走到哪逛到哪、放鬆不趕行程最棒', baseM: [43, 57], baseF: [56, 44] },
+    { id: 'p19', q: '感情裡你最看重哪一種「愛的語言」？', optA: '肯定的言詞與貼心行動（誇獎、記得小細節）', optB: '高品質的陪伴與肢體接觸（專心陪在身邊、牽手抱抱）', baseM: [42, 58], baseF: [53, 47] },
+    { id: 'p20', q: '如果伴侶跟前任「因為養寵物或工作還有聯絡」，你能接受嗎？', optA: '完全無法接受，分手就應該徹底斷乾淨', optB: '只要界線清楚、事先告知且不私下約就能理解', baseM: [48, 52], baseF: [68, 32] },
+    { id: 'p21', q: '你覺得交往後「多久見一次面」最剛剛好？', optA: '每週見 1～2 次，保有各自空間又維持熱度', optB: '只要有空就想天天膩在一起，越常見越好', baseM: [63, 37], baseF: [59, 41] },
+    { id: 'p22', q: '遇到生活或工作壓力大時，你希望另一半怎麼陪你？', optA: '先聽我吐苦水、給予情緒價值與抱抱安慰', optB: '幫我一起分析問題、提供實際解決建議', baseM: [38, 62], baseF: [74, 26] },
+    { id: 'p23', q: '你會介意另一半「非常愛打遊戲或追劇到深夜」嗎？', optA: '不介意，每個人都需要自己的放鬆娛樂時間', optB: '會介意，希望作息同步、多留點時間聊天相處', baseM: [69, 31], baseF: [45, 55] },
+    { id: 'p24', q: '對於「同居試婚（婚前先一起住）」，你的看法是？', optA: '非常贊成，生活習慣合不合住過才知道', optB: '傾向保留各自空間，等確定要結婚再同居', baseM: [72, 28], baseF: [64, 36] },
+    { id: 'p25', q: '在感情中，你是「容易吃醋佔有慾強」還是「佛系給足自由」？', optA: '表面裝沒事其實超容易吃醋，希望對方多哄我', optB: '偏佛系信任派，給彼此足夠的社交自由空間', baseM: [46, 54], baseF: [62, 38] },
+    { id: 'p26', q: '如果伴侶忘記你們的「交往紀念日」，你會怎麼反應？', optA: '會失落不開心，覺得對方不夠重視這段感情', optB: '還好，直接提醒對方一起補吃頓大餐就好', baseM: [31, 69], baseF: [58, 42] },
+    { id: 'p27', q: '你比較容易被「幽默風趣會逗你笑」還是「溫柔穩重很可靠」吸引？', optA: '幽默風趣，相處起來輕鬆開心、每天都笑得出聲', optB: '溫柔穩重，情緒穩定讓人覺得很有依靠感', baseM: [55, 45], baseF: [43, 57] },
+    { id: 'p28', q: '交往穩定後，你會想「把另一半介紹給家人朋友認識」嗎？', optA: '會！想讓對方融入自己的生活圈與重要的人', optB: '等非常穩定再說，初期想先享受兩人世界', baseM: [51, 49], baseF: [47, 53] },
+    { id: 'p29', q: '吃飯口味「一個愛吃辣、一個完全不吃辣」，你覺得影響大嗎？', optA: '影響很大，吃不到一起約會少了很多樂趣', optB: '完全沒差，各自點喜歡的或找鴛鴦鍋就好', baseM: [34, 66], baseF: [39, 61] },
+    { id: 'p30', q: '如果能重來，你會選擇「早點遇到對的人」還是「先成為更好的自己再相遇」？', optA: '成為更好的自己再相遇，才能好好接住這份緣分', optB: '早點遇到對的人，一起經歷成長、陪彼此變好', baseM: [57, 43], baseF: [52, 48] }
+];
+
+let dailyLovePollTestOffset = 0;
+let dailyPollCloudCountsCache = {}; // { [key]: { mA, mB, fA, fB } }
+let dailyPollInFlightKeys = new Set();
+
+function getTaipeiTodayDateStr() {
+    try {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Taipei',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).formatToParts(new Date());
+        const y = parts.find(p => p.type === 'year')?.value || '2026';
+        const m = parts.find(p => p.type === 'month')?.value || '01';
+        const d = parts.find(p => p.type === 'day')?.value || '01';
+        return `${y}-${m}-${d}`;
+    } catch (e) {
+        const dt = new Date(Date.now() + 8 * 3600 * 1000);
+        return dt.toISOString().slice(0, 10);
+    }
+}
+
+function getTodayPollObject() {
+    const dateStr = getTaipeiTodayDateStr();
+    let hash = 0;
+    for (let i = 0; i < dateStr.length; i++) {
+        hash = ((hash << 5) - hash) + dateStr.charCodeAt(i);
+        hash |= 0;
+    }
+    const idx = (Math.abs(hash) + dailyLovePollTestOffset) % YUELAO_DAILY_LOVE_POLLS.length;
+    return { dateStr, poll: YUELAO_DAILY_LOVE_POLLS[idx] };
+}
+
+function rollFortuneRandomCount10To30() {
+    return 10 + Math.floor(Math.random() * 21); // 10 ~ 30 隨機亂數
+}
+
+function buildRandomDailyFortuneCombo(dateStr) {
+    const level = YUELAO_DAILY_FORTUNE_LEVELS[Math.floor(Math.random() * YUELAO_DAILY_FORTUNE_LEVELS.length)];
+    const poemObj = YUELAO_DAILY_FORTUNE_POEMS[Math.floor(Math.random() * YUELAO_DAILY_FORTUNE_POEMS.length)];
+    const mbti = YUELAO_DAILY_FORTUNE_MBTIS[Math.floor(Math.random() * YUELAO_DAILY_FORTUNE_MBTIS.length)];
+    const spot = YUELAO_DAILY_FORTUNE_SPOTS[Math.floor(Math.random() * YUELAO_DAILY_FORTUNE_SPOTS.length)];
+    const matchCount = rollFortuneRandomCount10To30();
+    return {
+        dateStr,
+        level,
+        keyword: poemObj.keyword,
+        poem: poemObj.poem,
+        mbti,
+        spot,
+        matchCount,
+        drawnAt: Date.now()
+    };
+}
+
+function getSavedDailyFortune() {
+    const today = getTaipeiTodayDateStr();
+    try {
+        const raw = localStorage.getItem(DAILY_FORTUNE_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.dateStr === today) {
+            // 相容新格式（獨立隨機組合）與舊格式（index）
+            if (parsed.level && parsed.keyword && parsed.poem && parsed.mbti && parsed.spot) {
+                const randCount = (typeof parsed.matchCount === 'number' && parsed.matchCount >= 10 && parsed.matchCount <= 30)
+                    ? parsed.matchCount
+                    : rollFortuneRandomCount10To30();
+                return {
+                    dateStr: today,
+                    level: parsed.level,
+                    keyword: parsed.keyword,
+                    poem: parsed.poem,
+                    mbti: parsed.mbti,
+                    spot: parsed.spot,
+                    matchCount: randCount
+                };
+            }
+            if (typeof parsed.index === 'number') {
+                const poemObj = YUELAO_DAILY_FORTUNE_POEMS[parsed.index % YUELAO_DAILY_FORTUNE_POEMS.length];
+                const level = YUELAO_DAILY_FORTUNE_LEVELS[parsed.index % YUELAO_DAILY_FORTUNE_LEVELS.length];
+                const mbti = YUELAO_DAILY_FORTUNE_MBTIS[parsed.index % YUELAO_DAILY_FORTUNE_MBTIS.length];
+                const spot = YUELAO_DAILY_FORTUNE_SPOTS[parsed.index % YUELAO_DAILY_FORTUNE_SPOTS.length];
+                const randCount = (typeof parsed.matchCount === 'number' && parsed.matchCount >= 10 && parsed.matchCount <= 30)
+                    ? parsed.matchCount
+                    : rollFortuneRandomCount10To30();
+                return { dateStr: today, level, keyword: poemObj.keyword, poem: poemObj.poem, mbti, spot, matchCount: randCount };
+            }
+        }
+    } catch (e) {}
+    return null;
+}
+
+function drawTodayYuelaoFortune() {
+    const today = getTaipeiTodayDateStr();
+    let drawn = getSavedDailyFortune();
+    if (!drawn) {
+        drawn = buildRandomDailyFortuneCombo(today);
+        try {
+            localStorage.setItem(DAILY_FORTUNE_STORAGE_KEY, JSON.stringify(drawn));
+        } catch (e) {}
+    }
+    renderDailyFortuneCard(true);
+}
+
+function resetDailyFortuneForTest() {
+    try {
+        localStorage.removeItem(DAILY_FORTUNE_STORAGE_KEY);
+    } catch (e) {}
+    drawTodayYuelaoFortune();
+}
+
+function copyDailyFortuneShareText() {
+    const drawn = getSavedDailyFortune();
+    if (!drawn) return;
+    const today = getTaipeiTodayDateStr();
+    const shareText = `🌸 今日月老戀愛籤（${today}）\n【${drawn.level}】關鍵字：#${drawn.keyword}\n「${drawn.poem}」\n✨ 今日契合人格：${drawn.mbti}｜幸運地點：${drawn.spot}\n👉 一起來月老牽線計畫抽今日紅線運勢吧！`;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(shareText).then(() => {
+            if (typeof showMiniNotice === 'function') {
+                showMiniNotice('📋 籤詩已複製', '已複製今日月老籤詩文案，可直接貼到 Threads 分享喔！');
+            }
+        }).catch(() => {});
+    } else if (typeof showMiniNotice === 'function') {
+        showMiniNotice('🌸 今日月老籤詩', shareText);
+    }
+}
+
+function handleFortuneCtaClick() {
+    const hasProfile = Boolean(typeof appState !== 'undefined' && appState && appState.playerId);
+    if (!hasProfile) {
+        if (typeof switchTab === 'function') switchTab('profile');
+        if (typeof showMiniNotice === 'function') {
+            showMiniNotice('📝 填寫個人資料領取紅線', '完成基本資料並按下「保存」後，即可參加週二／四／六 20:00 月老牽線配對！');
+        }
+    } else {
+        if (typeof handleApplyClick === 'function') handleApplyClick();
+    }
+}
+
+function renderDailyFortuneCard(forceRender = false) {
+    const bodyEl = document.getElementById('dailyFortuneCardBody');
+    const dateBadge = document.getElementById('dailyFortuneDateBadge');
+    if (!bodyEl) return;
+
+    const today = getTaipeiTodayDateStr();
+    const isSandbox = (typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv());
+    if (dateBadge) {
+        dateBadge.innerHTML = isSandbox
+            ? `${today.slice(5).replace('-', '/')} 每日一籤 <button type="button" onclick="resetDailyFortuneForTest()" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">🧪 重抽</button>`
+            : `${today.slice(5).replace('-', '/')} 每日一籤`;
+    }
+
+    const drawn = getSavedDailyFortune();
+    const sig = drawn ? `drawn:${today}:${drawn.level}:${drawn.keyword}:${drawn.mbti}:${drawn.spot}:${drawn.matchCount}:${isSandbox}` : `undrawn:${today}:${isSandbox}`;
+    if (!forceRender && bodyEl.dataset.sig === sig) return;
+    bodyEl.dataset.sig = sig;
+
+    if (!drawn) {
+        bodyEl.innerHTML = `
+            <div class="p-4 rounded-2xl bg-gradient-to-br from-pink-50/90 via-white to-rose-50/90 border border-dashed border-pink-300 text-center space-y-3 my-auto">
+                <div class="w-16 h-16 mx-auto rounded-2xl bg-white border border-pink-200 shadow-inner flex items-center justify-center text-3xl">
+                    🏮
+                </div>
+                <div class="space-y-1">
+                    <h3 class="text-base font-bold font-serif-jp text-[#7a3542]">求一支今日的月老戀愛籤</h3>
+                    <p class="text-xs text-gray-500 leading-relaxed">
+                        誠心默念你的名字，看看今天月老為你準備了什麼緣分提示與契合人格！
+                    </p>
+                </div>
+                <div class="pt-1">
+                    <button type="button" onclick="drawTodayYuelaoFortune()" class="btn-sakura px-6 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md tracking-wider">
+                        ✨ 誠心抽今日戀愛籤
+                    </button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    const matchCount = drawn.matchCount;
+    const hasProfile = Boolean(typeof appState !== 'undefined' && appState && appState.playerId);
+    const ctaText = hasProfile ? '🌸 帶著好運去報名配對' : '📝 免費建檔領取紅線';
+
+    bodyEl.innerHTML = `
+        <div class="p-4 rounded-2xl bg-gradient-to-br from-rose-50/90 via-white to-pink-50/90 border border-pink-200/90 space-y-3 shadow-2xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-pink-100 pb-2.5">
+                <span class="text-sm font-extrabold font-serif-jp text-[#8f4452]">${escapeFateWallHtml(drawn.level)}</span>
+                <span class="text-[11px] px-2.5 py-0.5 rounded-full bg-white border border-pink-200 text-[#c96a7b] font-bold">
+                    #${escapeFateWallHtml(drawn.keyword)}
+                </span>
+            </div>
+
+            <p class="text-xs sm:text-sm text-[#5e343c] font-serif-jp leading-relaxed bg-white/80 p-3 rounded-xl border border-pink-100/80">
+                「${escapeFateWallHtml(drawn.poem)}」
+            </p>
+
+            <div class="grid grid-cols-2 gap-2 text-[11px]">
+                <div class="p-2 rounded-xl bg-white/85 border border-pink-100">
+                    <span class="text-gray-400 block">💞 今日契合人格</span>
+                    <strong class="text-[#8f4452] font-bold">${escapeFateWallHtml(drawn.mbti)}（站內 ${matchCount} 人）</strong>
+                </div>
+                <div class="p-2 rounded-xl bg-white/85 border border-pink-100">
+                    <span class="text-gray-400 block">📍 幸運相遇地點</span>
+                    <strong class="text-[#8f4452] font-bold">${escapeFateWallHtml(drawn.spot)}</strong>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 pt-1">
+                <button type="button" onclick="copyDailyFortuneShareText()" class="px-3 py-2 rounded-xl bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 text-xs font-bold transition shrink-0">
+                    📋 分享籤詩
+                </button>
+                <button type="button" onclick="handleFortuneCtaClick()" class="flex-1 btn-sakura py-2 px-3 rounded-xl text-xs font-bold shadow-sm">
+                    ${ctaText}
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function getSavedDailyLovePollVote(dateStr, pollId) {
+    try {
+        const raw = localStorage.getItem(DAILY_LOVE_POLL_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.dateStr === dateStr && parsed.pollId === pollId && (parsed.choice === 'A' || parsed.choice === 'B')) {
+            return parsed;
+        }
+    } catch (e) {}
+    return null;
+}
+
+function makeDailyPollStatKey(dateStr, pollId) {
+    return `${String(dateStr).replace(/[^0-9-]/g, '')}_${String(pollId).replace(/[^a-zA-Z0-9_-]/g, '')}`;
+}
+
+function normalizePollCounts(rawObj) {
+    const obj = (rawObj && typeof rawObj === 'object') ? rawObj : {};
+    return {
+        mA: Math.max(0, Number(obj.mA || 0)),
+        mB: Math.max(0, Number(obj.mB || 0)),
+        fA: Math.max(0, Number(obj.fA || 0)),
+        fB: Math.max(0, Number(obj.fB || 0))
+    };
+}
+
+async function fetchDailyPollCloudCounts(dateStr, pollId, forceRefresh = false) {
+    const statKey = makeDailyPollStatKey(dateStr, pollId);
+    if (!forceRefresh && dailyPollCloudCountsCache[statKey]) {
+        return dailyPollCloudCountsCache[statKey];
+    }
+    if (dailyPollInFlightKeys.has(statKey)) {
+        return dailyPollCloudCountsCache[statKey] || null;
+    }
+    if (typeof CloudSync === 'undefined' || CloudSync.isLocalSandboxMode() || !CloudSync.dbUrl) {
+        return dailyPollCloudCountsCache[statKey] || null;
+    }
+
+    dailyPollInFlightKeys.add(statKey);
+    try {
+        if (!CloudSync.initialized && typeof yuelaoAuth !== 'undefined' && typeof yuelaoAuth.init === 'function') {
+            await yuelaoAuth.init().catch(() => {});
+        }
+        const encodedPath = CloudSync.encodePath(`${DAILY_POLL_CLOUD_BASE_PATH}/${statKey}`);
+        const res = await fetch(`${CloudSync.dbUrl}/${encodedPath}.json${CloudSync.authQuery()}`, {
+            method: 'GET',
+            cache: 'no-store'
+        });
+        if (!res.ok) return dailyPollCloudCountsCache[statKey] || null;
+        const data = await res.json();
+        const normalized = normalizePollCounts(data);
+        dailyPollCloudCountsCache[statKey] = normalized;
+        return normalized;
+    } catch (e) {
+        return dailyPollCloudCountsCache[statKey] || null;
+    } finally {
+        dailyPollInFlightKeys.delete(statKey);
+    }
+}
+
+async function incrementDailyPollCloudVote(dateStr, pollId, gender, choice) {
+    const statKey = makeDailyPollStatKey(dateStr, pollId);
+    const fieldName = (gender === '男' ? 'm' : 'f') + (choice === 'A' ? 'A' : 'B');
+
+    // 先樂觀更新本地記憶體快取，確保使用者點選後 0ms 立即看到票數+1
+    const prevLocal = normalizePollCounts(dailyPollCloudCountsCache[statKey]);
+    prevLocal[fieldName] = prevLocal[fieldName] + 1;
+    dailyPollCloudCountsCache[statKey] = prevLocal;
+
+    if (typeof CloudSync === 'undefined' || CloudSync.isLocalSandboxMode() || !CloudSync.dbUrl) {
+        return prevLocal;
+    }
+
+    try {
+        if (!CloudSync.initialized && typeof yuelaoAuth !== 'undefined' && typeof yuelaoAuth.init === 'function') {
+            await yuelaoAuth.init().catch(() => {});
+        }
+        const encodedPath = CloudSync.encodePath(`${DAILY_POLL_CLOUD_BASE_PATH}/${statKey}`);
+        const patchPayload = {
+            [fieldName]: { '.sv': { increment: 1 } },
+            updatedAt: Date.now()
+        };
+        const res = await fetch(`${CloudSync.dbUrl}/${encodedPath}.json${CloudSync.authQuery()}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patchPayload)
+        });
+        if (res.ok) {
+            // 寫入成功後讀取最新全站票數（僅 ~45 Bytes），確保畫面顯示全站最新總票數
+            const freshCounts = await fetchDailyPollCloudCounts(dateStr, pollId, true);
+            if (freshCounts) {
+                renderDailyLovePollCard(true);
+                return freshCounts;
+            }
+        }
+    } catch (e) {}
+    return prevLocal;
+}
+
+function submitDailyLovePollVote(choice) {
+    if (choice !== 'A' && choice !== 'B') return;
+    const { dateStr, poll } = getTodayPollObject();
+    let voterGender = '';
+    if (typeof appState !== 'undefined' && appState && appState.profile && (appState.profile.gender === '男' || appState.profile.gender === '女')) {
+        voterGender = appState.profile.gender;
+    } else {
+        const sel = document.querySelector('input[name="dailyPollGuestGender"]:checked');
+        voterGender = sel ? sel.value : '女';
+    }
+    try {
+        localStorage.setItem(DAILY_LOVE_POLL_STORAGE_KEY, JSON.stringify({
+            dateStr,
+            pollId: poll.id,
+            choice,
+            gender: voterGender,
+            votedAt: Date.now()
+        }));
+    } catch (e) {}
+
+    // 立即寫入 Firebase 原子遞增並重繪畫面
+    incrementDailyPollCloudVote(dateStr, poll.id, voterGender, choice);
+    renderDailyLovePollCard(true);
+}
+
+function resetDailyLovePollForTest(nextQuestion = false) {
+    try {
+        localStorage.removeItem(DAILY_LOVE_POLL_STORAGE_KEY);
+    } catch (e) {}
+    if (nextQuestion) {
+        dailyLovePollTestOffset = (dailyLovePollTestOffset + 1) % YUELAO_DAILY_LOVE_POLLS.length;
+    }
+    renderDailyLovePollCard(true);
+}
+
+function computePollDisplayPercentages(poll, counts) {
+    const c = normalizePollCounts(counts);
+    const totalVotes = c.mA + c.mB + c.fA + c.fB;
+    const isPureReal = totalVotes >= DAILY_POLL_REAL_THRESHOLD;
+
+    if (isPureReal) {
+        // 累積滿 10 票後，100% 純真實站內投票比例
+        const fTot = c.fA + c.fB;
+        const mTot = c.mA + c.mB;
+        const fA = fTot > 0 ? Math.round((c.fA / fTot) * 100) : 50;
+        const mA = mTot > 0 ? Math.round((c.mA / mTot) * 100) : 50;
+        return {
+            fA,
+            fB: 100 - fA,
+            mA,
+            mB: 100 - mA,
+            totalVotes,
+            isPureReal: true
+        };
+    }
+
+    // 未滿 10 人（< 10 票）：隱藏具體百分比，顯示 A ??% ／ B ??%
+    return {
+        fA: null,
+        fB: null,
+        mA: null,
+        mB: null,
+        totalVotes,
+        isPureReal: false
+    };
+}
+
+function renderDailyLovePollCard(forceRender = false) {
+    const bodyEl = document.getElementById('dailyLovePollBody');
+    const badgeEl = document.getElementById('dailyPollBadge');
+    if (!bodyEl) return;
+
+    const { dateStr, poll } = getTodayPollObject();
+    const savedVote = getSavedDailyLovePollVote(dateStr, poll.id);
+    const hasProfile = Boolean(typeof appState !== 'undefined' && appState && appState.playerId);
+    const profileGender = (hasProfile && appState.profile && (appState.profile.gender === '男' || appState.profile.gender === '女'))
+        ? appState.profile.gender
+        : '';
+    const isSandbox = (typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv());
+    const statKey = makeDailyPollStatKey(dateStr, poll.id);
+    const cachedCounts = dailyPollCloudCountsCache[statKey] || null;
+
+    // 若今天已投過票但記憶體尚未載入雲端總票數，背景讀取一次（僅 ~45 Bytes）
+    if (savedVote && !cachedCounts && !dailyPollInFlightKeys.has(statKey)) {
+        fetchDailyPollCloudCounts(dateStr, poll.id, false).then(fetched => {
+            if (fetched) renderDailyLovePollCard(true);
+        });
+    }
+
+    const countsSig = cachedCounts ? `${cachedCounts.mA},${cachedCounts.mB},${cachedCounts.fA},${cachedCounts.fB}` : 'none';
+    if (badgeEl) {
+        if (isSandbox) {
+            badgeEl.innerHTML = `${savedVote ? '✅ 已投票' : '免建檔投票'} <button type="button" onclick="resetDailyLovePollForTest(false)" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">🧪 重選</button><button type="button" onclick="resetDailyLovePollForTest(true)" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">換題</button>`;
+        } else {
+            badgeEl.textContent = savedVote ? '✅ 今日已表態' : '免建檔即時投票';
+        }
+    }
+
+    const sig = `${dateStr}|${poll.id}|${savedVote ? savedVote.choice + ':' + savedVote.gender : 'none'}|${profileGender}|${isSandbox}|${countsSig}`;
+    if (!forceRender && bodyEl.dataset.sig === sig) return;
+    bodyEl.dataset.sig = sig;
+
+    if (!savedVote) {
+        const genderSelectorHtml = profileGender
+            ? `<div class="text-[11px] text-gray-500">將以你的檔案性別（<strong class="text-[#8f4452]">${profileGender}生</strong>）計入即時比例</div>`
+            : `<div class="flex items-center justify-between gap-2 text-[11px] bg-pink-50/70 px-3 py-1.5 rounded-xl border border-pink-100">
+                   <span class="text-gray-500 font-medium">你的立場身分：</span>
+                   <div class="flex items-center gap-3 font-bold text-[#8f4452]">
+                       <label class="inline-flex items-center gap-1 cursor-pointer">
+                           <input type="radio" name="dailyPollGuestGender" value="女" checked class="accent-[#c96a7b]"> 🎀 女生
+                       </label>
+                       <label class="inline-flex items-center gap-1 cursor-pointer">
+                           <input type="radio" name="dailyPollGuestGender" value="男" class="accent-[#c96a7b]"> ⚾ 男生
+                       </label>
+                   </div>
+               </div>`;
+
+        bodyEl.innerHTML = `
+            <div class="space-y-3">
+                <h3 class="text-sm sm:text-base font-bold font-serif-jp text-[#6e3a43] leading-snug">
+                    Q：${escapeFateWallHtml(poll.q)}
+                </h3>
+                ${genderSelectorHtml}
+                <div class="space-y-2 pt-0.5">
+                    <button type="button" onclick="submitDailyLovePollVote('A')" class="w-full text-left p-3 rounded-2xl bg-white hover:bg-pink-50/80 border border-pink-200 hover:border-[#c96a7b] transition flex items-start gap-2.5 group">
+                        <span class="w-6 h-6 rounded-full bg-pink-100 text-[#8f4452] font-bold text-xs flex items-center justify-center shrink-0 group-hover:bg-[#c96a7b] group-hover:text-white transition">A</span>
+                        <span class="text-xs sm:text-sm text-gray-700 font-medium leading-relaxed">${escapeFateWallHtml(poll.optA)}</span>
+                    </button>
+                    <button type="button" onclick="submitDailyLovePollVote('B')" class="w-full text-left p-3 rounded-2xl bg-white hover:bg-pink-50/80 border border-pink-200 hover:border-[#c96a7b] transition flex items-start gap-2.5 group">
+                        <span class="w-6 h-6 rounded-full bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center shrink-0 group-hover:bg-[#c96a7b] group-hover:text-white transition">B</span>
+                        <span class="text-xs sm:text-sm text-gray-700 font-medium leading-relaxed">${escapeFateWallHtml(poll.optB)}</span>
+                    </button>
+                </div>
+            </div>
+            <p class="text-[11px] text-gray-400 text-right">點選選項後，立即揭曉全站男／女真實想法比例 ✨</p>
+        `;
+        return;
+    }
+
+    const stats = computePollDisplayPercentages(poll, cachedCounts);
+    const displayVoteCount = Math.max(1, stats.totalVotes);
+    const genderTagText = `${escapeFateWallHtml(savedVote.gender)}生,已選擇`;
+    const isChosenA = savedVote.choice === 'A';
+    const isChosenB = savedVote.choice === 'B';
+
+    const femalePctText = stats.isPureReal ? `A ${stats.fA}% ／ B ${stats.fB}%` : 'A ??% ／ B ??%';
+    const malePctText = stats.isPureReal ? `A ${stats.mA}% ／ B ${stats.mB}%` : 'A ??% ／ B ??%';
+    const femaleBarHtml = stats.isPureReal
+        ? `<div class="w-full h-2.5 rounded-full bg-amber-100 overflow-hidden flex">
+               <div class="h-full bg-gradient-to-r from-pink-400 to-rose-500 transition-all duration-500" style="width: ${stats.fA}%"></div>
+           </div>`
+        : `<div class="w-full h-2.5 rounded-full bg-pink-100/80 overflow-hidden flex items-center justify-center">
+               <div class="w-full h-full bg-gradient-to-r from-pink-200 via-rose-200 to-pink-200 opacity-70"></div>
+           </div>`;
+    const maleBarHtml = stats.isPureReal
+        ? `<div class="w-full h-2.5 rounded-full bg-amber-100 overflow-hidden flex">
+               <div class="h-full bg-gradient-to-r from-sky-400 to-blue-500 transition-all duration-500" style="width: ${stats.mA}%"></div>
+           </div>`
+        : `<div class="w-full h-2.5 rounded-full bg-sky-100/80 overflow-hidden flex items-center justify-center">
+               <div class="w-full h-full bg-gradient-to-r from-sky-200 via-blue-200 to-sky-200 opacity-70"></div>
+           </div>`;
+
+    const statusBannerHtml = stats.isPureReal
+        ? `<div class="px-3 py-2 rounded-xl bg-emerald-50/85 border border-emerald-200 text-[11px] text-emerald-800 font-bold text-center">
+               📊 已達顯示門檻・全站 ${stats.totalVotes} 人真實統計比例
+           </div>`
+        : `<div class="px-3 py-2 rounded-xl bg-amber-50/75 border border-amber-200 text-[11px] text-amber-900 font-semibold text-center">
+               🔮 待投票數量滿 ${DAILY_POLL_REAL_THRESHOLD} 人後開獎顯示真實比例（目前已有 ${displayVoteCount} 人參與）
+           </div>`;
+
+    bodyEl.innerHTML = `
+        <div class="space-y-3">
+            <h3 class="text-sm sm:text-base font-bold font-serif-jp text-[#6e3a43] leading-snug">
+                Q：${escapeFateWallHtml(poll.q)}
+            </h3>
+
+            <div class="space-y-1.5 text-xs">
+                <div class="p-2.5 rounded-xl border ${isChosenA ? 'bg-rose-50/90 border-[#c96a7b] text-[#7a3542] font-bold shadow-2xs' : 'bg-white/75 border-pink-100 text-gray-500'}">
+                    A. ${escapeFateWallHtml(poll.optA)}${isChosenA ? ` <span class="text-[#c96a7b] font-extrabold">(${genderTagText})</span>` : ''}
+                </div>
+                <div class="p-2.5 rounded-xl border ${isChosenB ? 'bg-rose-50/90 border-[#c96a7b] text-[#7a3542] font-bold shadow-2xs' : 'bg-white/75 border-pink-100 text-gray-500'}">
+                    B. ${escapeFateWallHtml(poll.optB)}${isChosenB ? ` <span class="text-[#c96a7b] font-extrabold">(${genderTagText})</span>` : ''}
+                </div>
+            </div>
+
+            ${statusBannerHtml}
+
+            <div class="space-y-2.5 text-xs">
+                <div class="p-3 rounded-2xl bg-white/90 border border-pink-100 space-y-1.5">
+                    <div class="flex items-center justify-between font-bold text-rose-700">
+                        <span>🎀 女生立場分布</span>
+                        <span>${femalePctText}</span>
+                    </div>
+                    ${femaleBarHtml}
+                </div>
+
+                <div class="p-3 rounded-2xl bg-white/90 border border-pink-100 space-y-1.5">
+                    <div class="flex items-center justify-between font-bold text-sky-700">
+                        <span>⚾ 男生立場分布</span>
+                        <span>${malePctText}</span>
+                    </div>
+                    ${maleBarHtml}
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 pt-1">
+            <button type="button" onclick="if(typeof switchTab==='function') switchTab('forum');" class="flex-1 py-2 px-3 rounded-xl bg-white border border-pink-200 text-[#8f4452] hover:bg-pink-50 text-xs font-bold transition">
+                🔥 去討論區看大家怎麼聊
+            </button>
+            <button type="button" onclick="handleFortuneCtaClick()" class="flex-1 btn-sakura py-2 px-3 rounded-xl text-xs font-bold shadow-sm">
+                💘 尋找三觀契合對象
+            </button>
+        </div>
+    `;
+}
+
+window.drawTodayYuelaoFortune = drawTodayYuelaoFortune;
+window.resetDailyFortuneForTest = resetDailyFortuneForTest;
+window.copyDailyFortuneShareText = copyDailyFortuneShareText;
+window.handleFortuneCtaClick = handleFortuneCtaClick;
+window.renderDailyFortuneCard = renderDailyFortuneCard;
+window.submitDailyLovePollVote = submitDailyLovePollVote;
+window.resetDailyLovePollForTest = resetDailyLovePollForTest;
+window.renderDailyLovePollCard = renderDailyLovePollCard;
