@@ -1800,7 +1800,7 @@ function refreshAllUI() {
             const statusLines = openCustomActs.map(act => {
                 const schedState = getCustomActivityScheduleState(act);
                 const timeLine = schedState.hasSchedule
-                    ? `<br><span class="text-[11px] text-[#8f4452] font-semibold">⏰ 活動時間：${schedState.windowText || '不限'}${schedState.matchText ? ` ｜ 💘 配對時間：${schedState.matchText}` : ''}</span>`
+                    ? `<br><span class="text-[11px] text-[#8f4452] font-semibold">⏰ 活動時間：${schedState.windowText || '不限'}</span>`
                     : '';
                 return `<span class="font-bold text-[#8f4452]">✨ 獨立專屬活動【${act.name}】</span>${timeLine}`;
             });
