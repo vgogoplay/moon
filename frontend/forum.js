@@ -111,7 +111,7 @@ function renderForumList() {
         filtered = activePosts.slice();
         filtered.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     } else if (currentForumFilter === '熱門') {
-        const cutoffTs = Date.now() - 4 * 24 * 60 * 60 * 1000; // 近3天內 (放寬涵蓋到第4天午夜)
+        const cutoffTs = Date.now() - 30 * 24 * 60 * 60 * 1000; // 近30天內
         filtered = activePosts.filter(p => !isBackendForumPost(p) && Number(p.createdAt || 0) >= cutoffTs).sort((a, b) => {
             const scoreA = Number(a.pushCount || 0) + countForumPostReplies(a);
             const scoreB = Number(b.pushCount || 0) + countForumPostReplies(b);
