@@ -2446,11 +2446,9 @@ function renderDailyLovePollCard(forceRender = false) {
            </div>`;
 
     const statusBannerHtml = stats.isPureReal
-        ? `<div class="px-3 py-2 rounded-xl bg-emerald-50/85 border border-emerald-200 text-[11px] text-emerald-800 font-bold text-center">
-               📊 已達顯示門檻・全站 ${stats.totalVotes} 人真實統計比例
-           </div>`
+        ? ''
         : `<div class="px-3 py-2 rounded-xl bg-amber-50/75 border border-amber-200 text-[11px] text-amber-900 font-semibold text-center">
-               🔮 待投票數量滿 ${DAILY_POLL_REAL_THRESHOLD} 人後開獎顯示真實比例（目前已有 ${displayVoteCount} 人參與）
+               🔮 待投票數量滿 ${DAILY_POLL_REAL_THRESHOLD} 人後顯示結果（目前已有 ${displayVoteCount} 人參與）
            </div>`;
 
     bodyEl.innerHTML = `
