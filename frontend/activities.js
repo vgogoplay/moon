@@ -2102,7 +2102,7 @@ function renderDailyFortuneCard(forceRender = false) {
 
     const matchCount = drawn.matchCount;
     const hasProfile = Boolean(typeof appState !== 'undefined' && appState && appState.playerId);
-    const ctaText = hasProfile ? '🌸 帶著好運去報名配對' : '📝 免費建檔領取紅線';
+    const ctaText = hasProfile ? '🌸去報名' : '📝 免費建檔領取紅線';
 
     bodyEl.innerHTML = `
         <div class="p-4 rounded-2xl bg-gradient-to-br from-rose-50/90 via-white to-pink-50/90 border border-pink-200/90 space-y-3 shadow-2xs">
@@ -2322,18 +2322,22 @@ function renderDailyLovePollCard(forceRender = false) {
     const cachedCounts = dailyPollCloudCountsCache[statKey] || null;
 
     // 若今天已投過票但記憶體尚未載入雲端總票數，背景讀取一次（僅 ~45 Bytes）
-    if (savedVote && !cachedCounts && !dailyPollInFlightKeys.has(statKey)) {
+    if (!cachedCounts && !dailyPollInFlightKeys.has(statKey)) {
         fetchDailyPollCloudCounts(dateStr, poll.id, false).then(fetched => {
             if (fetched) renderDailyLovePollCard(true);
         });
     }
 
     const countsSig = cachedCounts ? `${cachedCounts.mA},${cachedCounts.mB},${cachedCounts.fA},${cachedCounts.fB}` : 'none';
+    const realTotalVotes = cachedCounts ? (cachedCounts.mA + cachedCounts.mB + cachedCounts.fA + cachedCounts.fB) : 0;
+    const voteCountBadgeHtml = realTotalVotes >= 15
+        ? `<span class="mr-1.5 px-2 py-0.5 rounded-full bg-rose-50 border border-pink-200 text-[#8f4452] text-[10px] font-bold">已投票 ${realTotalVotes + 20} 人</span>`
+        : '';
     if (badgeEl) {
         if (isSandbox) {
-            badgeEl.innerHTML = `${savedVote ? '✅ 已投票' : '免建檔投票'} <button type="button" onclick="resetDailyLovePollForTest(false)" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">🧪 重選</button><button type="button" onclick="resetDailyLovePollForTest(true)" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">換題</button>`;
+            badgeEl.innerHTML = `${voteCountBadgeHtml}${savedVote ? '✅ 已投票' : '免建檔投票'} <button type="button" onclick="resetDailyLovePollForTest(false)" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">🧪 重選</button><button type="button" onclick="resetDailyLovePollForTest(true)" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">換題</button>`;
         } else {
-            badgeEl.textContent = savedVote ? '✅ 今日已表態' : '免建檔即時投票';
+            badgeEl.innerHTML = `${voteCountBadgeHtml}${savedVote ? '✅ 已投票' : '免建檔即時投票'}`;
         }
     }
 
@@ -2448,7 +2452,7 @@ function renderDailyLovePollCard(forceRender = false) {
                 🔥 去討論區看大家怎麼聊
             </button>
             <button type="button" onclick="handleFortuneCtaClick()" class="flex-1 btn-sakura py-2 px-3 rounded-xl text-xs font-bold shadow-sm">
-                💘 尋找三觀契合對象
+                🌸去報名
             </button>
         </div>
     `;
