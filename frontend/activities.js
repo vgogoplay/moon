@@ -1685,7 +1685,7 @@ function refreshAllUI() {
             : '';
         badge.textContent = `⏳ 已報名 (${currentBatchSessions.length}場)`;
         applyBtn.disabled = false;
-        applyBtn.textContent = `✅ 已報名【${currentBatchSessions.join('、')}】（點此修改）`;
+        applyBtn.textContent = '✅ 已報名';
         alertBox.innerHTML = `你已成功報名 <strong>${currentBatchSessions.join('、')}</strong>！<br>配對條件：<strong>${criteriaSummary}</strong>。${closedHint}`;
     } else {
         badge.textContent = `✨ ${sched.batchPrefix}開始報名中`;
@@ -1735,14 +1735,14 @@ function refreshAllUI() {
 
                 if (appState.isWarnedAccount) {
                     return `
-                        <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-200 text-gray-400 cursor-not-allowed">
+                        <button type="button" disabled class="px-5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-200 text-gray-400 cursor-not-allowed">
                             ⚠️ ${act.name}（警告帳號不提供配對）
                         </button>
                     `;
                 }
                 if (schedState.status === 'upcoming') {
                     return `
-                        <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-100 border border-gray-300 text-gray-500 cursor-not-allowed">
+                        <button type="button" disabled class="px-5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 border border-gray-300 text-gray-500 cursor-not-allowed">
                             ⏳ 尚未開始【${act.name}】（${formatShortDateTime(schedState.startTs)} 開放）
                         </button>
                     `;
@@ -1750,13 +1750,13 @@ function refreshAllUI() {
                 if (schedState.status === 'waiting_match') {
                     if (isReg) {
                         return `
-                            <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-amber-100 border border-amber-300 text-amber-900 cursor-not-allowed">
+                            <button type="button" disabled class="px-5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-amber-100 border border-amber-300 text-amber-900 cursor-not-allowed">
                                 ⌛ 已報名【${act.name}】（等待 ${schedState.matchText || '配對時間'} 開獎）
                             </button>
                         `;
                     }
                     return `
-                        <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed">
+                        <button type="button" disabled class="px-5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed">
                             🔒【${act.name}】報名已截止（${schedState.matchText || ''} 配對）
                         </button>
                     `;
@@ -1764,20 +1764,20 @@ function refreshAllUI() {
                 if (schedState.status === 'matched') {
                     if (matchedItem) {
                         return `
-                            <button type="button" onclick="handleCustomActivityClick('${act.id}')" class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg shadow-lg tracking-wider bg-gradient-to-r from-pink-500 to-rose-500 text-white hover:opacity-95 transition">
+                            <button type="button" onclick="handleCustomActivityClick('${act.id}')" class="px-5 py-2 rounded-xl font-bold text-xs sm:text-sm shadow-lg tracking-wider bg-gradient-to-r from-pink-500 to-rose-500 text-white hover:opacity-95 transition">
                                 💘【${act.name}】配對成功！前往好友聊天
                             </button>
                         `;
                     }
                     if (isReg) {
                         return `
-                            <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-100 border border-gray-300 text-gray-500 cursor-not-allowed">
+                            <button type="button" disabled class="px-5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 border border-gray-300 text-gray-500 cursor-not-allowed">
                                 🍃【${act.name}】已開獎（本次未配對成功）
                             </button>
                         `;
                     }
                     return `
-                        <button type="button" disabled class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed">
+                        <button type="button" disabled class="px-5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 border border-gray-300 text-gray-400 cursor-not-allowed">
                             ⏰【${act.name}】活動已結束
                         </button>
                     `;
@@ -1785,73 +1785,29 @@ function refreshAllUI() {
 
                 if (isReg) {
                     return `
-                        <button type="button" onclick="handleCustomActivityClick('${act.id}')" class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg shadow-lg tracking-wider bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:opacity-95 transition">
-                            ✅ 已報名【${act.name}】（點此查看 / 取消）
+                        <button type="button" onclick="handleCustomActivityClick('${act.id}')" class="px-5 py-2 rounded-xl font-bold text-xs sm:text-sm shadow-lg tracking-wider bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:opacity-95 transition">
+                            ✅ 已報名
                         </button>
                     `;
                 }
                 return `
-                    <button type="button" onclick="handleCustomActivityClick('${act.id}')" class="px-8 py-4 rounded-2xl font-bold text-base md:text-lg shadow-lg tracking-wider bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400 text-white hover:opacity-95 transition">
+                    <button type="button" onclick="handleCustomActivityClick('${act.id}')" class="px-5 py-2 rounded-xl font-bold text-xs sm:text-sm shadow-lg tracking-wider bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400 text-white hover:opacity-95 transition">
                         🎪 報名【${act.name}】
                     </button>
                 `;
             }).join('');
 
             const statusLines = openCustomActs.map(act => {
-                const actType = act.activityType || 'classic';
-                const reg = myCustomRegs[act.id];
                 const schedState = getCustomActivityScheduleState(act);
-                const matchedItem = (meUserRec && Array.isArray(meUserRec.matchedHistory))
-                    ? meUserRec.matchedHistory.find(h => String(h.activityId || '') === String(act.id) || String(h.session || '') === String(act.name))
-                    : null;
-
-                const timeTag = schedState.hasSchedule
+                const timeLine = schedState.hasSchedule
                     ? `<br><span class="text-[11px] text-[#8f4452] font-semibold">⏰ 活動時間：${schedState.windowText || '不限'}${schedState.matchText ? ` ｜ 💘 配對時間：${schedState.matchText}` : ''}</span>`
                     : '';
-
-                if (schedState.status === 'matched') {
-                    if (matchedItem) {
-                        return `💘 專屬活動 <strong>【${act.name}】</strong> 配對成功！你已與 <strong>${matchedItem.partnerName}</strong> 成為好友，請至「好友名單」開啟對話！${timeTag}`;
-                    }
-                    if (reg) {
-                        return `🍃 專屬活動 <strong>【${act.name}】</strong> 已完成配對結算（本次未配對成功，未加入好友名單）。${timeTag}`;
-                    }
-                    return `⏰ 專屬活動 <strong>【${act.name}】</strong> 報名已截止並完成配對結算。${timeTag}`;
-                }
-
-                if (schedState.status === 'waiting_match') {
-                    if (reg) {
-                        return `⌛ 已報名專屬活動 <strong>【${act.name}】</strong>（報名已於 ${formatShortDateTime(schedState.endTs)} 截止，將於 <strong>${schedState.matchText}</strong> 準時配對，配對成功才會加入好友）。${timeTag}`;
-                    }
-                    return `🔒 專屬活動 <strong>【${act.name}】</strong> 已於 ${formatShortDateTime(schedState.endTs)} 截止報名，將於 <strong>${schedState.matchText}</strong> 進行配對。${timeTag}`;
-                }
-
-                if (schedState.status === 'upcoming') {
-                    const descTxt = act.description ? ` — ${act.description}` : '';
-                    return `⏳ 專屬活動 <strong>【${act.name}】</strong> 即將於 <strong>${formatShortDateTime(schedState.startTs)}</strong> 開放報名${descTxt}${timeTag}`;
-                }
-
-                if (reg) {
-                    if (actType === 'fortune_number' && reg.fortuneNumber) {
-                        return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（月老籤詩已選：<strong>第 ${reg.fortuneNumber} 首</strong>，同號碼配對）${timeTag}`;
-                    }
-                    if (actType === 'two_choice' && reg.twoChoiceValue) {
-                        return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（默契大考驗二選一已選：<strong>「${reg.twoChoiceValue}」</strong>）${timeTag}`;
-                    }
-                    const cSummary = formatCriteriaSummaryText(reg.exactMatchCriteria || {}, reg.mustMatchKeys || []);
-                    return `✅ 已報名專屬活動 <strong>【${act.name}】</strong>（配對條件：<strong>${cSummary}</strong>）${timeTag}`;
-                }
-                const typeHint = actType === 'fortune_number'
-                    ? '（月老籤詩請選擇1~5首號碼）'
-                    : (actType === 'two_choice' ? `（默契大考驗二選一：${act.optionA || ''} / ${act.optionB || ''}）` : '');
-                const descTxt = act.description ? ` — ${act.description}` : '';
-                return `🎪 專屬活動 <strong>【${act.name}】</strong> 開放報名中${typeHint}${descTxt}${timeTag}`;
+                return `<span class="font-bold text-[#8f4452]">✨ 獨立專屬活動【${act.name}】</span>${timeLine}`;
             });
 
             customAlertBox.classList.remove('hidden');
             customAlertBox.innerHTML = `
                 <div class="text-xs space-y-2">
-                    <p class="font-bold text-[#8f4452]">✨ 獨立專屬活動通知（與上方週二／週四／週六場次互不影響）：</p>
                     ${statusLines.map(line => `<p>${line}</p>`).join('')}
                 </div>
             `;
@@ -1880,11 +1836,11 @@ const DAILY_POLL_CLOUD_BASE_PATH = 'yuelao_fate_wall/_daily_poll_stats';
 const DAILY_POLL_REAL_THRESHOLD = 10; // 累積滿 10 票後顯示 100% 純真實站內投票比例
 
 const YUELAO_DAILY_FORTUNE_LEVELS = [
-    '🔮大吉🔮',
-    '🔮吉🔮', '🔮吉🔮', '🔮吉🔮', '🔮吉🔮', '🔮吉🔮', '🔮吉🔮', '🔮吉🔮',
-    '🔮中吉🔮', '🔮中吉🔮',
-    '🔮小吉🔮', '🔮小吉🔮', '🔮小吉🔮', '🔮小吉🔮',
-    '🔮末吉🔮', '🔮末吉🔮'
+    '🔮 大吉 🔮',
+    '🔮 吉 🔮', '🔮 吉 🔮', '🔮 吉 🔮', '🔮 吉 🔮', '🔮 吉 🔮', '🔮 吉 🔮', '🔮 吉 🔮',
+    '🔮 中吉 🔮', '🔮 中吉 🔮',
+    '🔮 小吉 🔮', '🔮 小吉 🔮', '🔮 小吉 🔮', '🔮 小吉 🔮',
+    '🔮 末吉 🔮', '🔮 末吉 🔮'
 ];
 
 const YUELAO_DAILY_FORTUNE_POEMS = [

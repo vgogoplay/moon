@@ -123,32 +123,32 @@
             </div>
 
             <!-- 報名與活動排程主控制台 -->
-            <div class="glass-card rounded-3xl p-6 md:p-8 text-center space-y-5">
-                <div class="inline-flex flex-col items-center justify-center gap-1.5 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-200 text-[#8f4452] shadow-sm">
-                    <span class="text-sm font-extrabold text-black tracking-wide"><span class="text-rose-600">每週日-更新下一屆</span>(星期二/四/六）的月老牽線活動</span>
-                    <span class="text-sm font-bold text-black"><span class="text-rose-600">⚠️ 每週需「手動」報名下一屆</span>，月老才會知道「弟子＆信女」的心意喔！</span>
+            <div class="glass-card rounded-3xl p-4 sm:p-5 md:p-6 text-center space-y-3.5">
+                <div class="inline-flex flex-col items-center justify-center gap-1 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-200 text-[#8f4452] shadow-sm">
+                    <span class="text-xs font-extrabold text-black tracking-wide"><span class="text-rose-600">每週日-更新下一屆</span>(星期二/四/六）的月老牽線活動</span>
+                    <span class="text-xs font-bold text-black"><span class="text-rose-600">⚠️ 每週需「手動」報名下一屆</span>，月老才會知道「弟子＆信女」的心意喔！</span>
                 </div>
 
                 <div>
-                    <p class="text-xs text-gray-500 mb-1">距離下一次月老牽線開獎還有</p>
-                    <div id="nextMatchCountdown" class="text-2xl md:text-3xl font-bold font-serif-jp text-[#c96a7b] tracking-wider">
+                    <p class="text-[11px] text-gray-500 mb-0.5">距離下一次月老牽線開獎還有</p>
+                    <div id="nextMatchCountdown" class="text-base sm:text-lg md:text-xl font-bold font-serif-jp text-[#c96a7b] tracking-wider">
                         計算中...
                     </div>
                 </div>
 
-                <div id="registrationAlertBox" class="max-w-lg mx-auto p-4 rounded-2xl bg-white/80 border border-pink-100 text-sm text-gray-600 leading-relaxed"></div>
+                <div id="registrationAlertBox" class="max-w-lg mx-auto p-3 rounded-2xl bg-white/80 border border-pink-100 text-xs text-gray-600 leading-relaxed"></div>
 
-                <div class="pt-1 flex justify-center">
-                    <button id="mainApplyBtn" type="button" onclick="handleApplyClick()" class="btn-sakura px-10 py-4 rounded-2xl font-bold text-base md:text-lg shadow-lg tracking-wider">
+                <div class="pt-0.5 flex justify-center">
+                    <button id="mainApplyBtn" type="button" onclick="handleApplyClick()" class="btn-sakura px-5 py-2 rounded-xl font-bold text-xs sm:text-sm shadow-md tracking-wider">
                         🌸 我要報名參加配對
                     </button>
                 </div>
 
                 <!-- 獨立專屬活動區（拆分顯示於常規場次報名按鈕下方，加深分隔線） -->
-                <div id="customActivitySection" class="hidden pt-6 mt-2 border-t-2 border-[#c96a7b] space-y-4">
-                    <div id="customActivityAlertBox" class="hidden max-w-lg mx-auto p-4 rounded-2xl bg-amber-50/75 border border-amber-200 text-sm text-[#7a3b46] leading-relaxed"></div>
+                <div id="customActivitySection" class="hidden pt-4 mt-1.5 border-t-2 border-[#c96a7b] space-y-3">
+                    <div id="customActivityAlertBox" class="hidden max-w-lg mx-auto p-3 rounded-2xl bg-amber-50/75 border border-amber-200 text-xs text-[#7a3b46] leading-relaxed"></div>
 
-                    <div id="customActivitiesBtnContainer" class="hidden flex flex-wrap justify-center items-center gap-3"></div>
+                    <div id="customActivitiesBtnContainer" class="hidden flex flex-wrap justify-center items-center gap-2"></div>
                 </div>
             </div>
 
@@ -1057,7 +1057,7 @@
     <script src="frontend/forum.js?v=20261126forumstarv22"></script>
   <script src="frontend/state.js?v=20261126dailyfortunetweakv26"></script>
     <script src="frontend/profile.js?v=20261125idprotectv19"></script>
-    <script src="frontend/activities.js?v=20261126pollstatuscleanv36"></script>
+    <script src="frontend/activities.js?v=20261126compactcardv38"></script>
     <script src="frontend/friends-chat.js?v=20261123coldfatemail"></script>
     <script src="frontend/wishes.js?v=20261126wishmaledays47v21"></script>
 </body>
