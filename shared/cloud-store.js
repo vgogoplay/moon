@@ -2299,7 +2299,7 @@ const CloudSync = {
         await this.fetchPlayerPaths(earlyNodes);
         const initialGenderStat = this.tree[PUBLIC_STATS_KEY] && this.tree[PUBLIC_STATS_KEY].gender;
         if (!initialGenderStat || typeof initialGenderStat !== 'object' || Number(initialGenderStat.updatedAt || 0) <= 0 ||
-            (Number(initialGenderStat.male || 0) + Number(initialGenderStat.female || 0)) <= 0) {
+            Number(initialGenderStat.total || 0) < 50) {
             await this.fetchPublicStatsCategory('gender').catch(() => {});
         }
         if (this.tree[CUSTOM_ACTIVITIES_KEY] === undefined && !this.isLocalSandboxMode()) {
@@ -2958,28 +2958,38 @@ const CloudSync = {
         }
 
         // 1. 先嘗試讀取預先聚合的輕量統計節點 yuelao_public_stats/{cat}（約數十 Bytes）
+        // 若 total < 50 代表舊索引尚未完整回填（正式服實際有 266+ 人），自動重算完整人數並覆蓋快取
         const remoteStat = await this.getNodeOnce(`${PUBLIC_STATS_KEY}/${cat}`);
-        if (remoteStat && typeof remoteStat === 'object' && Number(remoteStat.updatedAt || 0) > 0 && Number(remoteStat.total || 0) > 0) {
+        if (remoteStat && typeof remoteStat === 'object' && Number(remoteStat.updatedAt || 0) > 0 && Number(remoteStat.total || 0) >= 50) {
             this.tree[PUBLIC_STATS_KEY][cat] = remoteStat;
             try { localStorage.setItem(PUBLIC_STATS_KEY, JSON.stringify(this.tree[PUBLIC_STATS_KEY])); } catch (e) {}
             return remoteStat;
         }
 
         // 2. 次之嘗試讀取公開索引 USER_INDEX_KEY 計算統計
-        let sourceUsers = [];
+        const mergedUsersMap = {};
         const idxData = await this.getNodeOnce(USER_INDEX_KEY);
         if (idxData && typeof idxData === 'object') {
             this.applyStreamPatch(USER_INDEX_KEY, idxData);
-            sourceUsers = Object.values(idxData).filter(u => u && typeof u === 'object' && u.id);
+            Object.entries(idxData).forEach(([k, u]) => {
+                if (u && typeof u === 'object' && u.id) mergedUsersMap[String(u.id || k)] = u;
+            });
         }
 
-        // 3. 若正式服尚未建立 yuelao_user_index（舊有 266 筆會員僅存於 yuelao_users），改讀取 yuelao_users 計算完整人數並建立聚合快取
-        if (sourceUsers.length === 0) {
+        // 3. 若 yuelao_user_index 尚未完整回填（人數 < 50，例如只有新註冊的 1~2 位玩家），從 yuelao_users 讀取全部會員計算完整人數並更新聚合快取
+        if (Object.keys(mergedUsersMap).length < 50) {
             const usersData = await this.getNodeOnce(USERS_KEY);
             if (usersData && typeof usersData === 'object') {
-                sourceUsers = Object.values(usersData).filter(u => u && typeof u === 'object' && u.id);
+                Object.entries(usersData).forEach(([k, u]) => {
+                    if (u && typeof u === 'object' && u.id) {
+                        const uid = String(u.id || k);
+                        mergedUsersMap[uid] = { ...(mergedUsersMap[uid] || {}), ...u };
+                    }
+                });
             }
         }
+
+        const sourceUsers = Object.values(mergedUsersMap);
 
         if (sourceUsers.length > 0) {
             const summary = this.computePublicStatsFromUsers(sourceUsers);
