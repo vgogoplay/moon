@@ -353,8 +353,12 @@ function renderHomeStatsCharts(forceRender = false) {
     // 2. 僅當切換至 MBTI 人格統計 時才渲染 MBTI 圖表
     if (currentHomeStatsDimension === 'mbti') {
         const mbtiBucket = getResolvedPublicStatBucket('mbti') || { iCount: 0, eCount: 0, untestedCount: 0 };
-        const iPersonCount = Math.max(0, Number(mbtiBucket.iCount || 0)) + maleOffset + 5;
-        const ePersonCount = Math.max(0, Number(mbtiBucket.eCount || 0));
+        // 固定人數總加成（maleOffset + 5）：每 5 個 I 人配 1 個 E 人（即每 6 人為 5 I + 1 E）
+        const fixedMbtiOffsetTotal = maleOffset + 5;
+        const fixedEOffset = Math.floor(fixedMbtiOffsetTotal / 6);
+        const fixedIOffset = fixedMbtiOffsetTotal - fixedEOffset;
+        const iPersonCount = Math.max(0, Number(mbtiBucket.iCount || 0)) + fixedIOffset;
+        const ePersonCount = Math.max(0, Number(mbtiBucket.eCount || 0)) + fixedEOffset;
         const untestedMbtiCount = Math.max(0, Number(mbtiBucket.untestedCount || 0));
 
         const mbtiAllTotal = iPersonCount + ePersonCount + untestedMbtiCount;

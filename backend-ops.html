@@ -437,6 +437,69 @@
             <div id="forceMatchRulesList" class="space-y-2 pt-2"></div>
         </div>
 
+        <!-- ==================== 9. 前台「紅線企劃・人數統計」計算方式說明紀錄 ==================== -->
+        <div class="card-jp p-6 rounded-2xl border-2 border-pink-200 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-pink-200 pb-3">
+                <div>
+                    <h2 class="text-lg font-bold font-serif-jp text-[#8f4452]">9. 前台「紅線企劃・人數統計」計算方式說明紀錄</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">
+                        以下為前台首頁「📊 紅線企劃・人數統計」（男/女、MBTI、地區）實際套用的計算公式與固定人數分配規則（純文字紀錄）
+                    </p>
+                </div>
+                <span class="text-[11px] px-3 py-1 rounded-full bg-pink-50 border border-pink-200 text-[#8f4452] font-bold shrink-0">
+                    📖 規則備忘錄
+                </span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs text-gray-700">
+                <!-- 1. 總計人數 -->
+                <div class="admin-field-box space-y-1.5">
+                    <div class="font-bold text-sm text-[#8f4452]">① 總計人數計算</div>
+                    <p class="leading-relaxed">
+                        ・<strong>計算公式：</strong>真實資料庫總人數 ＋ 後台設定「男生固定加成（<code>maleOffset</code>）」 ＋ 女生固定加成 <strong>5 人</strong>。
+                    </p>
+                    <p class="text-[11px] text-gray-500 leading-relaxed">
+                        ※ 範例：若真實會員 266 人、後台設定男生固定加成 30 人，則前台顯示總計 ＝ 266 ＋ 30 ＋ 5 ＝ <strong>301 人</strong>。
+                    </p>
+                </div>
+
+                <!-- 2. 男／女人數統計 -->
+                <div class="admin-field-box space-y-1.5">
+                    <div class="font-bold text-sm text-[#8f4452]">② 男／女人數統計</div>
+                    <p class="leading-relaxed">
+                        ・<strong>男生人數：</strong>真實男生人數 ＋ 後台設定「男生固定加成（<code>maleOffset</code>）」。<br>
+                        ・<strong>女生人數：</strong>真實女生人數 ＋ 固定 <strong>5 人</strong>。<br>
+                        ・<strong>百分比：</strong>男生佔比四捨五入取整數（<code>Math.round(男 / 總 * 100)</code>），女生佔比為 <code>100% - 男生佔比</code>。
+                    </p>
+                </div>
+
+                <!-- 3. MBTI 人格統計 -->
+                <div class="admin-field-box space-y-1.5">
+                    <div class="font-bold text-sm text-[#8f4452]">③ MBTI 人格統計（I人 / E人 / 沒測過）</div>
+                    <p class="leading-relaxed">
+                        ・固定人數總加成（<code>maleOffset + 5</code>）依「<strong>每 5 個 I 人配 1 個 E 人</strong>」比例分配（每滿 6 人分配 1 位至 E 人、5 位至 I 人，未滿 6 人的餘數全數計入 I 人）：<br>
+                        　－ <strong>E人加成：</strong><code>Math.floor((maleOffset + 5) / 6)</code><br>
+                        　－ <strong>I人加成：</strong><code>(maleOffset + 5) - E人加成</code><br>
+                        ・<strong>I人總數：</strong>真實 I 人數 ＋ I人加成<br>
+                        ・<strong>E人總數：</strong>真實 E 人數 ＋ E人加成<br>
+                        ・<strong>不知道 / 沒測過：</strong>維持真實資料庫人數（不加固定人數）
+                    </p>
+                    <p class="text-[11px] text-gray-500 leading-relaxed">
+                        ※ 範例：固定 6 人 → 5 I、1 E；固定 11 人 → 10 I、1 E；固定 12 人 → 10 I、2 E；固定 35 人 → 30 I、5 E。
+                    </p>
+                </div>
+
+                <!-- 4. 人數分布地區 -->
+                <div class="admin-field-box space-y-1.5">
+                    <div class="font-bold text-sm text-[#8f4452]">④ 人數分布地區（北部 / 中部 / 南部 / 東部）</div>
+                    <p class="leading-relaxed">
+                        ・<strong>女生固定 +5 人加成：</strong>全部計算在 <strong>東部</strong>（東部 +5 人）。<br>
+                        ・<strong>男生固定加成（<code>maleOffset</code>）與未分類差額：</strong>依 6 次循環順序依序累加（<strong>北部 +1 → 中部 +1 → 南部 +1 → 北部 +1 → 南部 +1 → 北部 +1</strong>），使四區人數總和與總計人數完全一致。
+                    </p>
+                </div>
+            </div>
+        </div>
+
             </div>
 
     <!-- 💬 管理員回覆玩家問題 Modal -->
