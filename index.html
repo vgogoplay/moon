@@ -517,7 +517,7 @@
                 <button onclick="filterForum('討論')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">💬 討論</button>
                 <button onclick="filterForum('閒聊')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">☕ 閒聊</button>
                 <button onclick="filterForum('寵物')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">🐾 寵物</button>
-                <button onclick="filterForum('自己')" class="forum-filter-btn px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">👤 自己</button>
+                <button onclick="filterForum('自己')" class="forum-filter-btn relative px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-[#8f4452] hover:bg-pink-200 whitespace-nowrap">👤 自己<span id="forumSelfFilterDot" class="hidden -top-0.5 -right-0.5 absolute w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white"></span></button>
             </div>
 
             <!-- PTT 緊湊列表風 -->
@@ -594,6 +594,7 @@
             <button type="button" onclick="switchTab('forum')" data-tab-btn="forum" class="nav-btn relative">
                 <span class="text-base sm:text-lg">📋</span>
                 <span class="text-[10px] sm:text-xs font-medium leading-tight mt-0.5">討論區</span>
+                <span id="navForumDot" class="hidden absolute top-1.5 right-3 sm:right-5 w-2 h-2 rounded-full bg-rose-500"></span>
             </button>
             <button type="button" onclick="switchTab('wishes')" data-tab-btn="wishes" class="nav-btn relative">
                 <span class="text-base sm:text-lg">🏮</span>
@@ -1112,10 +1113,10 @@
     <script src="shared/schedule.js?v=20261126automatch1959v23"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261123nodup"></script>
-    <script src="shared/cloud-store.js?v=20261127backendsyncv34"></script>
+    <script src="shared/cloud-store.js?v=20261127forumdotv35"></script>
     <!-- 前台功能模組 -->
-    <script src="frontend/forum.js?v=20261127adminreplyv23"></script>
-  <script src="frontend/state.js?v=20261126dailyfortunetweakv26"></script>
+    <script src="frontend/forum.js?v=20261127forumdotv26"></script>
+  <script src="frontend/state.js?v=20261127forumdotv27"></script>
     <script src="frontend/profile.js?v=20261125idprotectv19"></script>
     <script src="frontend/activities.js?v=20261127mbtiratio5to1v61"></script>
     <script src="frontend/friends-chat.js?v=20261123coldfatemail"></script>

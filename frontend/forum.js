@@ -10,6 +10,145 @@ const FORUM_RETENTION_DAYS = 30;
 const FORUM_RETENTION_MS = FORUM_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 const FORUM_POSTS_PER_PAGE = 5;
+const FORUM_MY_POST_RECEIPTS_PREFIX = 'yuelao_forum_my_post_receipts_';
+
+function getForumMyPostReceiptsStorageKey() {
+    const pid = (typeof appState !== 'undefined' && appState && appState.playerId)
+        ? String(appState.playerId).trim()
+        : '';
+    return pid ? `${FORUM_MY_POST_RECEIPTS_PREFIX}${pid}` : '';
+}
+
+function loadForumMyPostReceiptsMap() {
+    const key = getForumMyPostReceiptsStorageKey();
+    if (!key) return {};
+    try {
+        const raw = JSON.parse(localStorage.getItem(key) || '{}');
+        return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function saveForumMyPostReceiptsMap(mapObj) {
+    const key = getForumMyPostReceiptsStorageKey();
+    if (!key) return;
+    try {
+        localStorage.setItem(key, JSON.stringify(mapObj || {}));
+    } catch (e) {}
+}
+
+function getLatestReplyTimestampOfPost(postObj) {
+    if (!postObj || typeof postObj !== 'object') return 0;
+    let maxTs = Number(postObj.lastReplyTs || 0);
+    const repliesRaw = postObj.replies;
+    const list = Array.isArray(repliesRaw)
+        ? repliesRaw
+        : (repliesRaw && typeof repliesRaw === 'object' ? Object.values(repliesRaw) : []);
+    list.forEach(r => {
+        if (r && typeof r === 'object') {
+            const t = Number(r.ts || 0);
+            if (t > maxTs) maxTs = t;
+        }
+    });
+    return maxTs;
+}
+
+function hasUnreadForumPostReplies(postObj, myPid = null, receiptsMap = null) {
+    const pid = myPid !== null
+        ? String(myPid || '').trim()
+        : ((typeof appState !== 'undefined' && appState && appState.playerId) ? String(appState.playerId).trim() : '');
+    if (!pid || !postObj || !postObj.id) return false;
+    if (isBackendForumPost(postObj)) return false;
+    if (String(postObj.authorId || '').trim() !== pid) return false;
+
+    const curReplies = countForumPostReplies(postObj);
+    if (curReplies <= 0) return false;
+
+    const map = receiptsMap || loadForumMyPostReceiptsMap();
+    const postIdStr = String(postObj.id).trim();
+    const rec = map[postIdStr];
+    const latestReplyTs = getLatestReplyTimestampOfPost(postObj);
+    const lastAuthorId = String(postObj.lastReplyAuthorId || '').trim();
+
+    if (!rec) {
+        if (lastAuthorId === pid) {
+            map[postIdStr] = { replyCount: curReplies, lastReplyTs: latestReplyTs };
+            saveForumMyPostReceiptsMap(map);
+            return false;
+        }
+        return true;
+    }
+
+    const seenCount = Number(rec.replyCount || 0);
+    const seenTs = Number(rec.lastReplyTs || 0);
+
+    if (curReplies > seenCount) {
+        if (curReplies === seenCount + 1 && lastAuthorId === pid) {
+            map[postIdStr] = { replyCount: curReplies, lastReplyTs: Math.max(seenTs, latestReplyTs) };
+            saveForumMyPostReceiptsMap(map);
+            return false;
+        }
+        return true;
+    }
+
+    if (latestReplyTs > seenTs && lastAuthorId && lastAuthorId !== pid) {
+        return true;
+    }
+
+    return false;
+}
+
+function markMyForumPostRepliesAsRead(postObj) {
+    const pid = (typeof appState !== 'undefined' && appState && appState.playerId)
+        ? String(appState.playerId).trim()
+        : '';
+    if (!pid || !postObj || !postObj.id) return;
+    if (isBackendForumPost(postObj)) return;
+    if (String(postObj.authorId || '').trim() !== pid) return;
+
+    const postIdStr = String(postObj.id).trim();
+    const curReplies = countForumPostReplies(postObj);
+    const latestReplyTs = Math.max(getLatestReplyTimestampOfPost(postObj), Number(postObj.lastUpdatedAt || 0));
+    const map = loadForumMyPostReceiptsMap();
+    const prev = map[postIdStr];
+    if (!prev || Number(prev.replyCount || 0) !== curReplies || Number(prev.lastReplyTs || 0) < latestReplyTs) {
+        map[postIdStr] = {
+            replyCount: curReplies,
+            lastReplyTs: latestReplyTs
+        };
+        saveForumMyPostReceiptsMap(map);
+    }
+    updateForumUnreadIndicators();
+}
+
+function updateForumUnreadIndicators() {
+    const navDot = document.getElementById('navForumDot');
+    const selfFilterDot = document.getElementById('forumSelfFilterDot');
+    const myPid = (typeof appState !== 'undefined' && appState && appState.playerId)
+        ? String(appState.playerId).trim()
+        : '';
+
+    if (!myPid) {
+        if (navDot) navDot.classList.add('hidden');
+        if (selfFilterDot) selfFilterDot.classList.add('hidden');
+        return false;
+    }
+
+    const sourceList = (Array.isArray(forumPosts) && forumPosts.length > 0)
+        ? forumPosts
+        : loadForumIndexFromLocalCache();
+    const nowTs = Date.now();
+    const receiptsMap = loadForumMyPostReceiptsMap();
+    const hasAnyUnread = sourceList.some(p =>
+        p && !isForumPostExpiredFrontend(p, nowTs) && hasUnreadForumPostReplies(p, myPid, receiptsMap)
+    );
+
+    if (navDot) navDot.classList.toggle('hidden', !hasAnyUnread);
+    if (selfFilterDot) selfFilterDot.classList.toggle('hidden', !hasAnyUnread);
+    return hasAnyUnread;
+}
+
 let forumCurrentPage = 1;
 
 function countForumPostReplies(postObj) {
@@ -88,6 +227,7 @@ function purgeExpiredForumPostsFrontend(rawPosts) {
 }
 
 function renderForumList() {
+    updateForumUnreadIndicators();
     const container = document.getElementById('forumPostList');
     if (!container) return;
 
@@ -192,13 +332,19 @@ function renderForumList() {
         const dateAuthorStr = `${dateStr} ${authorName}`;
         const likes = Number(p.pushCount || 0);
         const replies = countForumPostReplies(p);
-        const statsHtml = `<div class="flex items-center gap-2 text-gray-400 text-[11px] shrink-0"><span>❤️${likes}</span><span>💬${replies}</span></div>`;
+        const isPostUnread = hasUnreadForumPostReplies(p, myPid);
+        const unreadDotHtml = isPostUnread
+            ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-bold shrink-0 shadow-2xs animate-pulse"><span class="w-1.5 h-1.5 rounded-full bg-white inline-block"></span>新留言</span>`
+            : '';
+        const statsHtml = `<div class="flex items-center gap-2 ${isPostUnread ? 'text-rose-600 font-bold' : 'text-gray-400'} text-[11px] shrink-0"><span>❤️${likes}</span><span>💬${replies}</span></div>`;
 
         return `
-            <div onclick="viewForumPost('${yuelaoEscapeHtml(p.id)}')" class="px-3.5 py-2.5 flex flex-col gap-1 hover:bg-pink-50/70 cursor-pointer transition">
+            <div onclick="viewForumPost('${yuelaoEscapeHtml(p.id)}')" class="px-3.5 py-2.5 flex flex-col gap-1 ${isPostUnread ? 'bg-rose-50/65 hover:bg-rose-50' : 'hover:bg-pink-50/70'} cursor-pointer transition">
                 <div class="flex items-center gap-1.5 min-w-0">
+                    ${isPostUnread ? '<span class="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>' : ''}
                     ${tagBadge}
                     <div class="flex-1 min-w-0 text-[#5e464a] text-[13px] font-bold truncate">${yuelaoEscapeHtml(p.title)}</div>
+                    ${unreadDotHtml}
                 </div>
                 <div class="flex items-center gap-3 text-gray-400 text-[11px] font-medium">
                     <span class="truncate">${dateAuthorStr}</span>
@@ -328,9 +474,8 @@ async function refreshForum() {
                 }
 
                 if (!isSandbox && typeof CloudSync.conditionalGetNode === 'function') {
-                    // 若目前記憶體與快取仍無資料，強制重新向雲端抓取（避免舊 ETag 回傳 304 導致空列表）
-                    const forceFresh = forumPosts.length === 0;
-                    let r = await CloudSync.conditionalGetNode(FORUM_INDEX_KEY, { force: forceFresh });
+                    // 主動開啟或切換討論區時強制向雲端讀取最新索引（略過舊 ETag 304 快取），確保最新留言數與紅點即時同步
+                    let r = await CloudSync.conditionalGetNode(FORUM_INDEX_KEY, { force: true });
                     if (r.status === 'error') {
                         await new Promise(rDelay => setTimeout(rDelay, 350));
                         r = await CloudSync.conditionalGetNode(FORUM_INDEX_KEY, { force: true });
@@ -356,8 +501,10 @@ async function refreshForum() {
                 }
             }
             renderForumList();
+            updateForumUnreadIndicators();
         } catch (e) {
             renderForumList();
+            updateForumUnreadIndicators();
         } finally {
             forumRefreshInFlight = null;
         }
@@ -451,6 +598,7 @@ async function submitForumPost() {
         }
         forumPosts.unshift(postIndexData);
         saveForumIndexToLocalCache(forumPosts);
+        markMyForumPostRepliesAsRead(postIndexData);
         filterForum('最新');
         showMiniNotice('🌸 發佈成功', '文章已經成功發佈到月老看板！');
     } catch (e) {
@@ -495,6 +643,8 @@ function closeForumViewModal() {
     setTimeout(() => {
         modal.classList.add('hidden');
         currentViewingPostId = null;
+        updateForumUnreadIndicators();
+        renderForumList();
     }, 300);
 }
 
@@ -548,10 +698,19 @@ async function refreshForumPost(forceId = null) {
                     }
                     listNeedSync = true;
                 }
+                if (idxPost) {
+                    const latestTs = getLatestReplyTimestampOfPost(viewingPostData);
+                    if (latestTs > Number(idxPost.lastReplyTs || 0)) {
+                        idxPost.lastReplyTs = latestTs;
+                        listNeedSync = true;
+                    }
+                }
                 if (listNeedSync) {
+                    saveForumIndexToLocalCache(forumPosts);
                     renderForumList();
                 }
                 renderForumPostDetail();
+                updateForumUnreadIndicators();
             } else {
                 document.getElementById('forumPostHeader').innerHTML = '<div class="text-center text-rose-500 font-bold py-10">此文章不存在或已被刪除。</div>';
             }
@@ -562,6 +721,19 @@ async function refreshForumPost(forceId = null) {
 function renderForumPostDetail() {
     if (!viewingPostData) return;
     const p = viewingPostData;
+    const myPidForRead = (typeof appState !== 'undefined' && appState && appState.playerId)
+        ? String(appState.playerId).trim()
+        : '';
+    if (myPidForRead && !isBackendForumPost(p) && String(p.authorId || '').trim() === myPidForRead) {
+        const idxItem = forumPosts.find(item => String(item.id) === String(p.id));
+        if (idxItem) {
+            idxItem.replyCount = countForumPostReplies(p);
+            idxItem.lastReplyTs = Math.max(Number(idxItem.lastReplyTs || 0), getLatestReplyTimestampOfPost(p));
+            saveForumIndexToLocalCache(forumPosts);
+        }
+        markMyForumPostRepliesAsRead(p);
+        renderForumList();
+    }
     const headerEl = document.getElementById('forumPostHeader');
     const repliesEl = document.getElementById('forumRepliesList');
     
@@ -765,13 +937,21 @@ async function submitForumReply() {
             
             await CloudSync.patchNode(`${FORUM_INDEX_KEY}/${currentViewingPostId}`, { 
                 replyCount: curReplyCount,
+                lastReplyTs: nowTs,
+                lastReplyAuthorId: String(appState.playerId || ''),
                 lastUpdatedAt: nowTs
             });
             // Update local index cache
             const idxPost = forumPosts.find(p => p.id === currentViewingPostId);
             if (idxPost) {
                 idxPost.replyCount = curReplyCount;
+                idxPost.lastReplyTs = nowTs;
+                idxPost.lastReplyAuthorId = String(appState.playerId || '');
                 idxPost.lastUpdatedAt = nowTs;
+                saveForumIndexToLocalCache(forumPosts);
+                if (isPostAuthor) {
+                    markMyForumPostRepliesAsRead(idxPost);
+                }
                 renderForumList();
             }
         }
@@ -1079,6 +1259,7 @@ async function editMyForumPost(postId) {
 }
 
 window.renderForumList = renderForumList;
+window.updateForumUnreadIndicators = updateForumUnreadIndicators;
 window.goToForumPage = goToForumPage;
 window.filterForum = filterForum;
 window.refreshForum = refreshForum;

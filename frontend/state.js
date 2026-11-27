@@ -76,6 +76,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!document.getElementById('tab-wishes')?.classList.contains('hidden') && typeof renderWishWallTab === 'function') {
                 renderWishWallTab();
             }
+            if (typeof loadForumIndexFromLocalCache === 'function') {
+                forumPosts = loadForumIndexFromLocalCache();
+            }
+            if (typeof updateForumUnreadIndicators === 'function') {
+                updateForumUnreadIndicators();
+            }
             if (!document.getElementById('tab-forum')?.classList.contains('hidden') && typeof refreshForum === 'function') {
                 refreshForum();
             }
@@ -110,6 +116,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (typeof renderHomeFateWall === 'function') renderHomeFateWall(true);
     if (typeof updateWishNavBadge === 'function') updateWishNavBadge();
     if (typeof renderWishWallTab === 'function') renderWishWallTab(true);
+    if (typeof loadForumIndexFromLocalCache === 'function') {
+        forumPosts = loadForumIndexFromLocalCache();
+    }
+    if (typeof updateForumUnreadIndicators === 'function') updateForumUnreadIndicators();
     if (!document.getElementById('tab-forum')?.classList.contains('hidden') && typeof refreshForum === 'function') {
         refreshForum();
     }
@@ -150,8 +160,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const fwKey = (typeof FATE_WALL_KEY !== 'undefined') ? FATE_WALL_KEY : 'yuelao_fate_wall';
         const wwKey = (typeof WISH_WALL_KEY !== 'undefined') ? WISH_WALL_KEY : 'yuelao_wish_wall';
         if ([USERS_LOCAL_KEY, SYSTEM_STATE_KEY, CUSTOM_ACTIVITIES_KEY, BANNED_RULES_KEY, MAILBOX_KEY, REPORTS_KEY, CHATS_KEY, fwKey, wwKey, 'yuelao_forum_index', 'yuelao_test_event'].includes(e.key)) {
-            if (e.key === 'yuelao_forum_index' && typeof refreshForum === 'function') {
-                refreshForum();
+            if (e.key === 'yuelao_forum_index') {
+                if (typeof loadForumIndexFromLocalCache === 'function') forumPosts = loadForumIndexFromLocalCache();
+                if (typeof updateForumUnreadIndicators === 'function') updateForumUnreadIndicators();
+                if (typeof refreshForum === 'function') refreshForum();
             }
             if (e.key === fwKey && typeof renderHomeFateWall === 'function') {
                 renderHomeFateWall(true);

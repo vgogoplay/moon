@@ -707,7 +707,10 @@ async function submitAdminForumReply(e, postId) {
                 selectedAdminForumPostDetail.replies = mapObj;
             }
             selectedAdminForumPostDetail.replies[replyId] = replyData;
-            nextReplyCount = Object.keys(selectedAdminForumPostDetail.replies).length;
+            const validReplyKeys = Object.keys(selectedAdminForumPostDetail.replies).filter(
+                k => selectedAdminForumPostDetail.replies[k] && typeof selectedAdminForumPostDetail.replies[k] === 'object'
+            );
+            nextReplyCount = validReplyKeys.length;
             selectedAdminForumPostDetail.replyCount = nextReplyCount;
             selectedAdminForumPostDetail.lastUpdatedAt = nowTs;
         } else {
@@ -740,6 +743,8 @@ async function submitAdminForumReply(e, postId) {
                 }),
                 CloudSync.patchNode(`${ADMIN_FORUM_INDEX_KEY}/${pid}`, {
                     replyCount: nextReplyCount,
+                    lastReplyTs: nowTs,
+                    lastReplyAuthorId: 'ADMIN',
                     lastUpdatedAt: nowTs
                 })
             ]);
