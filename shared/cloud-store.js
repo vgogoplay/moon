@@ -904,8 +904,10 @@ const CloudSync = {
             const threadRaw = raw[pairKey];
             const msgs = this.mapToArray(threadRaw);
             msgs.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
-            // 同步雲端回本地時，也強制裁切至最近 200 則
-            result[pairKey] = msgs.slice(-200);
+            // 同步雲端回本地時，強制依加權上限裁切至最近 200 則（1 張圖片 = 10 則訊息）
+            result[pairKey] = (typeof ChatStore !== 'undefined' && typeof ChatStore.trimWeightedMessages === 'function')
+                ? ChatStore.trimWeightedMessages(msgs, 250).kept
+                : msgs.slice(-250);
         });
         return result;
     },
@@ -1936,7 +1938,13 @@ const CloudSync = {
             : false;
         if (includeAllChats || isFriendsTabOpen) {
             const rec = this.tree && this.tree[USERS_KEY] ? this.tree[USERS_KEY][me] : null;
-            this.partnerIdsOf(rec).forEach(partnerId => {
+            const pidSet = new Set(this.partnerIdsOf(rec));
+            if (typeof appState !== 'undefined' && appState && Array.isArray(appState.friends)) {
+                appState.friends.forEach(f => {
+                    if (f && f.id) pidSet.add(String(f.id).trim());
+                });
+            }
+            pidSet.forEach(partnerId => {
                 const pk = this.pairKeyOf(me, partnerId);
                 paths.push(`${CHATS_KEY}/${pk}`);
             });
@@ -2053,7 +2061,16 @@ const CloudSync = {
             .filter(([, m]) => m && typeof m === 'object')
             .sort((a, b) => Number(a[1].ts || 0) - Number(b[1].ts || 0));
         const trimmedMap = {};
-        sortedEntries.slice(-200).forEach(([k, m]) => {
+        let usedUnits = 0;
+        const keptPairs = [];
+        for (let i = sortedEntries.length - 1; i >= 0; i--) {
+            const [k, m] = sortedEntries[i];
+            const w = (m && m.imageData) ? 10 : 1;
+            if (usedUnits + w > 250 && keptPairs.length > 0) break;
+            usedUnits += w;
+            keptPairs.push([k, m]);
+        }
+        keptPairs.reverse().forEach(([k, m]) => {
             trimmedMap[k] = m;
         });
         this.tree[CHATS_KEY][pairKey] = trimmedMap;
@@ -4402,40 +4419,80 @@ const ChatStore = {
         return all[key];
     },
 
+    getMessageWeight(msg) {
+        if (!msg || typeof msg !== 'object') return 1;
+        if (msg.imageData && String(msg.imageData).startsWith('data:image/')) return 10;
+        const w = Number(msg.weight || 1);
+        return w > 1 ? w : 1;
+    },
+
+    getTotalWeightedCount(msgs) {
+        if (!Array.isArray(msgs)) return 0;
+        return msgs.reduce((sum, m) => sum + this.getMessageWeight(m), 0);
+    },
+
+    trimWeightedMessages(msgs, maxWeight = 250) {
+        const list = Array.isArray(msgs) ? msgs.filter(m => m && typeof m === 'object') : [];
+        let usedUnits = 0;
+        let cutIdx = 0;
+        for (let i = list.length - 1; i >= 0; i--) {
+            const w = this.getMessageWeight(list[i]);
+            if (usedUnits + w > maxWeight && i < list.length - 1) {
+                cutIdx = i + 1;
+                break;
+            }
+            usedUnits += w;
+        }
+        return {
+            kept: list.slice(cutIdx),
+            removed: cutIdx > 0 ? list.slice(0, cutIdx) : [],
+            usedUnits
+        };
+    },
+
     appendMessage(id1, id2, msg) {
         if (!id1 || !id2) return [];
         const all = this.getAll();
         const key = this.getPairKey(id1, id2);
         if (!Array.isArray(all[key])) all[key] = [];
         const msgTs = Number(msg.ts) || Date.now();
+        const hasImage = Boolean(msg.imageData && String(msg.imageData).startsWith('data:image/'));
+        const msgWeight = hasImage ? 10 : 1;
         const savedMsg = {
             id: msg.id || `MSG_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             senderId: String(msg.senderId),
             senderName: msg.senderName || '',
-            text: msg.text,
+            text: msg.text || (hasImage ? '📷 傳送了一張圖片' : ''),
             time: msg.time || '',
             dateTime: msg.dateTime || this.formatChatDateTimeStr(msgTs),
-            ts: msgTs
+            ts: msgTs,
+            weight: msgWeight
         };
+        if (hasImage) {
+            savedMsg.imageData = String(msg.imageData);
+        }
         all[key].push(savedMsg);
         
-        // P0：限制每個聊天室最多保留最近 200 則訊息，避免 DOM 卡頓與超過 localStorage 容量
-        let removedIds = [];
-        if (all[key].length > 200) {
-            const removedMsgs = all[key].slice(0, all[key].length - 200);
-            removedIds = removedMsgs.map(m => m.id).filter(Boolean);
-            all[key] = all[key].slice(-200);
-        }
+        // 每個聊天室最多保留最近 250 則訊息（1 張圖片 = 10 則訊息），超過即刪除不紀錄
+        const trimRes = this.trimWeightedMessages(all[key], 250);
+        all[key] = trimRes.kept;
+        const removedIds = trimRes.removed.map(m => m && m.id).filter(Boolean);
         
         this.saveAll(all);
         
         if (typeof CloudSync !== 'undefined') {
             const sendPath = `${CHATS_KEY}/${key}/${savedMsg.id}`;
+            const metaLastMsg = { ...savedMsg };
+            if (metaLastMsg.imageData) {
+                delete metaLastMsg.imageData;
+                metaLastMsg.hasImage = true;
+            }
+            const weightedTotal = this.getTotalWeightedCount(all[key]);
             CloudSync.putNode(sendPath, savedMsg, { throwOnError: true }).then(() => {
                 CloudSync.patchNode(`${CHAT_META_KEY}/${key}`, {
-                    lastMsg: savedMsg,
+                    lastMsg: metaLastMsg,
                     lastTs: savedMsg.ts,
-                    msgCount: all[key].length
+                    msgCount: weightedTotal
                 });
             }).catch(() => {
                 // 寫入失敗（權杖刷新後仍失敗）：撤回樂觀顯示的假訊息，並通知畫面
@@ -4929,8 +4986,19 @@ function compactStateForStorage(state) {
         copy.friends = copy.friends.map(f => {
             if (!f || typeof f !== 'object' || String(f.id || '').startsWith('MOCK_FRIEND_')) return f;
             const msgs = Array.isArray(f.messages) ? f.messages.slice(-5) : [];
-            return { ...f, messages: msgs.map(m => (m && typeof m.text === 'string' && m.text.length > 120)
-                ? { ...m, text: m.text.slice(0, 120) + '…' } : m) };
+            return { ...f, messages: msgs.map(m => {
+                if (!m || typeof m !== 'object') return m;
+                const copyM = { ...m };
+                if (copyM.imageData) {
+                    delete copyM.imageData;
+                    copyM.hasImage = true;
+                    if (!copyM.text) copyM.text = '📷 傳送了一張圖片';
+                }
+                if (typeof copyM.text === 'string' && copyM.text.length > 120) {
+                    copyM.text = copyM.text.slice(0, 120) + '…';
+                }
+                return copyM;
+            }) };
         });
     }
     return copy;
@@ -4959,3 +5027,139 @@ async function containsBannedWordsAsync(textVal) {
     }
     return false;
 }
+
+// ==================== 🖼️ 前端圖片壓縮與燈箱檢視共用工具 ====================
+const YuelaoImageHelper = {
+    estimateDataUrlBytes(dataUrl) {
+        const str = String(dataUrl || '');
+        const commaIdx = str.indexOf(',');
+        if (commaIdx < 0) return str.length;
+        const b64 = str.slice(commaIdx + 1);
+        return Math.ceil((b64.length * 3) / 4);
+    },
+
+    async compressImageFile(file, options = {}) {
+        if (!file || typeof file !== 'object') {
+            throw new Error('請選擇有效的圖片檔案');
+        }
+        const fileType = String(file.type || '').toLowerCase();
+        const fileName = String(file.name || '').toLowerCase();
+        const isImg = fileType.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp|heic|heif)$/i.test(fileName);
+        if (!isImg) {
+            throw new Error('僅支援上傳圖片格式（JPG / PNG / WebP / GIF）');
+        }
+        if (Number(file.size || 0) > 15 * 1024 * 1024) {
+            throw new Error('原始圖片檔案過大（超過 15MB），請選擇較小的照片');
+        }
+
+        const maxBytes = Number(options.maxBytes) || (50 * 1024); // 預設壓縮後上限 50 KB
+        const startMaxSide = Number(options.maxSide) || 600;
+        const startQuality = Number(options.quality) || 0.50;
+
+        const objectUrl = URL.createObjectURL(file);
+        try {
+            const img = await new Promise((resolve, reject) => {
+                const el = new Image();
+                el.onload = () => resolve(el);
+                el.onerror = () => reject(new Error('圖片讀取失敗，請換一張照片重試'));
+                el.src = objectUrl;
+            });
+
+            const origW = Number(img.naturalWidth || img.width || 0);
+            const origH = Number(img.naturalHeight || img.height || 0);
+            if (!origW || !origH) {
+                throw new Error('無法辨識圖片尺寸，請換一張照片重試');
+            }
+
+            const steps = [
+                { maxSide: startMaxSide, quality: startQuality },
+                { maxSide: Math.min(startMaxSide, 500), quality: 0.42 },
+                { maxSide: Math.min(startMaxSide, 420), quality: 0.35 },
+                { maxSide: 360, quality: 0.30 }
+            ];
+
+            let bestDataUrl = '';
+            let bestW = origW;
+            let bestH = origH;
+            let bestBytes = Infinity;
+
+            for (const step of steps) {
+                const scale = Math.min(1, step.maxSide / Math.max(origW, origH));
+                const targetW = Math.max(1, Math.round(origW * scale));
+                const targetH = Math.max(1, Math.round(origH * scale));
+
+                const canvas = document.createElement('canvas');
+                canvas.width = targetW;
+                canvas.height = targetH;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) throw new Error('瀏覽器不支援圖片壓縮功能');
+
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, targetW, targetH);
+                ctx.drawImage(img, 0, 0, targetW, targetH);
+
+                let dataUrl = canvas.toDataURL('image/webp', step.quality);
+                if (!dataUrl || !dataUrl.startsWith('data:image/webp')) {
+                    dataUrl = canvas.toDataURL('image/jpeg', step.quality);
+                }
+
+                const bytes = this.estimateDataUrlBytes(dataUrl);
+                if (bytes < bestBytes) {
+                    bestDataUrl = dataUrl;
+                    bestW = targetW;
+                    bestH = targetH;
+                    bestBytes = bytes;
+                }
+                if (bytes <= maxBytes) {
+                    break;
+                }
+            }
+
+            if (!bestDataUrl || bestBytes > maxBytes) {
+                throw new Error('圖片細節過多，壓縮後仍超過 50KB 上限，請裁切或換一張照片');
+            }
+
+            return {
+                dataUrl: bestDataUrl,
+                width: bestW,
+                height: bestH,
+                byteSize: bestBytes
+            };
+        } finally {
+            try { URL.revokeObjectURL(objectUrl); } catch (e) {}
+        }
+    }
+};
+
+function openImageLightbox(src) {
+    const cleanSrc = String(src || '').trim();
+    if (!cleanSrc.startsWith('data:image/') && !cleanSrc.startsWith('http://') && !cleanSrc.startsWith('https://')) {
+        return;
+    }
+    let modal = document.getElementById('yuelaoImageLightboxModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'yuelaoImageLightboxModal';
+        modal.className = 'hidden fixed inset-0 bg-black/80 backdrop-blur-xs z-[120] flex items-center justify-center p-4 cursor-zoom-out';
+        modal.onclick = function() { closeImageLightbox(); };
+        modal.innerHTML = `
+            <div class="relative max-w-3xl max-h-[88vh] flex flex-col items-center" onclick="event.stopPropagation()">
+                <button type="button" onclick="closeImageLightbox()" class="self-end mb-2 px-3 py-1 rounded-full bg-white/90 text-gray-800 text-xs font-bold shadow hover:bg-white transition">✕ 關閉圖片</button>
+                <img id="yuelaoImageLightboxImg" src="" alt="放大檢視圖片" class="max-w-full max-h-[80vh] rounded-2xl shadow-2xl border-2 border-white/80 object-contain bg-white">
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+    const imgEl = document.getElementById('yuelaoImageLightboxImg');
+    if (imgEl) imgEl.src = cleanSrc;
+    modal.classList.remove('hidden');
+}
+
+function closeImageLightbox() {
+    const modal = document.getElementById('yuelaoImageLightboxModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+window.YuelaoImageHelper = YuelaoImageHelper;
+window.openImageLightbox = openImageLightbox;
+window.closeImageLightbox = closeImageLightbox;

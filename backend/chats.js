@@ -351,6 +351,21 @@ function buildAdminChatSingleBubbleHtml(m, activeRoom, msgKey) {
         ? `${activeRoom.nameB} (ID:${activeRoom.idB})`
         : `${activeRoom.nameA} (ID:${activeRoom.idA})`;
 
+    const rawImg = String(m.imageData || '').trim();
+    const hasValidImg = rawImg.startsWith('data:image/');
+    if (hasValidImg) {
+        return `
+            <div data-msg-key="${safeKeyAttr}" class="flex flex-col ${isSideB ? 'items-end' : 'items-start'}">
+                <span class="text-[10px] font-semibold mb-0.5 px-1 ${isSideB ? 'text-[#c96a7b]' : 'text-sky-700'}">
+                    ${escapeChatAdminHtml(senderLabel)} ・ <span class="text-[10px] font-normal text-gray-400">圖片（計 10 則）</span>
+                </span>
+                <div class="max-w-[82%] p-1.5 rounded-2xl shadow-2xs ${isSideB ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] rounded-br-xs' : 'bg-white border border-pink-200 rounded-bl-xs'}">
+                    <img src="${rawImg}" alt="玩家圖片" loading="lazy" onclick="if(typeof openImageLightbox==='function') openImageLightbox(this.src)" title="點擊放大檢視圖片" class="max-w-[220px] max-h-[220px] rounded-xl object-cover cursor-zoom-in bg-white">
+                </div>
+                <span class="text-[10px] text-gray-400 mt-0.5 px-1">${escapeChatAdminHtml(timeDisplay)}</span>
+            </div>
+        `;
+    }
     return `
         <div data-msg-key="${safeKeyAttr}" class="flex flex-col ${isSideB ? 'items-end' : 'items-start'}">
             <span class="text-[10px] font-semibold mb-0.5 px-1 ${isSideB ? 'text-[#c96a7b]' : 'text-sky-700'}">

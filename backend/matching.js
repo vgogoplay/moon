@@ -839,6 +839,119 @@ function renderLinkedMockFriendsList() {
     `;
 }
 
+function buildMockTestFriendRoomAndState(targetId, existingCount = 0) {
+    const pid = String(targetId || '').trim();
+    const users = typeof getUsers === 'function' ? getUsers() : [];
+    const targetUser = users.find(u => u && String(u.id).trim() === pid) || null;
+    const isMale = targetUser
+        ? (String(targetUser.gender || '').trim() === '男')
+        : pid.startsWith('1');
+
+    const mockNamesFemale = ['知夏 (C)', '柚子 (D)', '千尋 (E)', '美咲 (F)', '星奈 (G)', '綾乃 (H)'];
+    const mockNamesMale = ['子豪 (C)', '柏翰 (D)', '冠宇 (E)', '承恩 (F)', '彥廷 (G)', '品叡 (H)'];
+    const mockIndex = Math.max(0, Number(existingCount) || 0);
+    const chosenName = isMale
+        ? (mockNamesFemale[mockIndex] || `測試好友_${mockIndex + 1}`)
+        : (mockNamesMale[mockIndex] || `測試好友_${mockIndex + 1}`);
+
+    const now = Date.now();
+    const newMockId = `MOCK_FRIEND_${now}_${mockIndex}`;
+    const pairKey = (typeof ChatStore !== 'undefined' && typeof ChatStore.getPairKey === 'function')
+        ? ChatStore.getPairKey(pid, newMockId)
+        : [pid, newMockId].sort().join('__');
+
+    const timeStr = new Date(now).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+    const initialMsgs = [
+        {
+            id: `INIT_${pairKey}_0`,
+            senderId: 'system',
+            senderName: '',
+            text: `🌸【測試好友連動】月老紅線牽起！已為你與「${chosenName}」建立專屬聊天室（支援文字與圖片測試）。`,
+            time: timeStr,
+            dateTime: (typeof ChatStore !== 'undefined' && typeof ChatStore.formatChatDateTimeStr === 'function') ? ChatStore.formatChatDateTimeStr(now) : timeStr,
+            ts: now,
+            weight: 1
+        },
+        {
+            id: `INIT_${pairKey}_1`,
+            senderId: newMockId,
+            senderName: chosenName,
+            text: '你好呀！很高興在紅線企劃與你相遇～可以試著傳文字或圖片給我喔 🌸',
+            time: timeStr,
+            dateTime: (typeof ChatStore !== 'undefined' && typeof ChatStore.formatChatDateTimeStr === 'function') ? ChatStore.formatChatDateTimeStr(now + 1) : timeStr,
+            ts: now + 1,
+            weight: 1
+        }
+    ];
+
+    if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
+        ChatStore.ensureThread(pid, newMockId, initialMsgs);
+    }
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+        const lastMsgObj = initialMsgs[initialMsgs.length - 1];
+        CloudSync.patchNode(`${CHAT_META_KEY}/${pairKey}`, {
+            lastMsg: lastMsgObj,
+            lastTs: Number(lastMsgObj.ts || now),
+            msgCount: initialMsgs.length
+        });
+    }
+
+    const sessionLabel = (typeof getBatchScheduleInfo === 'function' && typeof getCurrentBatchNumber === 'function')
+        ? getBatchScheduleInfo(getCurrentBatchNumber() + mockIndex + 1).tueLabel
+        : '測試場次';
+
+    const friendObj = {
+        id: newMockId,
+        nickname: chosenName,
+        sessionLabel,
+        matchedAt: now,
+        myContinue: false,
+        partnerContinue: false,
+        profile: {
+            gender: isMale ? '女' : '男',
+            region: (targetUser && targetUser.region) || '中部',
+            city: (targetUser && targetUser.city) || '台中市',
+            mbti: 'ENFP',
+            hobbies: ['音樂', '攝影', '藝文展覽'],
+            oneSentence: '你好呀！很高興在紅線企劃與你相遇～',
+            icebreakerQuestion: '最近有沒有讓你單曲循環的一首歌？'
+        },
+        privacy: { gender: 'open', icebreakerQuestion: 'open', city: 'open', mbti: 'open', hobbies: 'open', oneSentence: 'open' },
+        messages: initialMsgs
+    };
+
+    const syncLocalFriendState = (storageKey) => {
+        try {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return;
+            const st = JSON.parse(raw);
+            if (!st || String(st.playerId || '') !== pid) return;
+            if (!Array.isArray(st.friends)) st.friends = [];
+            if (!st.friends.some(f => f && String(f.id) === newMockId)) {
+                st.friends.push(friendObj);
+            }
+            st.activeFriendId = newMockId;
+            localStorage.setItem(storageKey, JSON.stringify(st));
+        } catch (e) {}
+    };
+    syncLocalFriendState(PLAYER_STATE_PREFIX + pid);
+    syncLocalFriendState(FRONTEND_STORAGE_KEY);
+
+    return friendObj;
+}
+
+function cleanupMockFriendChatRooms(targetId, mockIds = []) {
+    const pid = String(targetId || '').trim();
+    if (!pid || !Array.isArray(mockIds) || mockIds.length === 0) return;
+    mockIds.forEach(mid => {
+        const cleanMid = String(mid || '').trim();
+        if (!cleanMid) return;
+        if (typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+            ChatStore.clearChat(pid, cleanMid);
+        }
+    });
+}
+
 function adminLinkFriendCToPlayer() {
     const targetId = resolveLinkFriendCTargetId();
     if (!targetId) {
@@ -846,9 +959,18 @@ function adminLinkFriendCToPlayer() {
         return;
     }
 
-    triggerFrontendTestEvent('ADD_FRIEND_C', targetId);
+    const existingMocks = getLinkedMockFriendsForTarget(targetId);
+    const createdFriend = buildMockTestFriendRoomAndState(targetId, existingMocks.length);
+
+    triggerFrontendTestEvent('ADD_FRIEND_C', targetId, {
+        mockFriend: createdFriend
+    });
+    renderLinkedMockFriendsList();
     setTimeout(renderLinkedMockFriendsList, 350);
     setTimeout(renderLinkedMockFriendsList, 1200);
+    if (typeof appendLog === 'function') {
+        appendLog(`<span class="text-pink-300">[新增測試好友]</span> 已為玩家 ID:<strong>${targetId}</strong> 新增測試好友「<strong>${createdFriend.nickname}</strong>」並同步建立專屬聊天室！`);
+    }
 }
 
 function adminRemoveOneFriendCFromPlayer() {
@@ -861,9 +983,10 @@ function adminRemoveOneFriendCFromPlayer() {
     const mockList = getLinkedMockFriendsForTarget(targetId);
     const lastMock = mockList[mockList.length - 1];
     if (lastMock) {
+        cleanupMockFriendChatRooms(targetId, [String(lastMock.id)]);
         mutateLocalMockFriendsForTarget(targetId, f => String(f.id) !== String(lastMock.id));
         triggerFrontendTestEvent('REMOVE_FRIEND_C', targetId, { mockFriendId: String(lastMock.id) });
-        appendLog(`<span class="text-amber-300">[刪除測試好友]</span> 已移除玩家 ID:<strong>${targetId}</strong> 的測試好友「<strong>${lastMock.nickname}</strong>」。`);
+        appendLog(`<span class="text-amber-300">[刪除測試好友]</span> 已移除玩家 ID:<strong>${targetId}</strong> 的測試好友「<strong>${lastMock.nickname}</strong>」並清除聊天室。`);
     } else {
         triggerFrontendTestEvent('REMOVE_FRIEND_C', targetId);
         appendLog(`<span class="text-amber-300">[刪除測試好友]</span> 已發送移除指令至玩家 ID:<strong>${targetId}</strong>，前台將刪除最後一位測試好友。`);
@@ -878,10 +1001,11 @@ function adminRemoveSpecificFriendC(targetId, mockFriendId) {
 
     const mockList = getLinkedMockFriendsForTarget(pid);
     const targetFriend = mockList.find(f => String(f.id) === mid);
+    cleanupMockFriendChatRooms(pid, [mid]);
     mutateLocalMockFriendsForTarget(pid, f => String(f.id) !== mid);
     triggerFrontendTestEvent('REMOVE_FRIEND_C', pid, { mockFriendId: mid });
     renderLinkedMockFriendsList();
-    appendLog(`<span class="text-amber-300">[刪除測試好友]</span> 已移除玩家 ID:<strong>${pid}</strong> 的測試好友${targetFriend ? `「<strong>${targetFriend.nickname}</strong>」` : ''}。`);
+    appendLog(`<span class="text-amber-300">[刪除測試好友]</span> 已移除玩家 ID:<strong>${pid}</strong> 的測試好友${targetFriend ? `「<strong>${targetFriend.nickname}</strong>」` : ''}並清除聊天室。`);
 }
 
 function adminClearAllFriendCFromPlayer() {
@@ -891,10 +1015,12 @@ function adminClearAllFriendCFromPlayer() {
         return;
     }
 
+    const mockList = getLinkedMockFriendsForTarget(targetId);
+    cleanupMockFriendChatRooms(targetId, mockList.map(f => String(f.id)));
     const removed = mutateLocalMockFriendsForTarget(targetId, () => false);
     triggerFrontendTestEvent('CLEAR_ALL_FRIEND_C', targetId);
     renderLinkedMockFriendsList();
-    appendLog(`<span class="text-amber-300">[清空測試好友]</span> 已清空玩家 ID:<strong>${targetId}</strong> 的全部測試 C 連動好友${removed > 0 ? `（共 ${removed} 位）` : ''}。`);
+    appendLog(`<span class="text-amber-300">[清空測試好友]</span> 已清空玩家 ID:<strong>${targetId}</strong> 的全部測試 C 連動好友${removed > 0 ? `（共 ${removed} 位）` : ''}與聊天室。`);
 }
 
 function adminTriggerConfessionForPlayer() {

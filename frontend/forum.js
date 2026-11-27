@@ -10,6 +10,133 @@ const FORUM_RETENTION_DAYS = 30;
 const FORUM_RETENTION_MS = FORUM_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 const FORUM_POSTS_PER_PAGE = 5;
+
+// ==================== 🖼️ 討論區壓縮圖片上傳（僅新增／編輯文章可上傳與修改，上限 1 張） ====================
+const FORUM_IMAGE_COOLDOWN_MS = 2000;
+let pendingForumPostImageData = '';
+let pendingEditPostImageData = '';
+let editPostImageChanged = false;
+
+function getForumImageCooldownStorageKey() {
+    const pid = (typeof appState !== 'undefined' && appState && appState.playerId)
+        ? String(appState.playerId).trim()
+        : 'guest';
+    return `yuelao_forum_img_last_ts_${pid}`;
+}
+
+function getForumImageRemainingCooldownSec() {
+    try {
+        const lastTs = Number(localStorage.getItem(getForumImageCooldownStorageKey()) || 0);
+        if (!lastTs) return 0;
+        const remMs = (lastTs + FORUM_IMAGE_COOLDOWN_MS) - Date.now();
+        return remMs > 0 ? Math.ceil(remMs / 1000) : 0;
+    } catch (e) {
+        return 0;
+    }
+}
+
+function markForumImageSentNow() {
+    try {
+        localStorage.setItem(getForumImageCooldownStorageKey(), String(Date.now()));
+    } catch (e) {}
+}
+
+function updateForumPostImagePreviewUI() {
+    const wrap = document.getElementById('forumPostImagePreviewWrap');
+    const imgEl = document.getElementById('forumPostImagePreviewImg');
+    if (!wrap || !imgEl) return;
+    if (pendingForumPostImageData) {
+        imgEl.src = pendingForumPostImageData;
+        wrap.classList.remove('hidden');
+    } else {
+        imgEl.src = '';
+        wrap.classList.add('hidden');
+    }
+}
+
+function clearForumPostImage() {
+    pendingForumPostImageData = '';
+    const inp = document.getElementById('forumPostImageInput');
+    if (inp) inp.value = '';
+    updateForumPostImagePreviewUI();
+}
+
+async function handleForumPostImageSelected(inputEl) {
+    const file = inputEl && inputEl.files && inputEl.files[0];
+    if (!file) return;
+    inputEl.value = '';
+
+    const remSec = getForumImageRemainingCooldownSec();
+    if (remSec > 0) {
+        showMiniNotice('⏳ 上傳冷卻中', `每 2 秒最多上傳 1 張圖片，請再等 ${remSec} 秒後再試！`);
+        return;
+    }
+
+    try {
+        if (typeof YuelaoImageHelper === 'undefined' || typeof YuelaoImageHelper.compressImageFile !== 'function') {
+            throw new Error('圖片壓縮模組尚未載入，請重新整理頁面後再試');
+        }
+        const compressed = await YuelaoImageHelper.compressImageFile(file, {
+            maxSide: 600,
+            quality: 0.50,
+            maxBytes: 50 * 1024
+        });
+        pendingForumPostImageData = compressed.dataUrl;
+        updateForumPostImagePreviewUI();
+    } catch (err) {
+        showMiniNotice('⚠️ 圖片處理失敗', (err && err.message) || '請換一張照片重試。');
+    }
+}
+
+function updateEditPostImagePreviewUI() {
+    const previewWrap = document.getElementById('editContentImagePreviewWrap');
+    const imgEl = document.getElementById('editContentImagePreviewImg');
+    if (!previewWrap || !imgEl) return;
+    if (pendingEditPostImageData) {
+        imgEl.src = pendingEditPostImageData;
+        previewWrap.classList.remove('hidden');
+    } else {
+        imgEl.src = '';
+        previewWrap.classList.add('hidden');
+    }
+}
+
+function clearEditPostImage() {
+    pendingEditPostImageData = '';
+    editPostImageChanged = true;
+    const inp = document.getElementById('editContentImageInput');
+    if (inp) inp.value = '';
+    updateEditPostImagePreviewUI();
+}
+
+async function handleEditPostImageSelected(inputEl) {
+    const file = inputEl && inputEl.files && inputEl.files[0];
+    if (!file) return;
+    inputEl.value = '';
+
+    const remSec = getForumImageRemainingCooldownSec();
+    if (remSec > 0) {
+        showMiniNotice('⏳ 上傳冷卻中', `每 2 秒最多上傳 1 張圖片，請再等 ${remSec} 秒後再試！`);
+        return;
+    }
+
+    try {
+        if (typeof YuelaoImageHelper === 'undefined' || typeof YuelaoImageHelper.compressImageFile !== 'function') {
+            throw new Error('圖片壓縮模組尚未載入，請重新整理頁面後再試');
+        }
+        const compressed = await YuelaoImageHelper.compressImageFile(file, {
+            maxSide: 600,
+            quality: 0.50,
+            maxBytes: 50 * 1024
+        });
+        pendingEditPostImageData = compressed.dataUrl;
+        editPostImageChanged = true;
+        updateEditPostImagePreviewUI();
+    } catch (err) {
+        showMiniNotice('⚠️ 圖片處理失敗', (err && err.message) || '請換一張照片重試。');
+    }
+}
+
 const FORUM_MY_POST_RECEIPTS_PREFIX = 'yuelao_forum_my_post_receipts_';
 
 function getForumMyPostReceiptsStorageKey() {
@@ -344,6 +471,7 @@ function renderForumList() {
                     ${isPostUnread ? '<span class="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>' : ''}
                     ${tagBadge}
                     <div class="flex-1 min-w-0 text-[#5e464a] text-[13px] font-bold truncate">${yuelaoEscapeHtml(p.title)}</div>
+                    ${p.hasImage ? '<span class="text-[11px] shrink-0" title="內含圖片">🖼️</span>' : ''}
                     ${unreadDotHtml}
                 </div>
                 <div class="flex items-center gap-3 text-gray-400 text-[11px] font-medium">
@@ -533,6 +661,7 @@ function openForumPostModal() {
     const contentEl = document.getElementById('forumPostContent');
     if (titleEl) titleEl.value = '';
     if (contentEl) contentEl.value = '';
+    clearForumPostImage();
     
     document.getElementById('forumPostModal').classList.remove('hidden');
 }
@@ -568,6 +697,9 @@ async function submitForumPost() {
     const nowTs = Date.now();
     const postId = 'post_' + nowTs + '_' + Math.random().toString(36).substr(2, 5);
     
+    const attachedPostImg = String(pendingForumPostImageData || '').trim();
+    const hasPostImg = attachedPostImg.startsWith('data:image/');
+
     const postIndexData = {
         id: postId,
         title,
@@ -579,7 +711,8 @@ async function submitForumPost() {
         createdAt: nowTs,
         lastUpdatedAt: nowTs,
         pushCount: 0,
-        replyCount: 0
+        replyCount: 0,
+        hasImage: hasPostImg
     };
 
     const postFullData = {
@@ -587,6 +720,11 @@ async function submitForumPost() {
         content,
         replies: {}
     };
+    if (hasPostImg) {
+        postFullData.imageData = attachedPostImg;
+        markForumImageSentNow();
+    }
+    clearForumPostImage();
 
     closeForumPostModal();
     showMiniNotice('⏳ 發佈中...', '文章正在寫入伺服器，請稍候。');
@@ -808,6 +946,11 @@ function renderForumPostDetail() {
         </div>
         <h2 class="text-lg sm:text-xl font-bold font-serif-jp text-[#5e464a] leading-snug break-words">${yuelaoEscapeHtml(p.title)}${editedTag}</h2>
         <div class="text-gray-700 text-sm leading-relaxed break-words pt-2 whitespace-pre-wrap">${formattedContent}</div>
+        ${(p.imageData && String(p.imageData).startsWith('data:image/')) ? `
+            <div class="pt-3">
+                <img src="${String(p.imageData)}" alt="文章附圖" loading="lazy" onclick="openImageLightbox(this.src)" title="點擊放大檢視圖片" class="max-h-72 rounded-2xl border border-pink-200 shadow-2xs object-contain bg-white cursor-zoom-in">
+            </div>
+        ` : ''}
         <div class="flex items-center mt-4 pt-3 border-t border-pink-50">
             ${likeBtnHtml}
         </div>
@@ -1082,12 +1225,22 @@ function openEditContentModal(type, postId, replyId, oldContent, oldTitle = '') 
     const titleInput = document.getElementById('editContentTitle');
     const contentInput = document.getElementById('editContentTextarea');
 
+    const imgSectionWrap = document.getElementById('editContentImageSection');
     if (type === 'post') {
         titleWrap.classList.remove('hidden');
         titleInput.value = oldTitle;
+        pendingEditPostImageData = (viewingPostData && viewingPostData.imageData && String(viewingPostData.imageData).startsWith('data:image/'))
+            ? String(viewingPostData.imageData)
+            : '';
+        editPostImageChanged = false;
+        if (imgSectionWrap) imgSectionWrap.classList.remove('hidden');
+        updateEditPostImagePreviewUI();
     } else {
         titleWrap.classList.add('hidden');
         titleInput.value = '';
+        pendingEditPostImageData = '';
+        editPostImageChanged = false;
+        if (imgSectionWrap) imgSectionWrap.classList.add('hidden');
     }
     
     contentInput.value = oldContent;
@@ -1136,7 +1289,7 @@ async function submitEditContent() {
         const oldTitleStr = viewingPostData ? String(viewingPostData.title || '') : (oldPost ? String(oldPost.title || '') : '');
         const oldContentStr = viewingPostData ? String(viewingPostData.content || '') : '';
 
-        if (newTitle === oldTitleStr && newContent === oldContentStr) {
+        if (newTitle === oldTitleStr && newContent === oldContentStr && !editPostImageChanged) {
             closeEditContentModal();
             return;
         }
@@ -1155,9 +1308,32 @@ async function submitEditContent() {
             }
         ];
         
+        const nextHasImage = editPostImageChanged
+            ? Boolean(pendingEditPostImageData && pendingEditPostImageData.startsWith('data:image/'))
+            : Boolean(viewingPostData && viewingPostData.imageData);
+        const postPatchPayload = {
+            title: newTitle,
+            content: newContent,
+            isEdited: true,
+            editedAt: nowTs,
+            editHistory: nextEditHistory,
+            hasImage: nextHasImage
+        };
+        const indexPatchPayload = {
+            title: newTitle,
+            isEdited: true,
+            hasImage: nextHasImage,
+            lastUpdatedAt: nowTs
+        };
+        if (editPostImageChanged) {
+            postPatchPayload.imageData = nextHasImage ? pendingEditPostImageData : null;
+            if (nextHasImage) markForumImageSentNow();
+        }
+
         if (oldPost) {
             oldPost.title = newTitle;
             oldPost.isEdited = true;
+            oldPost.hasImage = nextHasImage;
         }
         if (viewingPostData) {
             viewingPostData.title = newTitle;
@@ -1165,23 +1341,18 @@ async function submitEditContent() {
             viewingPostData.isEdited = true;
             viewingPostData.editedAt = nowTs;
             viewingPostData.editHistory = nextEditHistory;
+            viewingPostData.hasImage = nextHasImage;
+            if (editPostImageChanged) {
+                if (nextHasImage) viewingPostData.imageData = pendingEditPostImageData;
+                else delete viewingPostData.imageData;
+            }
             renderForumPostDetail();
         }
 
         try {
             if (typeof CloudSync !== 'undefined') {
-                await CloudSync.patchNode(`${FORUM_POSTS_KEY}/${editTargetPostId}`, {
-                    title: newTitle,
-                    content: newContent,
-                    isEdited: true,
-                    editedAt: nowTs,
-                    editHistory: nextEditHistory
-                });
-                await CloudSync.patchNode(`${FORUM_INDEX_KEY}/${editTargetPostId}`, {
-                    title: newTitle,
-                    isEdited: true,
-                    lastUpdatedAt: nowTs
-                });
+                await CloudSync.patchNode(`${FORUM_POSTS_KEY}/${editTargetPostId}`, postPatchPayload);
+                await CloudSync.patchNode(`${FORUM_INDEX_KEY}/${editTargetPostId}`, indexPatchPayload);
                 if (typeof CloudSync.recordPlayerOpLog === 'function') {
                     CloudSync.recordPlayerOpLog(appState.playerId, myName, '編輯討論區文章', `文章 ID:${editTargetPostId}\n編輯前：[${oldTitleStr}] ${oldContentStr}\n編輯後：[${newTitle}] ${newContent}`);
                 }
@@ -1277,6 +1448,10 @@ window.closeEditContentModal = closeEditContentModal;
 window.submitEditContent = submitEditContent;
 window.editMyForumReply = editMyForumReply;
 window.editMyForumPost = editMyForumPost;
+window.handleForumPostImageSelected = handleForumPostImageSelected;
+window.clearForumPostImage = clearForumPostImage;
+window.handleEditPostImageSelected = handleEditPostImageSelected;
+window.clearEditPostImage = clearEditPostImage;
 
 forumPosts = loadForumIndexFromLocalCache();
 window.loadForumIndexFromLocalCache = loadForumIndexFromLocalCache;

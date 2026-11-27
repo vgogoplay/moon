@@ -359,7 +359,7 @@ function renderAdminForumList() {
                             <span class="px-2 py-0.5 rounded border text-[10px] font-bold ${meta.badgeClass}">
                                 ${meta.icon} ${escapeForumAdminHtml(p.tag || '討論')}
                             </span>
-                            <span class="text-xs font-bold text-[#5e464a] truncate">${escapeForumAdminHtml(p.title || '(無標題)')}</span>${(p.isEdited && !isBackendPost) ? '<span class="px-1.5 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-bold shrink-0">✏️ 已編輯</span>' : ''}
+                            <span class="text-xs font-bold text-[#5e464a] truncate">${escapeForumAdminHtml(p.title || '(無標題)')}</span>${p.hasImage ? '<span class="text-[11px] shrink-0" title="內含圖片">🖼️</span>' : ''}${(p.isEdited && !isBackendPost) ? '<span class="px-1.5 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-bold shrink-0">✏️ 已編輯</span>' : ''}
                         </div>
                         <div class="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
                             <span class="font-semibold text-gray-700">${escapeForumAdminHtml(p.authorName || '匿名')}</span>
@@ -610,6 +610,7 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
                             ${editedBtnHtml}
                         </div>
                         <p class="text-xs text-gray-800 break-words leading-relaxed">${escapeForumAdminHtml(r.content || '')}</p>
+                        ${(r.imageData && String(r.imageData).startsWith('data:image/')) ? `<div class="pt-1"><img src="${String(r.imageData)}" alt="留言附圖" loading="lazy" onclick="if(typeof openImageLightbox==='function') openImageLightbox(this.src)" title="點擊放大檢視圖片" class="max-h-40 rounded-xl border border-pink-200 object-contain bg-white cursor-zoom-in"></div>` : ''}
                         ${replyHistoryBoxHtml}
                     </div>
                     ${rid ? `
@@ -635,6 +636,7 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
             </div>
             ${postEditHistoryBoxHtml}
             <div class="text-sm text-gray-800 leading-relaxed break-words whitespace-pre-wrap">${formattedContent}</div>
+            ${(p.imageData && String(p.imageData).startsWith('data:image/')) ? `<div class="pt-2"><img src="${String(p.imageData)}" alt="文章附圖" loading="lazy" onclick="if(typeof openImageLightbox==='function') openImageLightbox(this.src)" title="點擊放大檢視圖片" class="max-h-64 rounded-2xl border border-pink-200 object-contain bg-white cursor-zoom-in"></div>` : ''}
             <div class="pt-2 border-t border-pink-50 text-xs text-gray-500 flex items-center gap-3">
                 <span>❤️ 愛心數：<strong>${Number(p.pushCount || 0)}</strong></span>
                 <span>💬 實際留言數：<strong>${repliesArr.length}</strong></span>

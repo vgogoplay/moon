@@ -600,9 +600,15 @@ function syncFromSharedStorage() {
             stateChanged = true;
         }
 
-        // 5. 同步所有真實配對好友的最新資料、延長後的 matchedAt、雙方繼續配對狀態與共享聊天紀錄
+        // 5. 同步所有配對好友（含測試好友）的最新資料、延長後的 matchedAt、雙方繼續配對狀態與共享聊天紀錄
         appState.friends.forEach(f => {
-            if (String(f.id).startsWith('MOCK_FRIEND_')) return;
+            if (String(f.id).startsWith('MOCK_FRIEND_')) {
+                const mockSharedMsgs = ChatStore.getMessages(appState.playerId, f.id);
+                if (mockSharedMsgs.length > 0) {
+                    f.messages = mockSharedMsgs;
+                }
+                return;
+            }
             const latestPartner = userById.get(String(f.id));
             if (latestPartner) {
                 f.nickname = latestPartner.nickname || f.nickname;
@@ -690,7 +696,7 @@ function syncFromSharedStorage() {
         if (chatsChanged) {
             if (appState && appState.playerId && Array.isArray(appState.friends)) {
                 appState.friends.forEach(f => {
-                    if (!f || String(f.id).startsWith('MOCK_FRIEND_')) return;
+                    if (!f || !f.id) return;
                     const sharedMsgs = ChatStore.getMessages(appState.playerId, f.id);
                     if (sharedMsgs.length > 0) {
                         f.messages = sharedMsgs;
@@ -756,14 +762,6 @@ function applyBackendTestEvent(cmd, latestUsers) {
     } else if (cmd.type === 'ADD_FRIEND_C') {
         if (targetId && String(appState.playerId) !== targetId) return;
 
-        const mockNamesFemale = ['知夏 (C)', '柚子 (D)', '千尋 (E)', '美咲 (F)', '星奈 (G)', '綾乃 (H)'];
-        const mockNamesMale = ['子豪 (C)', '柏翰 (D)', '冠宇 (E)', '承恩 (F)', '彥廷 (G)', '品叡 (H)'];
-        const mockIndex = appState.friends.filter(f => String(f.id).startsWith('MOCK_FRIEND_')).length;
-        const isMale = String(appState.playerId || '1').startsWith('1');
-        const chosenName = isMale
-            ? (mockNamesFemale[mockIndex] || `新好友_${mockIndex + 2}`)
-            : (mockNamesMale[mockIndex] || `新好友_${mockIndex + 2}`);
-
         const now = Date.now();
         const willReachMulti = appState.friends.length >= 1;
         if (willReachMulti && !appState.confessionUnlockAt) {
@@ -771,17 +769,46 @@ function applyBackendTestEvent(cmd, latestUsers) {
             appState.confessionUnlockAt = calcConfessionUnlockTime(now);
         }
 
-        const newMockId = `MOCK_FRIEND_${Date.now()}_${mockIndex}`;
+        const payloadFriend = (cmd.mockFriend && typeof cmd.mockFriend === 'object' && cmd.mockFriend.id)
+            ? cmd.mockFriend
+            : null;
+        if (payloadFriend && appState.friends.some(f => String(f.id) === String(payloadFriend.id))) {
+            appState.activeFriendId = String(payloadFriend.id);
+            return;
+        }
+
+        const mockNamesFemale = ['知夏 (C)', '柚子 (D)', '千尋 (E)', '美咲 (F)', '星奈 (G)', '綾乃 (H)'];
+        const mockNamesMale = ['子豪 (C)', '柏翰 (D)', '冠宇 (E)', '承恩 (F)', '彥廷 (G)', '品叡 (H)'];
+        const mockIndex = appState.friends.filter(f => String(f.id).startsWith('MOCK_FRIEND_')).length;
+        const isMale = String(appState.playerId || '1').startsWith('1');
+        const chosenName = payloadFriend
+            ? String(payloadFriend.nickname || `測試好友_${mockIndex + 1}`)
+            : (isMale
+                ? (mockNamesFemale[mockIndex] || `新好友_${mockIndex + 2}`)
+                : (mockNamesMale[mockIndex] || `新好友_${mockIndex + 2}`));
+
+        const newMockId = payloadFriend ? String(payloadFriend.id) : `MOCK_FRIEND_${now}_${mockIndex}`;
         const unlockAt = appState.confessionUnlockAt || calcConfessionUnlockTime(now);
+        const timeStr = new Date(now).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+        const initialMsgs = (payloadFriend && Array.isArray(payloadFriend.messages) && payloadFriend.messages.length > 0)
+            ? payloadFriend.messages
+            : [
+                { senderId: 'system', text: `🌸 月老紅線牽起！因好友達 2 人以上，將於每隔 2 天的「${formatUnlockDateTime(unlockAt)}」觸發 20:00 心動抉擇。`, time: timeStr, ts: now },
+                { senderId: newMockId, senderName: chosenName, text: '你好呀！很高興在這裡與你相遇～可以試著傳文字或圖片給我喔 🌸', time: timeStr, ts: now + 1 }
+            ];
+
+        const syncedMsgs = (appState.playerId && typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function')
+            ? ChatStore.ensureThread(appState.playerId, newMockId, initialMsgs)
+            : initialMsgs;
 
         appState.friends.push({
             id: newMockId,
             nickname: chosenName,
-            sessionLabel: getBatchScheduleInfo(getCurrentBatchNumber() + mockIndex + 1).tueLabel,
-            matchedAt: now,
+            sessionLabel: (payloadFriend && payloadFriend.sessionLabel) || getBatchScheduleInfo(getCurrentBatchNumber() + mockIndex + 1).tueLabel,
+            matchedAt: (payloadFriend && payloadFriend.matchedAt) || now,
             myContinue: false,
             partnerContinue: false,
-            profile: {
+            profile: (payloadFriend && payloadFriend.profile) || {
                 gender: isMale ? '女' : '男',
                 region: appState.profile.region || '中部',
                 city: appState.profile.city || '台中市',
@@ -790,17 +817,15 @@ function applyBackendTestEvent(cmd, latestUsers) {
                 oneSentence: '你好呀！很高興在紅線企劃與你相遇～',
                 icebreakerQuestion: '最近有沒有讓你單曲循環的一首歌？'
             },
-            privacy: { gender: 'open', icebreakerQuestion: 'open', city: 'open', mbti: 'open', hobbies: 'open', oneSentence: 'open' },
-            messages: [
-                { sender: 'system', text: `🌸 月老紅線牽起！因好友達 2 人以上，將於每隔 2 天的「${formatUnlockDateTime(unlockAt)}」觸發 20:00 心動抉擇。` },
-                { sender: 'partner', text: '你好呀！很高興在這裡與你相遇～', time: '20:02' }
-            ]
+            privacy: (payloadFriend && payloadFriend.privacy) || { gender: 'open', icebreakerQuestion: 'open', city: 'open', mbti: 'open', hobbies: 'open', oneSentence: 'open' },
+            messages: syncedMsgs
         });
         appState.activeFriendId = newMockId;
     } else if (cmd.type === 'REMOVE_FRIEND_C') {
         if (targetId && String(appState.playerId) !== targetId) return;
         const targetMockId = cmd.mockFriendId ? String(cmd.mockFriendId) : '';
         if (targetMockId && appState.friends.some(f => String(f.id) === targetMockId)) {
+            if (appState.playerId && typeof ChatStore !== 'undefined') ChatStore.clearChat(appState.playerId, targetMockId);
             appState.friends = appState.friends.filter(f => String(f.id) !== targetMockId);
         } else {
             let lastMockIdx = -1;
@@ -811,6 +836,8 @@ function applyBackendTestEvent(cmd, latestUsers) {
                 }
             }
             if (lastMockIdx >= 0) {
+                const removedObj = appState.friends[lastMockIdx];
+                if (removedObj && appState.playerId && typeof ChatStore !== 'undefined') ChatStore.clearChat(appState.playerId, removedObj.id);
                 appState.friends.splice(lastMockIdx, 1);
             }
         }
@@ -823,6 +850,11 @@ function applyBackendTestEvent(cmd, latestUsers) {
         }
     } else if (cmd.type === 'CLEAR_ALL_FRIEND_C') {
         if (targetId && String(appState.playerId) !== targetId) return;
+        appState.friends.forEach(f => {
+            if (f && String(f.id).startsWith('MOCK_FRIEND_') && appState.playerId && typeof ChatStore !== 'undefined') {
+                ChatStore.clearChat(appState.playerId, f.id);
+            }
+        });
         appState.friends = appState.friends.filter(f => !String(f.id).startsWith('MOCK_FRIEND_'));
         if (appState.activeFriendId && !appState.friends.some(f => String(f.id) === String(appState.activeFriendId))) {
             appState.activeFriendId = appState.friends[0] ? String(appState.friends[0].id) : null;

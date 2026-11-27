@@ -623,6 +623,9 @@ function renderFriendsSection() {
 function removeMockTestFriend(friendId) {
     const target = appState.friends.find(f => String(f.id) === String(friendId) && String(f.id).startsWith('MOCK_FRIEND_'));
     if (!target) return;
+    if (appState.playerId && typeof ChatStore !== 'undefined' && typeof ChatStore.clearChat === 'function') {
+        ChatStore.clearChat(appState.playerId, target.id);
+    }
     appState.friends = appState.friends.filter(f => String(f.id) !== String(friendId));
     if (String(appState.activeFriendId) === String(friendId)) {
         appState.activeFriendId = appState.friends[0] ? String(appState.friends[0].id) : null;
@@ -863,6 +866,19 @@ function renderSingleChatBubbleHtml(m, friend) {
     const isMe = m.senderId
         ? (String(m.senderId) === String(appState.playerId))
         : (m.sender === 'me');
+    const rawImg = String(m.imageData || '').trim();
+    const hasValidImg = rawImg.startsWith('data:image/');
+    if (hasValidImg) {
+        return `
+            <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'}">
+                ${!isMe ? `<span class="text-[10px] text-[#c96a7b] font-semibold mb-0.5 px-1">${yuelaoEscapeHtml(friend.nickname)}</span>` : ''}
+                <div class="max-w-[78%] p-1.5 rounded-2xl shadow-2xs ${isMe ? 'bg-gradient-to-r from-[#e598a6] to-[#c96a7b] rounded-br-xs' : 'bg-white border border-pink-200 rounded-bl-xs'}">
+                    <img src="${rawImg}" alt="聊天圖片" loading="lazy" onclick="openImageLightbox(this.src)" title="點擊放大檢視圖片" class="max-w-[210px] sm:max-w-[240px] max-h-[240px] rounded-xl object-cover cursor-zoom-in bg-white">
+                </div>
+                <span class="text-[10px] text-gray-400 mt-1 px-1">${m.time || ''}</span>
+            </div>
+        `;
+    }
     return `
         <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'}">
             ${!isMe ? `<span class="text-[10px] text-[#c96a7b] font-semibold mb-0.5 px-1">${yuelaoEscapeHtml(friend.nickname)}</span>` : ''}
@@ -896,17 +912,23 @@ async function loadMoreOlderChatMessages() {
     }
 
     const isRealFriend = !String(friend.id).startsWith('MOCK_FRIEND_') && Boolean(appState && appState.playerId);
+    const curWeightedUnits = (typeof ChatStore !== 'undefined' && typeof ChatStore.getTotalWeightedCount === 'function')
+        ? ChatStore.getTotalWeightedCount(friend.messages)
+        : friend.messages.length;
+    if (curWeightedUnits >= 250) {
+        friend._noMoreCloudHistory = true;
+    }
     if (
         isRealFriend &&
         !friend._fetchingOlderCloud &&
         !friend._noMoreCloudHistory &&
         friend.messages.length >= CHAT_BATCH_STEP &&
-        friend.messages.length < 200 &&
+        curWeightedUnits < 250 &&
         typeof CloudSync !== 'undefined' &&
         typeof CloudSync.fetchActiveChatRoomNow === 'function'
     ) {
         friend._fetchingOlderCloud = true;
-        const nextCloudLimit = Math.min(200, friend.messages.length + CHAT_BATCH_STEP);
+        const nextCloudLimit = Math.min(250, friend.messages.length + CHAT_BATCH_STEP);
         const roomPath = `${CHATS_KEY}/${ChatStore.getPairKey(appState.playerId, friend.id)}`;
         try {
             const changed = await CloudSync.fetchActiveChatRoomNow(roomPath, { limit: nextCloudLimit, force: true });
@@ -939,13 +961,19 @@ function ensureChatBoxScrollPagination(chatBox) {
 
         const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
         if (!friend || !Array.isArray(friend.messages)) return;
+        const curWeightedUnits = (typeof ChatStore !== 'undefined' && typeof ChatStore.getTotalWeightedCount === 'function')
+            ? ChatStore.getTotalWeightedCount(friend.messages)
+            : friend.messages.length;
+        if (curWeightedUnits >= 250) {
+            friend._noMoreCloudHistory = true;
+        }
         const canFetchMoreCloud = (
             !String(friend.id).startsWith('MOCK_FRIEND_') &&
             Boolean(appState && appState.playerId) &&
             !friend._fetchingOlderCloud &&
             !friend._noMoreCloudHistory &&
             friend.messages.length >= CHAT_BATCH_STEP &&
-            friend.messages.length < 200
+            curWeightedUnits < 250
         );
         if (chatVisibleBatchLimit >= friend.messages.length && !canFetchMoreCloud) return;
 
@@ -1122,7 +1150,7 @@ function renderActiveFriendWorkspace() {
         banner.classList.add('hidden');
     }
 
-    const isRealFriend = !String(friend.id).startsWith('MOCK_FRIEND_') && !!appState.playerId;
+    const isRealFriend = Boolean(appState && appState.playerId);
     if (isRealFriend) {
         const sharedMsgs = ChatStore.getMessages(appState.playerId, friend.id);
         if (sharedMsgs.length > 0) {
@@ -1164,7 +1192,7 @@ function renderActiveFriendWorkspace() {
     const lastMsgObj = visibleMessages[visibleMessages.length - 1];
     const firstMsgObj = visibleMessages[0];
     const firstMsgKey = String(firstMsgObj?.id || firstMsgObj?.ts || '');
-    const lastMsgKey = String(lastMsgObj?.id || lastMsgObj?.text || '');
+    const lastMsgKey = String(lastMsgObj?.id || lastMsgObj?.text || '') + '_' + (lastMsgObj?.imageData ? 'img' : '');
     const hasOlderBanner = remainingOlderCount > 0 || totalMsgCount > CHAT_BATCH_STEP;
     const currentSignature = `${currentFriendKey}_${totalMsgCount}_${visibleMessages.length}_${firstMsgKey}_${lastMsgKey}`;
 
@@ -1199,11 +1227,17 @@ function renderActiveFriendWorkspace() {
         if (canAppendSingleBubble) {
             chatBox.insertAdjacentHTML('beforeend', renderSingleChatBubbleHtml(lastMsgObj, friend));
         } else {
+            const curWeightedUnits = (typeof ChatStore !== 'undefined' && typeof ChatStore.getTotalWeightedCount === 'function')
+                ? ChatStore.getTotalWeightedCount(friend.messages)
+                : totalMsgCount;
+            if (curWeightedUnits >= 250) {
+                friend._noMoreCloudHistory = true;
+            }
             const canLoadMoreCloudOlder = Boolean(
                 isRealFriend &&
                 !friend._noMoreCloudHistory &&
                 totalMsgCount >= CHAT_BATCH_STEP &&
-                totalMsgCount < 200
+                curWeightedUnits < 250
             );
             let topStatusHtml = '';
             if (remainingOlderCount > 0) {
@@ -1632,9 +1666,9 @@ document.getElementById('chatSendForm').addEventListener('submit', function(e) {
     if (!text) return;
 
     const nowStr = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
-    const isMockFriend = String(friend.id).startsWith('MOCK_FRIEND_') || !appState.playerId;
+    const hasLoggedPlayer = Boolean(appState && appState.playerId);
 
-    if (!isMockFriend) {
+    if (hasLoggedPlayer) {
         const updatedMsgs = ChatStore.appendMessage(appState.playerId, friend.id, {
             senderId: String(appState.playerId),
             senderName: appState.profile.nickname || String(appState.playerId),
@@ -2050,3 +2084,172 @@ window.addEventListener('chat-send-failed', () => {
     showMiniNotice('⚠️ 訊息傳送失敗，請重試', '訊息未送達雲端，已撤回顯示，請重新輸入後再送出。');
     try { renderActiveFriendWorkspace(); } catch (e) {}
 });
+
+// ==================== 📷 聊天區壓縮圖片上傳（每 2 秒限 1 張・1 張圖 = 10 則訊息，超過 250 則刪除不紀錄） ====================
+const CHAT_IMAGE_COOLDOWN_MS = 2000;
+let chatImageCooldownTimer = null;
+
+function getChatImageCooldownStorageKey() {
+    const pid = (typeof appState !== 'undefined' && appState && appState.playerId)
+        ? String(appState.playerId).trim()
+        : 'guest';
+    return `yuelao_chat_img_last_ts_${pid}`;
+}
+
+function getChatImageRemainingCooldownSec() {
+    try {
+        const lastTs = Number(localStorage.getItem(getChatImageCooldownStorageKey()) || 0);
+        if (!lastTs) return 0;
+        const remMs = (lastTs + CHAT_IMAGE_COOLDOWN_MS) - Date.now();
+        return remMs > 0 ? Math.ceil(remMs / 1000) : 0;
+    } catch (e) {
+        return 0;
+    }
+}
+
+function markChatImageSentNow() {
+    try {
+        localStorage.setItem(getChatImageCooldownStorageKey(), String(Date.now()));
+    } catch (e) {}
+    startChatImageCooldownTicker();
+}
+
+function startChatImageCooldownTicker() {
+    if (chatImageCooldownTimer) {
+        clearInterval(chatImageCooldownTimer);
+        chatImageCooldownTimer = null;
+    }
+    const updateBtnState = () => {
+        const btn = document.getElementById('chatImageBtn');
+        if (!btn) return;
+        const rem = getChatImageRemainingCooldownSec();
+        if (rem > 0) {
+            btn.disabled = true;
+            btn.textContent = `📷 ${rem}s`;
+            btn.title = `每 2 秒最多傳送 1 張圖片（冷卻剩餘 ${rem} 秒）`;
+        } else {
+            btn.disabled = false;
+            btn.textContent = '📷';
+            btn.title = '傳送壓縮圖片（每 2 秒限 1 張，1 張圖 = 10 則訊息）';
+            if (chatImageCooldownTimer) {
+                clearInterval(chatImageCooldownTimer);
+                chatImageCooldownTimer = null;
+            }
+        }
+    };
+    updateBtnState();
+    if (getChatImageRemainingCooldownSec() > 0) {
+        chatImageCooldownTimer = setInterval(updateBtnState, 1000);
+    }
+}
+
+function triggerChatImageUpload() {
+    if (appState.isChatBanned) {
+        showMiniNotice('🚫 禁止發話', '請聯繫管理員');
+        return;
+    }
+    if (typeof isEveningConfessionPending === 'function' && isEveningConfessionPending()) {
+        if (typeof openEveningConfessionModal === 'function') openEveningConfessionModal();
+        return;
+    }
+    const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
+    if (!friend) return;
+    if (calcRemainingDays(friend.matchedAt, Date.now()) === 0) {
+        showMiniNotice('🚫 聊天室已禁止發話', '剩餘 0 天！請先決定是否繼續配對，雙方都按下繼續後才會重新開放聊天。');
+        return;
+    }
+    const remSec = getChatImageRemainingCooldownSec();
+    if (remSec > 0) {
+        showMiniNotice('⏳ 傳圖冷卻中', `每 2 秒最多傳送 1 張圖片，請再等 ${remSec} 秒後再傳喔！`);
+        return;
+    }
+    const fileInput = document.getElementById('chatImageInput');
+    if (fileInput) {
+        fileInput.value = '';
+        fileInput.click();
+    }
+}
+
+async function handleChatImageSelected(inputEl) {
+    const file = inputEl && inputEl.files && inputEl.files[0];
+    if (!file) return;
+    inputEl.value = '';
+
+    if (appState.isChatBanned) {
+        showMiniNotice('🚫 禁止發話', '請聯繫管理員');
+        return;
+    }
+    if (typeof isEveningConfessionPending === 'function' && isEveningConfessionPending()) {
+        if (typeof openEveningConfessionModal === 'function') openEveningConfessionModal();
+        return;
+    }
+    const friend = appState.friends.find(f => String(f.id) === String(appState.activeFriendId));
+    if (!friend) return;
+    if (calcRemainingDays(friend.matchedAt, Date.now()) === 0) {
+        showMiniNotice('🚫 聊天室已禁止發話', '剩餘 0 天！請先決定是否繼續配對，雙方都按下繼續後才會重新開放聊天。');
+        return;
+    }
+    const remSec = getChatImageRemainingCooldownSec();
+    if (remSec > 0) {
+        showMiniNotice('⏳ 傳圖冷卻中', `每 2 秒最多傳送 1 張圖片，請再等 ${remSec} 秒後再傳喔！`);
+        return;
+    }
+
+    const btn = document.getElementById('chatImageBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳';
+    }
+
+    try {
+        if (typeof YuelaoImageHelper === 'undefined' || typeof YuelaoImageHelper.compressImageFile !== 'function') {
+            throw new Error('圖片壓縮模組尚未載入，請重新整理頁面後再試');
+        }
+        const compressed = await YuelaoImageHelper.compressImageFile(file, {
+            maxSide: 600,
+            quality: 0.50,
+            maxBytes: 50 * 1024
+        });
+
+        const nowStr = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+        const hasLoggedPlayer = Boolean(appState && appState.playerId);
+
+        if (hasLoggedPlayer) {
+            const updatedMsgs = ChatStore.appendMessage(appState.playerId, friend.id, {
+                senderId: String(appState.playerId),
+                senderName: appState.profile.nickname || String(appState.playerId),
+                text: '📷 傳送了一張圖片',
+                imageData: compressed.dataUrl,
+                weight: 10,
+                time: nowStr
+            });
+            lastChatsSnapshot = localStorage.getItem(CHATS_KEY) || '';
+            friend.messages = updatedMsgs;
+            markChatImageSentNow();
+            shouldScrollChatToLatest = true;
+            Store.save(appState, false, true);
+            renderActiveFriendWorkspace();
+        } else {
+            friend.messages.push({
+                sender: 'me',
+                text: '📷 傳送了一張圖片',
+                imageData: compressed.dataUrl,
+                weight: 10,
+                time: nowStr
+            });
+            if (typeof ChatStore !== 'undefined' && typeof ChatStore.trimWeightedMessages === 'function') {
+                friend.messages = ChatStore.trimWeightedMessages(friend.messages, 250).kept;
+            }
+            markChatImageSentNow();
+            shouldScrollChatToLatest = true;
+            Store.save(appState);
+            renderActiveFriendWorkspace();
+        }
+    } catch (err) {
+        showMiniNotice('⚠️ 圖片上傳失敗', (err && err.message) || '圖片處理失敗，請換一張照片再試。');
+        startChatImageCooldownTicker();
+    }
+}
+
+window.triggerChatImageUpload = triggerChatImageUpload;
+window.handleChatImageSelected = handleChatImageSelected;
