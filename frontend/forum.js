@@ -657,15 +657,22 @@ function renderForumPostDetail() {
         repliesEl.innerHTML = repliesArr.map(r => {
             const rTs = new Date(Number(r.ts || 0));
             const rTimeStr = rTs.toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-            const rType = r.type === '推' ? `<span class="text-emerald-600 font-bold w-4">推</span>` : `<span class="text-gray-500 font-bold w-4">→</span>`;
-            const isMe = appState.playerId && String(r.authorId || '') === String(appState.playerId);
-            const isOp = Boolean(postAuthorId && String(r.authorId || '').trim() === postAuthorId);
-            const replyAuthorName = isOp ? '原Po' : resolveForumReplyAuthorName(r, p);
-            const authorTag = isOp
-                ? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-[#8f4452] font-bold">原Po</span>`
-                : (isMe
-                    ? `<span class="text-[#8f4452] font-bold">${yuelaoEscapeHtml(replyAuthorName)}</span>`
-                    : `<span class="text-gray-600 font-semibold">${yuelaoEscapeHtml(replyAuthorName)}</span>`);
+            const isAdminReply = Boolean(r.isAdminReply || String(r.authorId || '').trim() === 'ADMIN');
+            const rType = isAdminReply
+                ? `<span class="text-[#c96a7b] font-bold w-4">→</span>`
+                : (r.type === '推' ? `<span class="text-emerald-600 font-bold w-4">推</span>` : `<span class="text-gray-500 font-bold w-4">→</span>`);
+            const isMe = !isAdminReply && appState.playerId && String(r.authorId || '') === String(appState.playerId);
+            const isOp = !isAdminReply && Boolean(postAuthorId && String(r.authorId || '').trim() === postAuthorId);
+            const replyAuthorName = isAdminReply
+                ? (String(r.authorName || '').trim() || '🧙‍♂️月老')
+                : (isOp ? '原Po' : resolveForumReplyAuthorName(r, p));
+            const authorTag = isAdminReply
+                ? `<span class="px-1.5 py-0.5 rounded bg-gradient-to-r from-rose-100 to-amber-50 border border-rose-300 text-[#8f4452] font-extrabold">${yuelaoEscapeHtml(replyAuthorName)}</span>`
+                : (isOp
+                    ? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-[#8f4452] font-bold">原Po</span>`
+                    : (isMe
+                        ? `<span class="text-[#8f4452] font-bold">${yuelaoEscapeHtml(replyAuthorName)}</span>`
+                        : `<span class="text-gray-600 font-semibold">${yuelaoEscapeHtml(replyAuthorName)}</span>`));
             let editReplyHtml = '';
             const editedReplyTag = r.isEdited ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-gray-500 font-semibold ml-1.5">已編輯</span>` : '';
             if (isMe && r.id) {

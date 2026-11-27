@@ -564,10 +564,13 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
             const typeBadge = r.type === '推'
                 ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold text-[10px]">推</span>`
                 : `<span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-bold text-[10px]">→</span>`;
+            const isAdminRep = Boolean(r.isAdminReply || String(r.authorId || '').trim() === 'ADMIN');
             const replyNick = String(r.authorName || '').trim();
-            const authorInfo = replyNick
-                ? `${escapeForumAdminHtml(replyNick)}（${escapeForumAdminHtml(r.gender || '?')}）・ ID:${escapeForumAdminHtml(r.authorId || '未知')}`
-                : `匿名(${escapeForumAdminHtml(r.gender || '?')}) ・ ID:${escapeForumAdminHtml(r.authorId || '未知')}`;
+            const authorInfo = isAdminRep
+                ? `<span class="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-[#8f4452] font-bold">${escapeForumAdminHtml(replyNick || '🧙‍♂️月老')}</span>（官方回覆）`
+                : (replyNick
+                    ? `${escapeForumAdminHtml(replyNick)}（${escapeForumAdminHtml(r.gender || '?')}）・ ID:${escapeForumAdminHtml(r.authorId || '未知')}`
+                    : `匿名(${escapeForumAdminHtml(r.gender || '?')}) ・ ID:${escapeForumAdminHtml(r.authorId || '未知')}`);
 
             const replyHistArr = Array.isArray(r.editHistory)
                 ? r.editHistory.filter(item => item && typeof item === 'object')
@@ -638,11 +641,132 @@ function renderAdminForumDetail(notFound = false, expiredDeleted = false) {
             </div>
         </div>
 
+        <div class="p-3.5 rounded-2xl bg-gradient-to-r from-rose-50/80 to-pink-50/70 border-2 border-pink-200 space-y-2.5">
+            <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-bold text-[#8f4452]">🧙‍♂️ 後台官方留言（前台顯示：<span class="font-mono bg-white px-1.5 py-0.5 rounded border border-pink-200">→🧙‍♂️月老</span>）</span>
+                <span class="text-[10px] text-gray-500">上限 200 字</span>
+            </div>
+            <form onsubmit="submitAdminForumReply(event, '${escapeForumAdminHtml(pid)}')" class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
+                <textarea id="adminForumReplyContentInput" rows="2" maxlength="200" placeholder="以「🧙‍♂️月老」身分在此文章留言回覆..." class="flex-1 p-2.5 admin-input-box text-xs leading-relaxed resize-y" required></textarea>
+                <button type="submit" id="adminForumReplySubmitBtn" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs font-bold shadow hover:opacity-95 transition shrink-0 whitespace-nowrap">
+                    💬 送出月老留言
+                </button>
+            </form>
+        </div>
+
         <div class="space-y-2">
             <div class="text-xs font-bold text-[#8f4452]">💬 留言推文管理（共 ${repliesArr.length} 則）</div>
             ${repliesHtml}
         </div>
     `;
+}
+
+async function submitAdminForumReply(e, postId) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    const pid = String(postId || selectedAdminForumPostId || '').trim();
+    if (!pid) return;
+
+    const inputEl = document.getElementById('adminForumReplyContentInput');
+    const btn = document.getElementById('adminForumReplySubmitBtn');
+    const content = inputEl ? inputEl.value.trim() : '';
+    if (!content) {
+        alert('請輸入留言內容！');
+        return;
+    }
+
+    const nowTs = Date.now();
+    const replyId = 'r_' + nowTs + '_admin_' + Math.random().toString(36).substr(2, 4);
+    const replyData = {
+        id: replyId,
+        authorId: 'ADMIN',
+        authorName: '🧙‍♂️月老',
+        isAdminReply: true,
+        isAnonymous: false,
+        isOp: false,
+        gender: '管理員',
+        type: '→',
+        content: content,
+        ts: nowTs
+    };
+
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '送出中...';
+    }
+
+    try {
+        let nextReplyCount = 1;
+        if (selectedAdminForumPostDetail && String(selectedAdminForumPostDetail.id) === pid) {
+            if (!selectedAdminForumPostDetail.replies || Array.isArray(selectedAdminForumPostDetail.replies)) {
+                const mapObj = {};
+                if (Array.isArray(selectedAdminForumPostDetail.replies)) {
+                    selectedAdminForumPostDetail.replies.forEach((r, idx) => {
+                        if (r && typeof r === 'object') mapObj[String(r.id || `r_${idx}`)] = r;
+                    });
+                }
+                selectedAdminForumPostDetail.replies = mapObj;
+            }
+            selectedAdminForumPostDetail.replies[replyId] = replyData;
+            nextReplyCount = Object.keys(selectedAdminForumPostDetail.replies).length;
+            selectedAdminForumPostDetail.replyCount = nextReplyCount;
+            selectedAdminForumPostDetail.lastUpdatedAt = nowTs;
+        } else {
+            const idxRec = adminForumIndexList.find(p => String(p.id) === pid);
+            nextReplyCount = Number((idxRec && idxRec.replyCount) || 0) + 1;
+        }
+
+        if (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode()) {
+            const postsMap = getSandboxForumStore(ADMIN_FORUM_POSTS_KEY);
+            if (postsMap[pid]) {
+                if (!postsMap[pid].replies || typeof postsMap[pid].replies !== 'object') postsMap[pid].replies = {};
+                postsMap[pid].replies[replyId] = replyData;
+                nextReplyCount = Object.keys(postsMap[pid].replies).length;
+                postsMap[pid].replyCount = nextReplyCount;
+                postsMap[pid].lastUpdatedAt = nowTs;
+                setSandboxForumStore(ADMIN_FORUM_POSTS_KEY, postsMap);
+            }
+            const idxMap = getSandboxForumStore(ADMIN_FORUM_INDEX_KEY);
+            if (idxMap[pid]) {
+                idxMap[pid].replyCount = nextReplyCount;
+                idxMap[pid].lastUpdatedAt = nowTs;
+                setSandboxForumStore(ADMIN_FORUM_INDEX_KEY, idxMap);
+            }
+        } else if (typeof CloudSync !== 'undefined') {
+            await CloudSync.putNode(`${ADMIN_FORUM_POSTS_KEY}/${pid}/replies/${replyId}`, replyData, { throwOnError: true });
+            await Promise.all([
+                CloudSync.patchNode(`${ADMIN_FORUM_POSTS_KEY}/${pid}`, {
+                    replyCount: nextReplyCount,
+                    lastUpdatedAt: nowTs
+                }),
+                CloudSync.patchNode(`${ADMIN_FORUM_INDEX_KEY}/${pid}`, {
+                    replyCount: nextReplyCount,
+                    lastUpdatedAt: nowTs
+                })
+            ]);
+        }
+
+        const idxItem = adminForumIndexList.find(p => String(p.id) === pid);
+        if (idxItem) {
+            idxItem.replyCount = nextReplyCount;
+            idxItem.lastUpdatedAt = nowTs;
+        }
+
+        if (inputEl) inputEl.value = '';
+        renderAdminForumDetail(false, false);
+        renderAdminForumList();
+
+        if (typeof appendLog === 'function') {
+            appendLog(`<span class="text-pink-300">[討論區官方留言]</span> 已以「🧙‍♂️月老」身分在文章 ${escapeForumAdminHtml(pid)} 留言`);
+        }
+    } catch (err) {
+        console.error('[admin-forum] 後台留言失敗', err);
+        alert('❌ 送出留言失敗，請檢查 Firebase 權限或網路連線後再試。');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '💬 送出月老留言';
+        }
+    }
 }
 
 async function submitAdminForumAnnouncement(e) {
@@ -1048,6 +1172,7 @@ window.onAdminForumPerPageChange = onAdminForumPerPageChange;
 window.goToAdminForumPage = goToAdminForumPage;
 window.selectAdminForumPost = selectAdminForumPost;
 window.submitAdminForumAnnouncement = submitAdminForumAnnouncement;
+window.submitAdminForumReply = submitAdminForumReply;
 window.openAdminEditForumPostModal = openAdminEditForumPostModal;
 window.closeAdminEditForumPostModal = closeAdminEditForumPostModal;
 window.submitAdminEditForumPost = submitAdminEditForumPost;
