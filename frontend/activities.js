@@ -269,10 +269,21 @@ function renderHomeStatsCharts(forceRender = false) {
     let baseFemale = 0;
     let baseTotal = 0;
 
-    if (genderBucket && typeof genderBucket === 'object') {
+    if (genderBucket && typeof genderBucket === 'object' && (Number(genderBucket.male || 0) + Number(genderBucket.female || 0)) > 0) {
         baseMale = Math.max(0, Number(genderBucket.male || 0));
         baseFemale = Math.max(0, Number(genderBucket.female || 0));
         baseTotal = Math.max(baseMale + baseFemale, Number(genderBucket.total || 0));
+    } else if (typeof CloudSync !== 'undefined' && !CloudSync.isLocalSandboxMode() &&
+               typeof CloudSync.fetchPublicStatsCategory === 'function' && !window._homeGenderStatsFetching) {
+        window._homeGenderStatsFetching = true;
+        CloudSync.fetchPublicStatsCategory('gender').then(fetched => {
+            if (fetched && typeof fetched === 'object') {
+                homeStatsCategoryCache.gender = fetched;
+                renderHomeStatsCharts(true);
+            }
+        }).catch(() => {}).finally(() => {
+            window._homeGenderStatsFetching = false;
+        });
     } else if (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode()) {
         const localUsers = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function') ? Store.getUsersArray() : [];
         localUsers.forEach(u => {

@@ -1221,6 +1221,21 @@ const CloudSync = {
         } else if (t['yuelao_forum_index'] === null) {
             this.writeLocalIfChanged('yuelao_forum_index', '{}');
         }
+
+        // 16. 公開人數統計摘要快取同步（男/女、MBTI、地區）
+        if (t[PUBLIC_STATS_KEY] && typeof t[PUBLIC_STATS_KEY] === 'object') {
+            let mergedStats = {};
+            try {
+                const prevRaw = localStorage.getItem(PUBLIC_STATS_KEY);
+                if (prevRaw) mergedStats = JSON.parse(prevRaw) || {};
+            } catch (e) {}
+            Object.keys(t[PUBLIC_STATS_KEY]).forEach(catKey => {
+                if (t[PUBLIC_STATS_KEY][catKey] && typeof t[PUBLIC_STATS_KEY][catKey] === 'object') {
+                    mergedStats[catKey] = t[PUBLIC_STATS_KEY][catKey];
+                }
+            });
+            this.writeLocalIfChanged(PUBLIC_STATS_KEY, JSON.stringify(mergedStats));
+        }
     },
 
     applyStreamPatch(path, data) {
@@ -2275,6 +2290,11 @@ const CloudSync = {
         const earlyNodes = [`${PUBLIC_STATS_KEY}/gender`, 'yuelao_system_batch', WISH_WALL_KEY, CUSTOM_ACTIVITIES_KEY];
         if (me) earlyNodes.push(`${USERS_KEY}/${me}`);
         await this.fetchPlayerPaths(earlyNodes);
+        const initialGenderStat = this.tree[PUBLIC_STATS_KEY] && this.tree[PUBLIC_STATS_KEY].gender;
+        if (!initialGenderStat || typeof initialGenderStat !== 'object' || Number(initialGenderStat.updatedAt || 0) <= 0 ||
+            (Number(initialGenderStat.male || 0) + Number(initialGenderStat.female || 0)) <= 0) {
+            await this.fetchPublicStatsCategory('gender').catch(() => {});
+        }
         if (this.tree[CUSTOM_ACTIVITIES_KEY] === undefined && !this.isLocalSandboxMode()) {
             await new Promise(r => setTimeout(r, 500));
             await this.fetchPlayerPaths([CUSTOM_ACTIVITIES_KEY]);
