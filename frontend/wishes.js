@@ -19,7 +19,7 @@ const WISH_MIN_OPEN_DAYS = 3;
 const WISH_MAX_OPEN_DAYS = 7;
 
 function getMinWishOpenDaysForGender(gender) {
-    return String(gender || '').trim() === '男' ? 4 : WISH_MIN_OPEN_DAYS;
+    return String(gender || '').trim() === '男' ? 5 : WISH_MIN_OPEN_DAYS;
 }
 const WISH_MAX_EXTRA_QUESTIONS = 4;
 let wishDraftQuestions = [
