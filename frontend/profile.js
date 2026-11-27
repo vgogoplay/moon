@@ -1024,7 +1024,7 @@ document.getElementById('profileForm').addEventListener('submit', async function
         }
     }
 
-    const violatedRule = Store.checkProfileBanned(nextProfile);
+    const violatedRule = (typeof Store.checkProfileBannedAsync === 'function') ? await Store.checkProfileBannedAsync(nextProfile) : Store.checkProfileBanned(nextProfile);
     if (violatedRule) {
         appState.isWarnedAccount = true;
         appState.warningReason = `偵測到受限制內容（${violatedRule.keyword}），目前警告帳號 不提供配對`;

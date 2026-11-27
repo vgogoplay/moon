@@ -191,7 +191,7 @@ async function saveEditedMyActiveWish(e) {
     // 禁止關鍵字檢查
     if (typeof Store !== 'undefined' && typeof Store.checkProfileBanned === 'function') {
         const combinedCheckText = [nextTitle, ...updatedQuestions.map(q => `${q.question} ${q.optionA} ${q.optionB}`)].join(' ');
-        const hitRule = Store.checkProfileBanned({ bio: combinedCheckText, nickname: nextTitle });
+        const hitRule = (typeof Store.checkProfileBannedAsync === 'function') ? await Store.checkProfileBannedAsync({ bio: combinedCheckText, nickname: nextTitle }) : Store.checkProfileBanned({ bio: combinedCheckText, nickname: nextTitle });
         if (hitRule) {
             showMiniNotice('🚫 內容包含受限制字眼', '祈願題目或選項包含系統限制的字眼，請修改後再儲存。');
             return;
@@ -525,7 +525,7 @@ async function submitCreateWishPost(e) {
     // 禁止關鍵字檢查
     if (typeof Store !== 'undefined' && typeof Store.checkProfileBanned === 'function') {
         const combinedCheckText = [titleText, ...cleanQuestions.map(q => `${q.question} ${q.optionA} ${q.optionB}`)].join(' ');
-        const hitRule = Store.checkProfileBanned({ bio: combinedCheckText, nickname: titleText });
+        const hitRule = (typeof Store.checkProfileBannedAsync === 'function') ? await Store.checkProfileBannedAsync({ bio: combinedCheckText, nickname: titleText }) : Store.checkProfileBanned({ bio: combinedCheckText, nickname: titleText });
         if (hitRule) {
             showMiniNotice('🚫 內容包含受限制字眼', '祈願題目或選項包含系統限制的字眼，請修改後再發布。');
             return;
@@ -715,7 +715,7 @@ async function submitWishResponse(wishId) {
 
     const noteText = String(wishDraftNotes[wid] || '').trim();
     if (noteText && typeof Store !== 'undefined' && typeof Store.checkProfileBanned === 'function') {
-        const hitRule = Store.checkProfileBanned({ bio: noteText, nickname: noteText });
+        const hitRule = (typeof Store.checkProfileBannedAsync === 'function') ? await Store.checkProfileBannedAsync({ bio: noteText, nickname: noteText }) : Store.checkProfileBanned({ bio: noteText, nickname: noteText });
         if (hitRule) {
             showMiniNotice('🚫 內容包含受限制字眼', '補充留言包含系統限制的字眼，請修改後再送出。');
             return;

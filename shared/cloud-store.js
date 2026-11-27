@@ -1495,7 +1495,7 @@ const CloudSync = {
     // ===================== 方案 C：前後台省流混合同步（閒置降頻 + 跨頁 ETag 快取 + 後台按頁讀取） =====================
     PLAYER_SYNC_ENABLED: true,
     PLAYER_HOT_NODES: ['yuelao_system_batch', 'yuelao_custom_activities'],
-    PLAYER_COLD_NODES: ['yuelao_wish_wall', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_banned_rules', 'yuelao_unmatched_pairs', 'yuelao_forum_index'],
+    PLAYER_COLD_NODES: ['yuelao_wish_wall', 'yuelao_mailbox', 'yuelao_reports', 'yuelao_forum_index'],
     PLAYER_HOT_INTERVAL_MS: 75000,   // P2：熱門節點每 75 秒 + 隨機抖動檢查一次
     PLAYER_COLD_INTERVAL_MS: 240000, // 冷門節點每 4 分鐘檢查一次（3~5 分鐘區間）
     PLAYER_USER_INDEX_INTERVAL_MS: 1800000, // 男女比例與 MBTI 統計索引每 30 分鐘檢查一次
@@ -3742,6 +3742,27 @@ const Store = {
         return Array.isArray(parsed) ? parsed : [];
     },
 
+    async ensureBannedRulesFresh() {
+        if (typeof CloudSync !== 'undefined' && CloudSync.initialized && !CloudSync.isLocalSandboxMode() && typeof CloudSync.conditionalGetNode === 'function') {
+            try {
+                const r = await CloudSync.conditionalGetNode(BANNED_RULES_KEY);
+                if (r.status === 'changed') {
+                    CloudSync.applyStreamPatch(BANNED_RULES_KEY, r.data);
+                    const arr = CloudSync.mapToArray(r.data);
+                    const nextStr = JSON.stringify(arr);
+                    localStorage.setItem(BANNED_RULES_KEY, nextStr);
+                    LocalJsonCache.invalidate(BANNED_RULES_KEY);
+                }
+            } catch (e) {}
+        }
+        return this.getBannedRules();
+    },
+
+    async checkProfileBannedAsync(profile) {
+        await this.ensureBannedRulesFresh();
+        return this.checkProfileBanned(profile);
+    },
+
     checkProfileBanned(profile) {
         const rules = this.getBannedRules();
         for (const rule of rules) {
@@ -4925,3 +4946,16 @@ function writeStateSafely(key, state) {
     }
 }
 
+
+async function containsBannedWordsAsync(textVal) {
+    const str = String(textVal || '').trim();
+    if (!str) return false;
+    if (typeof Store !== 'undefined' && typeof Store.checkProfileBannedAsync === 'function') {
+        const hit = await Store.checkProfileBannedAsync({ bio: str, nickname: str });
+        return Boolean(hit);
+    }
+    if (typeof containsBannedWords === 'function') {
+        return Boolean(containsBannedWords(str));
+    }
+    return false;
+}

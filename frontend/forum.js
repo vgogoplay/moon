@@ -551,7 +551,7 @@ async function submitForumPost() {
         showMiniNotice('⚠️ 資料不齊', '標題與內文皆不可留白喔！');
         return;
     }
-    if (typeof containsBannedWords === 'function' && (containsBannedWords(title) || containsBannedWords(content))) {
+    if (typeof containsBannedWordsAsync === 'function' ? (await containsBannedWordsAsync(title) || await containsBannedWordsAsync(content)) : (typeof containsBannedWords === 'function' && (containsBannedWords(title) || containsBannedWords(content)))) {
         showMiniNotice('🚫 違規字眼', '請勿包含禁止的字眼或外部聯絡方式！');
         return;
     }
@@ -890,7 +890,7 @@ async function submitForumReply() {
     const content = contentEl.value.trim();
     if (!content) return;
     
-    if (typeof containsBannedWords === 'function' && containsBannedWords(content)) {
+    if (typeof containsBannedWordsAsync === 'function' ? await containsBannedWordsAsync(content) : (typeof containsBannedWords === 'function' && containsBannedWords(content))) {
         showMiniNotice('🚫 違規字眼', '請勿包含禁止的字眼或外部聯絡方式！');
         return;
     }
@@ -1113,7 +1113,7 @@ async function submitEditContent() {
         return;
     }
 
-    if (typeof containsBannedWords === 'function' && containsBannedWords(newContent)) {
+    if (typeof containsBannedWordsAsync === 'function' ? await containsBannedWordsAsync(newContent) : (typeof containsBannedWords === 'function' && containsBannedWords(newContent))) {
         showMiniNotice('🚫 違規字眼', '請勿包含禁止的字眼或外部聯絡方式！');
         return;
     }
@@ -1127,7 +1127,7 @@ async function submitEditContent() {
             showMiniNotice('⚠️ 資料不齊', '標題不可留白喔！');
             return;
         }
-        if (typeof containsBannedWords === 'function' && containsBannedWords(newTitle)) {
+        if (typeof containsBannedWordsAsync === 'function' ? await containsBannedWordsAsync(newTitle) : (typeof containsBannedWords === 'function' && containsBannedWords(newTitle))) {
             showMiniNotice('🚫 違規字眼', '請勿包含禁止的字眼或外部聯絡方式！');
             return;
         }
