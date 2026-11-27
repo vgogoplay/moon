@@ -193,10 +193,16 @@ function closePlayerDetailModal() {
     if (modal) modal.classList.add('hidden');
 }
 
+let currentFunctionsModalPlayerId = null;
+
 function refreshDetailModalIfOpen(playerId) {
     const modal = document.getElementById('playerDetailModal');
     if (modal && !modal.classList.contains('hidden') && String(currentDetailModalPlayerId) === String(playerId)) {
         viewPlayerDetail(playerId);
+    }
+    const funcModal = document.getElementById('playerFunctionsModal');
+    if (funcModal && !funcModal.classList.contains('hidden') && String(currentFunctionsModalPlayerId) === String(playerId)) {
+        openPlayerFunctionsModal(playerId);
     }
 }
 
@@ -311,6 +317,7 @@ function executeDeletePlayerEntirely(playerId) {
     }
     saveUsers(remaining, { isMatchMutation: true });
     closePlayerDetailModal();
+    closePlayerFunctionsModal();
     appendLog(`<span class="text-rose-400">[刪除玩家資料]</span> 已將玩家 <strong>${target.nickname} (ID:${target.id})</strong> 的整個資料徹底刪除。`);
 }
 
@@ -331,6 +338,239 @@ const ADMIN_EDIT_SECTIONS = FIELD_SECTIONS.map(sec => ({
     }))
 }));
 
+function openPlayerFunctionsModal(playerId) {
+    const u = getUsers().find(item => String(item.id) === String(playerId));
+    if (!u) return;
+    currentFunctionsModalPlayerId = String(u.id);
+
+    const targetInput = document.getElementById('playerFunctionsTargetId');
+    if (targetInput) targetInput.value = String(u.id);
+    const titleEl = document.getElementById('playerFunctionsModalTitle');
+    if (titleEl) titleEl.textContent = `⚙️ 功能設定：${u.nickname}（ID：${u.id}）`;
+
+    const curExtraCredits = Math.max(0, parseInt(u.extraMatchCredits, 10) || 0);
+    const isTargetMale = (typeof isMalePlayerRecord === 'function') ? isMalePlayerRecord(u) : (u.gender === '男' || String(u.id || '').startsWith('1'));
+    const defaultGenderLimit = isTargetMale ? 4 : 6;
+    const genderNameLabel = isTargetMale ? '男生' : '女生';
+    const hasCustomLimit = (u.customMaxFriendsLimit !== undefined && u.customMaxFriendsLimit !== null && u.customMaxFriendsLimit !== '');
+    const customLimitNum = hasCustomLimit ? Math.max(0, parseInt(u.customMaxFriendsLimit, 10) || 0) : defaultGenderLimit;
+    const isUserUnlimited = hasCustomLimit && customLimitNum === 0;
+    const effectiveUserLimit = isUserUnlimited ? 0 : (hasCustomLimit ? customLimitNum : defaultGenderLimit);
+
+    const bodyEl = document.getElementById('playerFunctionsModalBody');
+    if (bodyEl) {
+        bodyEl.innerHTML = `
+            <div class="p-4 rounded-2xl bg-rose-50/75 border-2 border-rose-200 space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-rose-200/80 pb-2">
+                    <span class="text-sm font-bold font-serif-jp text-[#8f4452]">🛡️ 帳號管理操作（需驗證管理員密碼）</span>
+                    <span class="text-[11px] text-gray-500">點擊即刻生效</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <button type="button" onclick="togglePlayerMatchBan('${u.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition ${u.isMatchBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-700 hover:bg-gray-800'}">
+                        ${u.isMatchBanned ? '✅ 解除配對限制' : '🚫 禁止配對'}
+                    </button>
+                    <button type="button" onclick="togglePlayerChatBan('${u.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition ${u.isChatBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}">
+                        ${u.isChatBanned ? '🔊 解除禁言' : '🔇 禁止發話'}
+                    </button>
+                    <button type="button" onclick="deletePlayerEntirely('${u.id}')" class="px-3.5 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold shadow-sm hover:bg-rose-700 transition">
+                        🗑️ 刪除資料
+                    </button>
+                </div>
+            </div>
+
+            <div class="space-y-3 p-4 rounded-2xl bg-rose-50/40 border-2 border-rose-200">
+                <h4 class="text-sm md:text-base font-bold font-serif-jp text-rose-800 border-b border-rose-200/80 pb-1.5">🛡️ 後台管理員專屬設定</h4>
+                <div class="grid grid-cols-1 gap-3.5">
+                    <div class="p-3.5 rounded-xl bg-white border-2 border-rose-100 space-y-2 shadow-sm">
+                        <label class="flex items-center justify-between gap-2 cursor-pointer">
+                            <span class="text-xs font-bold text-rose-700">禁止此玩家觸發「20:00 心動抉擇」</span>
+                            <input type="checkbox" id="edit-admin-disableConfession" ${u.disableConfession ? 'checked' : ''} class="w-4 h-4 accent-rose-600">
+                        </label>
+                        <p class="text-[11px] text-gray-500">勾選後，該玩家即使擁有 2 位以上好友，也不會彈出心動抉擇視窗。</p>
+                    </div>
+                    <div class="p-3.5 rounded-xl bg-white border-2 border-pink-200 space-y-2.5 shadow-sm">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-xs font-bold text-[#8f4452]">💌 此玩家專屬・好友名單人數限制</span>
+                            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${isUserUnlimited ? 'bg-emerald-100 text-emerald-800' : (hasCustomLimit && effectiveUserLimit !== defaultGenderLimit ? 'bg-amber-100 text-amber-900' : 'bg-rose-100 text-[#8f4452]')}">
+                                ${isUserUnlimited ? '♾️ 個人不限制' : (hasCustomLimit && effectiveUserLimit !== defaultGenderLimit ? `個人自訂：${effectiveUserLimit} 人` : `全站預設：${genderNameLabel} ${defaultGenderLimit} 人`)}
+                            </span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <div class="inline-flex items-center gap-1">
+                                <button type="button" onclick="const el=document.getElementById('edit-admin-userMaxFriendsLimit');const cb=document.getElementById('edit-admin-userMaxFriendsUnlimited');if(cb)cb.checked=false;if(el){el.disabled=false;el.value=Math.max(1,(parseInt(el.value,10)||${defaultGenderLimit})-1);}" class="w-7 h-8 rounded-lg bg-pink-50 border border-pink-300 text-[#8f4452] font-bold hover:bg-pink-100">−</button>
+                                <input type="number" id="edit-admin-userMaxFriendsLimit" min="1" max="999" value="${effectiveUserLimit > 0 ? effectiveUserLimit : defaultGenderLimit}" ${isUserUnlimited ? 'disabled' : ''} class="w-20 h-8 p-1.5 admin-input-box text-center text-sm font-mono font-bold text-[#8f4452]">
+                                <button type="button" onclick="const el=document.getElementById('edit-admin-userMaxFriendsLimit');const cb=document.getElementById('edit-admin-userMaxFriendsUnlimited');if(cb)cb.checked=false;if(el){el.disabled=false;el.value=Math.min(999,(parseInt(el.value,10)||${defaultGenderLimit})+1);}" class="w-7 h-8 rounded-lg bg-pink-50 border border-pink-300 text-[#8f4452] font-bold hover:bg-pink-100">＋</button>
+                            </div>
+                            <span class="text-xs text-gray-600 font-semibold">人（超過禁止報名）</span>
+                            <label class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-pink-50 border border-pink-200 text-[#8f4452] text-xs font-bold cursor-pointer select-none">
+                                <input type="checkbox" id="edit-admin-userMaxFriendsUnlimited" ${isUserUnlimited ? 'checked' : ''} onchange="document.getElementById('edit-admin-userMaxFriendsLimit').disabled = this.checked;" class="w-3.5 h-3.5 accent-[#c96a7b]">
+                                <span>不限制</span>
+                            </label>
+                            <button type="button" onclick="const el=document.getElementById('edit-admin-userMaxFriendsLimit');const cb=document.getElementById('edit-admin-userMaxFriendsUnlimited');if(cb)cb.checked=false;if(el){el.disabled=false;el.value=${defaultGenderLimit};}" class="px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 text-[11px] font-semibold transition">
+                                恢復預設 (${defaultGenderLimit} 人)
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-gray-500">全站預設：男生上限 4 人、女生上限 6 人。此處僅調整<strong>該玩家個人</strong>的好友上限，不影響其他會員。</p>
+                    </div>
+                    <div class="p-3.5 rounded-xl bg-white border-2 border-amber-200 space-y-2 shadow-sm">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-xs font-bold text-amber-900">🎟️ 額外加場次數（解鎖每週第 3 場）</span>
+                            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${curExtraCredits > 0 ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 text-gray-500'}">
+                                ${isTargetMale ? (curExtraCredits > 0 ? '已解鎖 3 場/週' : '預設 2 場/週') : '女生不限場次'}
+                            </span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <input type="number" id="edit-admin-extraMatchCredits" min="0" max="99" value="${curExtraCredits}" class="w-20 p-1.5 admin-input-box text-center text-sm font-mono font-bold text-[#8f4452]">
+                            <span class="text-xs text-gray-600 font-semibold">次</span>
+                            <button type="button" onclick="adjustAdminEditExtraCredits(1)" class="px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 text-xs font-bold transition">+1 次 ($60)</button>
+                            <button type="button" onclick="adjustAdminEditExtraCredits(4)" class="px-2.5 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 border border-rose-300 text-[#8f4452] text-xs font-bold transition">+4 次 ($200)</button>
+                            <button type="button" onclick="curCreditsReset()" class="px-2 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 text-[11px] font-semibold transition">歸零</button>
+                        </div>
+                        <p class="text-[11px] text-gray-500">剩餘次數 &gt; 0 時，該男會員當週可多選第 3 場；當週報名 3 場開獎時即扣 1 次（未配對成功一樣扣次）。</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    const modalEl = document.getElementById('playerFunctionsModal');
+    if (modalEl) {
+        modalEl.classList.remove('hidden');
+        const scrollBox = modalEl.firstElementChild;
+        if (scrollBox) scrollBox.scrollTop = 0;
+    }
+}
+
+function closePlayerFunctionsModal() {
+    currentFunctionsModalPlayerId = null;
+    const modalEl = document.getElementById('playerFunctionsModal');
+    if (modalEl) modalEl.classList.add('hidden');
+}
+
+function savePlayerFunctionsModalSettings() {
+    const targetId = (document.getElementById('playerFunctionsTargetId')?.value || '').trim();
+    if (!targetId) return;
+    const users = getUsers();
+    const idx = users.findIndex(u => String(u.id) === String(targetId));
+    if (idx < 0) {
+        closePlayerFunctionsModal();
+        return;
+    }
+
+    const prevUser = users[idx];
+    const u = { ...prevUser };
+
+    const disableConfessionEl = document.getElementById('edit-admin-disableConfession');
+    if (disableConfessionEl) {
+        u.disableConfession = disableConfessionEl.checked;
+    }
+
+    const isTargetMaleSave = (typeof isMalePlayerRecord === 'function') ? isMalePlayerRecord(u) : (u.gender === '男' || String(u.id || '').startsWith('1'));
+    const defaultGenderLimSave = isTargetMaleSave ? 4 : 6;
+    const editUserFriendsUnlimEl = document.getElementById('edit-admin-userMaxFriendsUnlimited');
+    const editUserFriendsInputEl = document.getElementById('edit-admin-userMaxFriendsLimit');
+    let nextCustomFriendsLimit = null;
+    if (editUserFriendsUnlimEl && editUserFriendsInputEl) {
+        if (editUserFriendsUnlimEl.checked) {
+            nextCustomFriendsLimit = 0;
+            u.customMaxFriendsLimit = 0;
+        } else {
+            const enteredLim = Math.max(1, parseInt(editUserFriendsInputEl.value, 10) || defaultGenderLimSave);
+            if (enteredLim === defaultGenderLimSave) {
+                nextCustomFriendsLimit = null;
+                delete u.customMaxFriendsLimit;
+            } else {
+                nextCustomFriendsLimit = enteredLim;
+                u.customMaxFriendsLimit = enteredLim;
+            }
+        }
+    }
+
+    const extraCreditsEl = document.getElementById('edit-admin-extraMatchCredits');
+    let forceClearDeductedBatches = false;
+    if (extraCreditsEl) {
+        const nextCredVal = Math.max(0, parseInt(extraCreditsEl.value, 10) || 0);
+        const prevCredVal = Math.max(0, parseInt(prevUser.extraMatchCredits, 10) || 0);
+        u.extraMatchCredits = nextCredVal;
+        if (nextCredVal !== prevCredVal || nextCredVal === 0) {
+            u.extraCreditDeductedBatches = [];
+            u.lastExtraCreditDeductTs = 0;
+            forceClearDeductedBatches = true;
+        }
+    }
+
+    users[idx] = u;
+    const patchFields = {
+        disableConfession: Boolean(u.disableConfession),
+        extraMatchCredits: u.extraMatchCredits,
+        customMaxFriendsLimit: nextCustomFriendsLimit
+    };
+    if (forceClearDeductedBatches) {
+        patchFields.extraCreditDeductedBatches = [];
+        patchFields.lastExtraCreditDeductTs = 0;
+    }
+
+    try {
+        localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
+        if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_LOCAL_KEY);
+    } catch (e) {}
+
+    if (typeof CloudSync !== 'undefined') {
+        const pidStr = String(u.id).trim();
+        if (CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][pidStr]) {
+            CloudSync.tree[USERS_KEY][pidStr].disableConfession = Boolean(u.disableConfession);
+            CloudSync.tree[USERS_KEY][pidStr].extraMatchCredits = u.extraMatchCredits;
+            if (nextCustomFriendsLimit === null) {
+                delete CloudSync.tree[USERS_KEY][pidStr].customMaxFriendsLimit;
+            } else {
+                CloudSync.tree[USERS_KEY][pidStr].customMaxFriendsLimit = nextCustomFriendsLimit;
+            }
+            if (forceClearDeductedBatches) {
+                CloudSync.tree[USERS_KEY][pidStr].extraCreditDeductedBatches = [];
+                CloudSync.tree[USERS_KEY][pidStr].lastExtraCreditDeductTs = 0;
+            }
+        }
+        if (typeof CloudSync.setSharedPendingUser === 'function') {
+            CloudSync.setSharedPendingUser(pidStr, { ...u }, 45000);
+        }
+    }
+
+    [PLAYER_STATE_PREFIX + String(u.id).trim(), FRONTEND_STORAGE_KEY].forEach(stKey => {
+        try {
+            const rawSt = localStorage.getItem(stKey);
+            if (!rawSt) return;
+            const parsedSt = JSON.parse(rawSt);
+            if (parsedSt && String(parsedSt.playerId || '') === String(u.id).trim()) {
+                parsedSt.disableConfession = Boolean(u.disableConfession);
+                parsedSt.extraMatchCredits = u.extraMatchCredits;
+                if (nextCustomFriendsLimit === null) {
+                    delete parsedSt.customMaxFriendsLimit;
+                } else {
+                    parsedSt.customMaxFriendsLimit = nextCustomFriendsLimit;
+                }
+                if (parsedSt.profile) parsedSt.profile.extraMatchCredits = u.extraMatchCredits;
+                localStorage.setItem(stKey, JSON.stringify(parsedSt));
+            }
+        } catch (e) {}
+    });
+
+    if (typeof saveSingleUserPatch === 'function') {
+        saveSingleUserPatch(users, u, patchFields);
+    } else {
+        saveUsers(users);
+    }
+
+    lastMemberRenderSig = '';
+    if (typeof renderAdminAll === 'function') {
+        renderAdminAll(true);
+    }
+    closePlayerFunctionsModal();
+    appendLog(`<span class="text-sky-300">[玩家功能設定]</span> 已更新玩家 <strong>${u.nickname} (ID:${u.id})</strong> 的管理員專屬設定，並同步至前台！`);
+}
+window.openPlayerFunctionsModal = openPlayerFunctionsModal;
+window.closePlayerFunctionsModal = closePlayerFunctionsModal;
+window.savePlayerFunctionsModalSettings = savePlayerFunctionsModalSettings;
+
 function openEditPlayerModal(playerId) {
     const u = getUsers().find(item => String(item.id) === String(playerId));
     if (!u) return;
@@ -341,38 +581,7 @@ function openEditPlayerModal(playerId) {
     const privMap = u.privacy || {};
     const container = document.getElementById('adminEditPlayerFieldsBody');
 
-    const curExtraCredits = Math.max(0, parseInt(u.extraMatchCredits, 10) || 0);
-    const isTargetMale = (typeof isMalePlayerRecord === 'function') ? isMalePlayerRecord(u) : (u.gender === '男' || String(u.id || '').startsWith('1'));
-    const adminSettingsHtml = `
-        <div class="space-y-3 p-4 rounded-2xl bg-rose-50/40 border-2 border-rose-200">
-            <h4 class="text-sm md:text-base font-bold font-serif-jp text-rose-800 border-b border-rose-200/80 pb-1.5">🛡️ 後台管理員專屬設定</h4>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                <div class="p-3.5 rounded-xl bg-white border-2 border-rose-100 space-y-2 shadow-sm">
-                    <label class="flex items-center justify-between gap-2 cursor-pointer">
-                        <span class="text-xs font-bold text-rose-700">禁止此玩家觸發「20:00 心動抉擇」</span>
-                        <input type="checkbox" id="edit-admin-disableConfession" ${u.disableConfession ? 'checked' : ''} class="w-4 h-4 accent-rose-600">
-                    </label>
-                    <p class="text-[11px] text-gray-500">勾選後，該玩家即使擁有 2 位以上好友，也不會彈出心動抉擇視窗。</p>
-                </div>
-                <div class="p-3.5 rounded-xl bg-white border-2 border-amber-200 space-y-2 shadow-sm">
-                    <div class="flex items-center justify-between gap-2">
-                        <span class="text-xs font-bold text-amber-900">🎟️ 額外加場次數（解鎖每週第 3 場）</span>
-                        <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${curExtraCredits > 0 ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 text-gray-500'}">
-                            ${isTargetMale ? (curExtraCredits > 0 ? '已解鎖 3 場/週' : '預設 2 場/週') : '女生不限場次'}
-                        </span>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <input type="number" id="edit-admin-extraMatchCredits" min="0" max="99" value="${curExtraCredits}" class="w-20 p-1.5 admin-input-box text-center text-sm font-mono font-bold text-[#8f4452]">
-                        <span class="text-xs text-gray-600 font-semibold">次</span>
-                        <button type="button" onclick="adjustAdminEditExtraCredits(1)" class="px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 text-xs font-bold transition">+1 次 ($60)</button>
-                        <button type="button" onclick="adjustAdminEditExtraCredits(4)" class="px-2.5 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 border border-rose-300 text-[#8f4452] text-xs font-bold transition">+4 次 ($200)</button>
-                        <button type="button" onclick="curCreditsReset()" class="px-2 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 text-[11px] font-semibold transition">歸零</button>
-                    </div>
-                    <p class="text-[11px] text-gray-500">剩餘次數 &gt; 0 時，該男會員當週可多選第 3 場；當週報名 3 場開獎時即扣 1 次（未配對成功一樣扣次）。</p>
-                </div>
-            </div>
-        </div>
-    `;
+
 
     const sectionsHtml = ADMIN_EDIT_SECTIONS.map(sec => `
         <div class="space-y-3 p-4 rounded-2xl bg-pink-50/40 border-2 border-pink-200">
@@ -511,7 +720,7 @@ function openEditPlayerModal(playerId) {
         </div>
     `).join('');
 
-    container.innerHTML = adminSettingsHtml + sectionsHtml;
+    container.innerHTML = sectionsHtml;
 
     const editModalEl = document.getElementById('editPlayerModal');
     editModalEl.classList.remove('hidden');
@@ -653,7 +862,7 @@ function adjustAdminEditExtraCredits(delta) {
 function curCreditsReset() {
     const inputEl = document.getElementById('edit-admin-extraMatchCredits');
     if (inputEl) inputEl.value = 0;
-    const targetId = (document.getElementById('editPlayerTargetId')?.value || '').trim();
+    const targetId = (document.getElementById('playerFunctionsTargetId')?.value || document.getElementById('editPlayerTargetId')?.value || '').trim();
     if (targetId) {
         applyExtraMatchCreditsToLocalAndCloud(targetId, 0);
         appendLog(`<span class="text-amber-300">[加場次數歸零]</span> 已將玩家 <strong>ID:${targetId}</strong> 的額外加場次數歸零為 <strong>0 次</strong>，前後台已同步更新！`);
@@ -751,6 +960,26 @@ function saveAdminEditedPlayer(e) {
     const disableConfessionEl = document.getElementById('edit-admin-disableConfession');
     if (disableConfessionEl) {
         u.disableConfession = disableConfessionEl.checked;
+    }
+    const isTargetMaleSave = (typeof isMalePlayerRecord === 'function') ? isMalePlayerRecord(u) : (u.gender === '男' || String(u.id || '').startsWith('1'));
+    const defaultGenderLimSave = isTargetMaleSave ? 4 : 6;
+    const editUserFriendsUnlimEl = document.getElementById('edit-admin-userMaxFriendsUnlimited');
+    const editUserFriendsInputEl = document.getElementById('edit-admin-userMaxFriendsLimit');
+    let nextCustomFriendsLimit = null;
+    if (editUserFriendsUnlimEl && editUserFriendsInputEl) {
+        if (editUserFriendsUnlimEl.checked) {
+            nextCustomFriendsLimit = 0;
+            u.customMaxFriendsLimit = 0;
+        } else {
+            const enteredLim = Math.max(1, parseInt(editUserFriendsInputEl.value, 10) || defaultGenderLimSave);
+            if (enteredLim === defaultGenderLimSave) {
+                nextCustomFriendsLimit = null;
+                delete u.customMaxFriendsLimit;
+            } else {
+                nextCustomFriendsLimit = enteredLim;
+                u.customMaxFriendsLimit = enteredLim;
+            }
+        }
     }
     const extraCreditsEl = document.getElementById('edit-admin-extraMatchCredits');
     let forceClearDeductedBatches = false;
@@ -866,30 +1095,13 @@ function viewPlayerDetail(playerId) {
     document.getElementById('detailModalTitle').textContent = `🆔 玩家 ID：${u.id}（${u.nickname}）完整資料記錄`;
     const entries = Object.entries(u).filter(([k]) => !['privacy', 'backupCode', 'lastSaveIp', 'lastSaveRegion', 'lastSaveIpAt'].includes(k));
 
-    const topAdminActionsHtml = `
-        <div class="md:col-span-2 p-3.5 rounded-2xl bg-rose-50/75 border-2 border-rose-200 flex flex-wrap items-center justify-between gap-2.5">
-            <span class="text-xs font-bold text-[#8f4452]">🛡️ 帳號管理操作（需驗證管理員密碼）：</span>
-            <div class="flex flex-wrap items-center gap-2">
-                <button type="button" onclick="togglePlayerMatchBan('${u.id}')" class="px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm transition ${u.isMatchBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-700 hover:bg-gray-800'}">
-                    ${u.isMatchBanned ? '✅ 解除配對限制' : '🚫 禁止配對'}
-                </button>
-                <button type="button" onclick="togglePlayerChatBan('${u.id}')" class="px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm transition ${u.isChatBanned ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}">
-                    ${u.isChatBanned ? '🔊 解除禁言' : '🔇 禁止發話'}
-                </button>
-                <button type="button" onclick="deletePlayerEntirely('${u.id}')" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-bold shadow-sm hover:bg-rose-700 transition">
-                    🗑️ 刪除資料
-                </button>
-            </div>
-        </div>
-    `;
-
     const backupBannerHtml = `
         <div class="md:col-span-2 p-3.5 rounded-2xl bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-300 space-y-2">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="text-xs font-bold text-[#8f4452]">🔑 玩家專屬 5 碼英數通行碼（若玩家遺忘可複製提供給對方）</span>
                 <div class="flex items-center gap-1.5">
                     <button type="button" onclick="closePlayerDetailModal(); openEditPlayerModal('${u.id}')" class="px-3 py-1 rounded-xl bg-sky-600 text-white text-xs font-bold shadow-sm hover:bg-sky-700 transition">
-                        ✏️ 編輯此玩家資料
+                        編輯
                     </button>
                     <button type="button" onclick="copyPlayerBackupCode('${u.id}')" class="px-3 py-1 rounded-xl bg-[#c96a7b] text-white text-xs font-bold shadow-sm hover:opacity-95 transition">
                         📋 一鍵複製 5 碼通行碼
@@ -911,7 +1123,7 @@ function viewPlayerDetail(playerId) {
             </div>
         </div>
     `;
-    document.getElementById('detailModalBody').innerHTML = topAdminActionsHtml + backupBannerHtml + ipGeoBannerHtml + entries.map(([k, v]) => `
+    document.getElementById('detailModalBody').innerHTML = backupBannerHtml + ipGeoBannerHtml + entries.map(([k, v]) => `
         <div class="p-2.5 rounded-xl bg-pink-50/50 border border-pink-100">
             <span class="text-[11px] text-[#c96a7b] font-mono block">${k}</span>
             <span class="font-semibold break-all">${typeof v === 'object' && v !== null ? JSON.stringify(v) : (v ?? '未填')}</span>
@@ -979,7 +1191,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
         users: users.map(u => [
             u.id, u.nickname, u.gender, u.age, u.ig, u.region, u.city,
             u.registeredSessions, u.customActivityRegs, u.exactMatchCriteria, u.mustMatchKeys,
-            u.isMatchBanned, u.isChatBanned, u.isWarned, u.extraMatchCredits,
+            u.isMatchBanned, u.isChatBanned, u.isWarned, u.extraMatchCredits, u.customMaxFriendsLimit,
             u.matchedHistory, u.matchedWithId, u.matchedWithName, u.matchedSession
         ])
     });
@@ -1214,6 +1426,12 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
             if (uExtraCredits > 0) {
                 statusParts.push(`<span class="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 font-bold">🎟️ 加場剩餘 ${uExtraCredits} 次</span>`);
             }
+            if (u.customMaxFriendsLimit !== undefined && u.customMaxFriendsLimit !== null && u.customMaxFriendsLimit !== '') {
+                const cLim = Math.max(0, parseInt(u.customMaxFriendsLimit, 10) || 0);
+                statusParts.push(cLim === 0
+                    ? `<span class="inline-block px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 font-bold">💌 好友上限：不限制</span>`
+                    : `<span class="inline-block px-2.5 py-0.5 rounded-full bg-pink-50 border border-pink-300 text-[#8f4452] font-bold">💌 個人好友上限 ${cLim} 人</span>`);
+            }
             if (historyList.length > 0) {
                 historyList.forEach(h => {
                     const isForceProtected = Boolean(
@@ -1262,10 +1480,11 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
                     </td>
                     <td class="p-3 text-xs min-w-[145px] leading-relaxed">${criteriaHtml}</td>
                     <td class="p-3 text-xs min-w-[140px] space-y-1">${statusParts.join('<br>')}</td>
-                    <td class="p-3 text-xs min-w-[135px]">
+                    <td class="p-3 text-xs min-w-[165px]">
                         <div class="flex flex-wrap gap-1.5">
                             <button onclick="viewPlayerDetail('${u.id}')" class="px-2.5 py-1 rounded-lg border border-pink-200 text-[#8f4452] font-semibold hover:bg-pink-50 whitespace-nowrap">詳情</button>
-                            <button onclick="openEditPlayerModal('${u.id}')" title="編輯此玩家的個人資料" class="px-2.5 py-1 rounded-lg bg-sky-600 text-white font-semibold hover:bg-sky-700 whitespace-nowrap">✏️ 編輯資料</button>
+                            <button onclick="openEditPlayerModal('${u.id}')" title="編輯此玩家的個人資料" class="px-2.5 py-1 rounded-lg bg-sky-600 text-white font-semibold hover:bg-sky-700 whitespace-nowrap">編輯</button>
+                            <button onclick="openPlayerFunctionsModal('${u.id}')" title="開啟帳號管理操作與後台管理員專屬設定" class="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-semibold hover:bg-rose-700 whitespace-nowrap">功能</button>
                         </div>
                     </td>
                 </tr>

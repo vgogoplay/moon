@@ -164,9 +164,83 @@ function renderHomeFateWall(forceRender = false) {
     `;
 }
 
-// ==================== 前台首頁：即時男女比例與 I人 / E人 / 不知道・沒測過 統計圖表（30 秒節流冷卻） ====================
+// ==================== 前台首頁：即時統計下拉切換（預設僅讀取男／女人數統計；切換時按需讀取 MBTI 與 北中南東地區分布） ====================
 const HOME_STATS_COOLDOWN_MS = 30000;
 let lastHomeStatsRenderTs = 0;
+let currentHomeStatsDimension = 'gender';
+const homeStatsCategoryCache = {
+    gender: null,
+    mbti: null,
+    region: null
+};
+
+function syncHomeStatsTabButtonsUI(activeDim) {
+    const activeCls = 'text-xs px-3 py-1.5 rounded-full bg-[#c96a7b] text-white border border-[#c96a7b] font-bold shadow-2xs transition cursor-pointer';
+    const inactiveCls = 'text-xs px-3 py-1.5 rounded-full bg-white border border-pink-300 text-[#8f4452] font-bold hover:bg-pink-50 transition cursor-pointer';
+    ['gender', 'mbti', 'region'].forEach(key => {
+        const btn = document.getElementById(`homeStatsTabBtn_${key}`);
+        if (btn) btn.className = (key === activeDim) ? activeCls : inactiveCls;
+    });
+}
+
+async function onHomeStatsDimensionChange(dimension) {
+    const dim = ['gender', 'mbti', 'region'].includes(String(dimension)) ? String(dimension) : 'gender';
+    currentHomeStatsDimension = dim;
+    syncHomeStatsTabButtonsUI(dim);
+
+    const panelGender = document.getElementById('homeStatsPanelGender');
+    const panelMbti = document.getElementById('homeStatsPanelMbti');
+    const panelRegion = document.getElementById('homeStatsPanelRegion');
+    if (panelGender) panelGender.classList.toggle('hidden', dim !== 'gender');
+    if (panelMbti) panelMbti.classList.toggle('hidden', dim !== 'mbti');
+    if (panelRegion) panelRegion.classList.toggle('hidden', dim !== 'region');
+
+    // 只有當玩家主動切換到 MBTI 或 人數分布地區 時，才向雲端按需讀取該分類統計資料，不用把資料都給所有人下載
+    if ((dim === 'mbti' || dim === 'region') && !homeStatsCategoryCache[dim]) {
+        const loadingTag = document.getElementById(dim === 'mbti' ? 'homeStatsMbtiLoadingTag' : 'homeStatsRegionLoadingTag');
+        if (loadingTag) loadingTag.classList.remove('hidden');
+        try {
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.fetchPublicStatsCategory === 'function') {
+                const fetched = await CloudSync.fetchPublicStatsCategory(dim);
+                if (fetched && typeof fetched === 'object') {
+                    homeStatsCategoryCache[dim] = fetched;
+                }
+            }
+        } finally {
+            if (loadingTag) loadingTag.classList.add('hidden');
+        }
+    }
+
+    renderHomeStatsCharts(true);
+}
+window.onHomeStatsDimensionChange = onHomeStatsDimensionChange;
+
+function getResolvedPublicStatBucket(category) {
+    // 1. 優先讀取記憶體快取或 CloudSync.tree[PUBLIC_STATS_KEY][category]
+    if (homeStatsCategoryCache[category] && typeof homeStatsCategoryCache[category] === 'object') {
+        return homeStatsCategoryCache[category];
+    }
+    if (typeof CloudSync !== 'undefined' && CloudSync.tree && typeof PUBLIC_STATS_KEY !== 'undefined' &&
+        CloudSync.tree[PUBLIC_STATS_KEY] && CloudSync.tree[PUBLIC_STATS_KEY][category]) {
+        homeStatsCategoryCache[category] = CloudSync.tree[PUBLIC_STATS_KEY][category];
+        return homeStatsCategoryCache[category];
+    }
+    // 2. 次之讀取 localStorage 中的輕量公開統計快取（僅在本地測試模式或本地已有該分類快取時）
+    if (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode() && typeof CloudSync.computePublicStatsFromUsers === 'function') {
+        const summary = CloudSync.computePublicStatsFromUsers(Store.getUsersArray());
+        return summary[category] || null;
+    }
+    try {
+        if (typeof PUBLIC_STATS_KEY !== 'undefined') {
+            const rawStat = localStorage.getItem(PUBLIC_STATS_KEY);
+            if (rawStat) {
+                const parsed = JSON.parse(rawStat);
+                if (parsed && parsed[category]) return parsed[category];
+            }
+        }
+    } catch (e) {}
+    return null;
+}
 
 function renderHomeStatsCharts(forceRender = false) {
     const totalBadge = document.getElementById('homeStatsTotalBadge');
@@ -179,16 +253,44 @@ function renderHomeStatsCharts(forceRender = false) {
         ? Store.getSystemConfig()
         : { maleDisplayOffset: 0 };
     const maleOffset = Math.max(0, Number(sysCfgForStats.maleDisplayOffset || 0));
-    const rawUsersStr = localStorage.getItem(USERS_LOCAL_KEY) || '[]';
-    const statsCacheSig = `${maleOffset}|${rawUsersStr}`;
 
+    // 同步當前統計分頁按鈕與面板顯示狀態
+    syncHomeStatsTabButtonsUI(currentHomeStatsDimension);
+    const panelGender = document.getElementById('homeStatsPanelGender');
+    const panelMbti = document.getElementById('homeStatsPanelMbti');
+    const panelRegion = document.getElementById('homeStatsPanelRegion');
+    if (panelGender) panelGender.classList.toggle('hidden', currentHomeStatsDimension !== 'gender');
+    if (panelMbti) panelMbti.classList.toggle('hidden', currentHomeStatsDimension !== 'mbti');
+    if (panelRegion) panelRegion.classList.toggle('hidden', currentHomeStatsDimension !== 'region');
+
+    // 預設首頁進來僅讀取男／女人數統計（yuelao_public_stats/gender），不主動下載全體會員名單
+    const genderBucket = getResolvedPublicStatBucket('gender');
+    let baseMale = 0;
+    let baseFemale = 0;
+    let baseTotal = 0;
+
+    if (genderBucket && typeof genderBucket === 'object') {
+        baseMale = Math.max(0, Number(genderBucket.male || 0));
+        baseFemale = Math.max(0, Number(genderBucket.female || 0));
+        baseTotal = Math.max(baseMale + baseFemale, Number(genderBucket.total || 0));
+    } else if (typeof CloudSync !== 'undefined' && CloudSync.isLocalSandboxMode()) {
+        const localUsers = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function') ? Store.getUsersArray() : [];
+        localUsers.forEach(u => {
+            if (!u || !u.id) return;
+            baseTotal++;
+            if (u.gender === '男') baseMale++;
+            else if (u.gender === '女') baseFemale++;
+        });
+    }
+
+    const statsCacheSig = `${currentHomeStatsDimension}|${maleOffset}|${baseMale}:${baseFemale}:${baseTotal}|${JSON.stringify(homeStatsCategoryCache[currentHomeStatsDimension] || {})}`;
     if (!forceRender && donutBox.dataset.rendered === '1') {
         if (statsCacheSig === lastUsersStatsSnapshot) {
             lastHomeStatsRenderTs = nowTs;
             return;
         }
-        const prevOffsetPart = String(lastUsersStatsSnapshot || '').split('|')[0];
-        if (prevOffsetPart === String(maleOffset) && (nowTs - lastHomeStatsRenderTs) < HOME_STATS_COOLDOWN_MS) {
+        const prevDim = String(lastUsersStatsSnapshot || '').split('|')[0];
+        if (prevDim === currentHomeStatsDimension && (nowTs - lastHomeStatsRenderTs) < HOME_STATS_COOLDOWN_MS) {
             return;
         }
     }
@@ -196,81 +298,26 @@ function renderHomeStatsCharts(forceRender = false) {
     lastHomeStatsRenderTs = nowTs;
     donutBox.dataset.rendered = '1';
 
-    const users = (typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function')
-        ? Store.getUsersArray()
-        : (() => {
-            try {
-                const parsed = JSON.parse(rawUsersStr);
-                return Array.isArray(parsed) ? parsed : [];
-            } catch (e) {
-                return [];
-            }
-        })();
-
-    const validUsers = users.filter(u => u && typeof u === 'object' && u.id);
-    const totalCount = validUsers.length;
-    let maleCount = 0;
-    let femaleCount = 0;
-    let iPersonCount = 0;
-    let ePersonCount = 0;
-    let untestedMbtiCount = 0;
-
-    validUsers.forEach(u => {
-        if (u.gender === '男') maleCount++;
-        else if (u.gender === '女') femaleCount++;
-
-        const rawMbti = String(u.mbti || '').trim().toUpperCase();
-        const grp = u.mbtiGroup || inferMbtiGroup(rawMbti);
-
-        if (!rawMbti || rawMbti.includes('不知道') || rawMbti.includes('沒測過') || grp === '不知道 / 沒測過') {
-            if (grp === 'I人') iPersonCount++;
-            else if (grp === 'E人') ePersonCount++;
-            else untestedMbtiCount++;
-        } else {
-            if (grp === 'I人' || rawMbti.startsWith('I')) iPersonCount++;
-            else if (grp === 'E人' || rawMbti.startsWith('E')) ePersonCount++;
-            else untestedMbtiCount++;
-        }
-    });
-
-    // 前台顯示：男生人數依後台設定固定加成，女生人數固定加 5 人，且 (maleOffset + 5) 同步計入 MBTI 的 I 人
-    maleCount += maleOffset;
-    femaleCount += 5;
-    iPersonCount += (maleOffset + 5);
-    const displayTotalCount = totalCount + maleOffset + 5;
-
+    // 1. 渲染男女生人數統計（男生依後台固定加成，女生固定加 5 人）
+    const maleCount = baseMale + maleOffset;
+    const femaleCount = baseFemale + 5;
+    const displayTotalCount = baseTotal + maleOffset + 5;
     const genderTotal = maleCount + femaleCount;
     const malePct = genderTotal > 0 ? Math.round((maleCount / genderTotal) * 100) : 0;
     const femalePct = genderTotal > 0 ? (100 - malePct) : 0;
 
     totalBadge.textContent = `總計 ${displayTotalCount} 人`;
-    document.getElementById('genderRatioSummaryTag').textContent = `男 ${maleCount} 女 ${femaleCount}`;
-    document.getElementById('statMaleText').textContent = `${maleCount} 人 (${malePct}%)`;
-    document.getElementById('statFemaleText').textContent = `${femaleCount} 人 (${femalePct}%)`;
-    document.getElementById('statMaleBar').style.width = `${malePct}%`;
-    document.getElementById('statFemaleBar').style.width = `${femalePct}%`;
+    const ratioTag = document.getElementById('genderRatioSummaryTag');
+    if (ratioTag) ratioTag.textContent = `男 ${maleCount} 女 ${femaleCount}`;
+    const statMaleText = document.getElementById('statMaleText');
+    const statFemaleText = document.getElementById('statFemaleText');
+    const statMaleBar = document.getElementById('statMaleBar');
+    const statFemaleBar = document.getElementById('statFemaleBar');
+    if (statMaleText) statMaleText.textContent = `${maleCount} 人 (${malePct}%)`;
+    if (statFemaleText) statFemaleText.textContent = `${femaleCount} 人 (${femalePct}%)`;
+    if (statMaleBar) statMaleBar.style.width = `${malePct}%`;
+    if (statFemaleBar) statFemaleBar.style.width = `${femalePct}%`;
 
-    // 更新 I人 / E人 / 不知道・沒測過 數量紀錄與比例條
-    const mbtiAllTotal = iPersonCount + ePersonCount + untestedMbtiCount;
-    const iPct = mbtiAllTotal > 0 ? Math.round((iPersonCount / mbtiAllTotal) * 100) : 0;
-    const ePct = mbtiAllTotal > 0 ? Math.round((ePersonCount / mbtiAllTotal) * 100) : 0;
-    const untestedPct = mbtiAllTotal > 0 ? Math.round((untestedMbtiCount / mbtiAllTotal) * 100) : 0;
-
-    const iTextEl = document.getElementById('statMbtiIText');
-    const eTextEl = document.getElementById('statMbtiEText');
-    const untestedTextEl = document.getElementById('statMbtiUntestedText');
-    const iBarEl = document.getElementById('statMbtiIBar');
-    const eBarEl = document.getElementById('statMbtiEBar');
-    const untestedBarEl = document.getElementById('statMbtiUntestedBar');
-
-    if (iTextEl) iTextEl.textContent = `${iPersonCount} 人 (${iPct}%)`;
-    if (eTextEl) eTextEl.textContent = `${ePersonCount} 人 (${ePct}%)`;
-    if (untestedTextEl) untestedTextEl.textContent = `${untestedMbtiCount} 人 (${untestedPct}%)`;
-    if (iBarEl) iBarEl.style.width = `${iPct}%`;
-    if (eBarEl) eBarEl.style.width = `${ePct}%`;
-    if (untestedBarEl) untestedBarEl.style.width = `${untestedPct}%`;
-
-    // SVG 雙色圓環圖（男：天藍色 #38bdf8 / 女：櫻花粉 #fb7185）
     const radius = 52;
     const circumference = 2 * Math.PI * radius;
     const maleArc = genderTotal > 0 ? (maleCount / genderTotal) * circumference : 0;
@@ -292,37 +339,161 @@ function renderHomeStatsCharts(forceRender = false) {
         </div>
     `;
 
-    // SVG 三色圓環圖（I人：靛紫色 #818cf8 / E人：暖琥珀 #fbbf24 / 不知道・沒測過：霧灰藍 #94a3b8）
-    const iArc = mbtiAllTotal > 0 ? (iPersonCount / mbtiAllTotal) * circumference : 0;
-    const eArc = mbtiAllTotal > 0 ? (ePersonCount / mbtiAllTotal) * circumference : 0;
-    const untestedArc = mbtiAllTotal > 0 ? (untestedMbtiCount / mbtiAllTotal) * circumference : 0;
+    // 2. 僅當切換至 MBTI 人格統計 時才渲染 MBTI 圖表
+    if (currentHomeStatsDimension === 'mbti') {
+        const mbtiBucket = getResolvedPublicStatBucket('mbti') || { iCount: 0, eCount: 0, untestedCount: 0 };
+        const iPersonCount = Math.max(0, Number(mbtiBucket.iCount || 0)) + maleOffset + 5;
+        const ePersonCount = Math.max(0, Number(mbtiBucket.eCount || 0));
+        const untestedMbtiCount = Math.max(0, Number(mbtiBucket.untestedCount || 0));
 
-    ieDonutBox.innerHTML = `
-        <svg viewBox="0 0 132 132" class="w-36 h-36 -rotate-90">
-            <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#fce7f3" stroke-width="16"></circle>
-            ${mbtiAllTotal > 0 ? `
-                <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#818cf8" stroke-width="16"
-                    stroke-dasharray="${iArc} ${circumference}" stroke-dashoffset="0"></circle>
-                <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#fbbf24" stroke-width="16"
-                    stroke-dasharray="${eArc} ${circumference}" stroke-dashoffset="${-iArc}"></circle>
-                <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#94a3b8" stroke-width="16"
-                    stroke-dasharray="${untestedArc} ${circumference}" stroke-dashoffset="${-(iArc + eArc)}"></circle>
-            ` : ''}
-        </svg>
-        <div class="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
-            <span class="text-[10px] text-gray-400 font-medium">已登記人數</span>
-            <span class="text-lg font-bold font-serif-jp text-[#8f4452] leading-tight">${mbtiAllTotal} 人</span>
-        </div>
-    `;
+        const mbtiAllTotal = iPersonCount + ePersonCount + untestedMbtiCount;
+        const iPct = mbtiAllTotal > 0 ? Math.round((iPersonCount / mbtiAllTotal) * 100) : 0;
+        const ePct = mbtiAllTotal > 0 ? Math.round((ePersonCount / mbtiAllTotal) * 100) : 0;
+        const untestedPct = mbtiAllTotal > 0 ? Math.round((untestedMbtiCount / mbtiAllTotal) * 100) : 0;
+
+        const iTextEl = document.getElementById('statMbtiIText');
+        const eTextEl = document.getElementById('statMbtiEText');
+        const untestedTextEl = document.getElementById('statMbtiUntestedText');
+        const iBarEl = document.getElementById('statMbtiIBar');
+        const eBarEl = document.getElementById('statMbtiEBar');
+        const untestedBarEl = document.getElementById('statMbtiUntestedBar');
+
+        if (iTextEl) iTextEl.textContent = `${iPersonCount} 人 (${iPct}%)`;
+        if (eTextEl) eTextEl.textContent = `${ePersonCount} 人 (${ePct}%)`;
+        if (untestedTextEl) untestedTextEl.textContent = `${untestedMbtiCount} 人 (${untestedPct}%)`;
+        if (iBarEl) iBarEl.style.width = `${iPct}%`;
+        if (eBarEl) eBarEl.style.width = `${ePct}%`;
+        if (untestedBarEl) untestedBarEl.style.width = `${untestedPct}%`;
+
+        const iArc = mbtiAllTotal > 0 ? (iPersonCount / mbtiAllTotal) * circumference : 0;
+        const eArc = mbtiAllTotal > 0 ? (ePersonCount / mbtiAllTotal) * circumference : 0;
+        const untestedArc = mbtiAllTotal > 0 ? (untestedMbtiCount / mbtiAllTotal) * circumference : 0;
+
+        ieDonutBox.innerHTML = `
+            <svg viewBox="0 0 132 132" class="w-36 h-36 -rotate-90">
+                <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#fce7f3" stroke-width="16"></circle>
+                ${mbtiAllTotal > 0 ? `
+                    <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#818cf8" stroke-width="16"
+                        stroke-dasharray="${iArc} ${circumference}" stroke-dashoffset="0"></circle>
+                    <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#fbbf24" stroke-width="16"
+                        stroke-dasharray="${eArc} ${circumference}" stroke-dashoffset="${-iArc}"></circle>
+                    <circle cx="66" cy="66" r="${radius}" fill="none" stroke="#94a3b8" stroke-width="16"
+                        stroke-dasharray="${untestedArc} ${circumference}" stroke-dashoffset="${-(iArc + eArc)}"></circle>
+                ` : ''}
+            </svg>
+            <div class="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                <span class="text-[10px] text-gray-400 font-medium">已登記人數</span>
+                <span class="text-lg font-bold font-serif-jp text-[#8f4452] leading-tight">${mbtiAllTotal} 人</span>
+            </div>
+        `;
+    }
+
+    // 3. 僅當切換至 人數分布地區 時才渲染 北部／中部／南部／東部 4 個個別地區總人數
+    //    同步納入後台「男生上限 固定 x 人」(maleOffset) 與女生固定 +5 人加成（北+2、中+1、南+1、東+1），確保地區總和與總計人數（男/女、MBTI）完全一致
+    if (currentHomeStatsDimension === 'region') {
+        const regBucket = getResolvedPublicStatBucket('region') || { north: 0, central: 0, south: 0, east: 0 };
+        const rawNorth = Math.max(0, Number(regBucket.north || 0));
+        const rawCentral = Math.max(0, Number(regBucket.central || 0));
+        const rawSouth = Math.max(0, Number(regBucket.south || 0));
+        const rawEast = Math.max(0, Number(regBucket.east || 0));
+        const rawRegSum = rawNorth + rawCentral + rawSouth + rawEast;
+
+        const regionCycleSteps = [
+            ['north', 1], ['central', 1], ['south', 1],
+            ['north', 1], ['south', 1], ['north', 1]
+        ];
+        // 女生固定 +5 人加成全部計算在東部（東+5 = 5 人），並加上 maleOffset 的 6 次迴圈加成
+        const extraRegionCounts = { north: 0, central: 0, south: 0, east: 5 };
+        const missingBaseDiff = Math.max(0, baseTotal - rawRegSum);
+        const totalStepsToDistribute = maleOffset + missingBaseDiff;
+        for (let stepIdx = 0; stepIdx < totalStepsToDistribute; stepIdx++) {
+            const [targetReg, deltaVal] = regionCycleSteps[stepIdx % 6];
+            extraRegionCounts[targetReg] += deltaVal;
+        }
+
+        const northCount = rawNorth + extraRegionCounts.north;
+        const centralCount = rawCentral + extraRegionCounts.central;
+        const southCount = rawSouth + extraRegionCounts.south;
+        const eastCount = rawEast + extraRegionCounts.east;
+        const regTotal = northCount + centralCount + southCount + eastCount;
+
+        const regionsMeta = [
+            { count: northCount, countId: 'statRegionNorthCount', pctId: 'statRegionNorthPct', barId: 'statRegionNorthBar' },
+            { count: centralCount, countId: 'statRegionCentralCount', pctId: 'statRegionCentralPct', barId: 'statRegionCentralBar' },
+            { count: southCount, countId: 'statRegionSouthCount', pctId: 'statRegionSouthPct', barId: 'statRegionSouthBar' },
+            { count: eastCount, countId: 'statRegionEastCount', pctId: 'statRegionEastPct', barId: 'statRegionEastBar' }
+        ];
+        regionsMeta.forEach(item => {
+            const pct = regTotal > 0 ? Math.round((item.count / regTotal) * 100) : 0;
+            const cEl = document.getElementById(item.countId);
+            const pEl = document.getElementById(item.pctId);
+            const bEl = document.getElementById(item.barId);
+            if (cEl) cEl.textContent = `${item.count} 人`;
+            if (pEl) pEl.textContent = `${pct}%`;
+            if (bEl) bEl.style.width = `${pct}%`;
+        });
+    }
 }
 
 // ==================== 複選場次與完全吻合條件（當前居住地區僅選北部、中部、南部、東部） ====================
+function checkExceededFriendsLimitForRegistration(sysConfig) {
+    const isMale = (typeof isMalePlayerRecord === 'function')
+        ? isMalePlayerRecord(appState)
+        : ((appState && appState.profile && appState.profile.gender === '男') || String((appState && appState.playerId) || '').startsWith('1'));
+
+    const defaultGenderLimit = isMale ? 4 : 6;
+    const genderLabel = isMale ? '男生' : '女生';
+
+    // 優先讀取該玩家個人專屬上限設定（null/undefined 則套用全站固定預設：男 4 人、女 6 人；0 代表個人不限制）
+    let customVal = undefined;
+    const pid = (appState && appState.playerId) ? String(appState.playerId).trim() : '';
+    if (pid && typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY] && CloudSync.tree[USERS_KEY][pid]) {
+        customVal = CloudSync.tree[USERS_KEY][pid].customMaxFriendsLimit;
+    }
+    if (customVal === undefined && pid && typeof Store !== 'undefined' && typeof Store.getUsersArray === 'function') {
+        const uRec = Store.getUsersArray().find(u => u && String(u.id).trim() === pid);
+        if (uRec) customVal = uRec.customMaxFriendsLimit;
+    }
+    if (customVal === undefined && appState && appState.customMaxFriendsLimit !== undefined) {
+        customVal = appState.customMaxFriendsLimit;
+    }
+
+    let maxFriendsLimit = defaultGenderLimit;
+    let isCustomApplied = false;
+    if (customVal !== undefined && customVal !== null && customVal !== '') {
+        const parsedCustom = Number(customVal);
+        if (!isNaN(parsedCustom) && parsedCustom >= 0) {
+            if (Math.floor(parsedCustom) === 0) return false; // 個人設為「不限制」
+            maxFriendsLimit = Math.floor(parsedCustom);
+            isCustomApplied = true;
+        }
+    }
+
+    const currentFriendsCount = (typeof Store !== 'undefined' && typeof Store.getActiveFriendCount === 'function' && pid)
+        ? Store.getActiveFriendCount(pid)
+        : ((appState && Array.isArray(appState.friends)) ? appState.friends.length : 0);
+
+    if (currentFriendsCount > maxFriendsLimit) {
+        const limitDesc = isCustomApplied ? `上限 ${maxFriendsLimit} 人` : `${genderLabel}上限 ${maxFriendsLimit} 人`;
+        showMiniNotice(
+            '🚫 好友名單人數超過上限 禁止報名',
+            `目前你的好友名單共有 ${currentFriendsCount} 人（超過${limitDesc}），禁止報名新活動！請先整理好友名單後再試。`
+        );
+        return true;
+    }
+    return false;
+}
+
 function handleApplyClick() {
     const sysConfig = Store.getSystemConfig();
     const quota = Store.getGenderQuotaStatus();
 
     if (appState.isWarnedAccount) {
         showMiniNotice('⚠️ 無法報名', '目前警告帳號 不提供配對');
+        return;
+    }
+
+    if (checkExceededFriendsLimitForRegistration(sysConfig)) {
         return;
     }
 
@@ -1068,9 +1239,14 @@ async function cancelRegularRegistration() {
 }
 
 async function confirmRegistration() {
-    if (!Store.getSystemConfig().registrationOpen) {
+    const sysCfgNow = Store.getSystemConfig();
+    if (!sysCfgNow.registrationOpen) {
         closeRegisterModal();
         showMiniNotice('🚫 人數已滿 不可報名', '本屆報名名額已滿，目前暫不開放報名。');
+        return;
+    }
+    if (checkExceededFriendsLimitForRegistration(sysCfgNow)) {
+        closeRegisterModal();
         return;
     }
 
@@ -1179,6 +1355,10 @@ function handleCustomActivityClick(activityId) {
 
     if (appState.isWarnedAccount) {
         showMiniNotice('⚠️ 無法報名', '目前警告帳號 不提供配對');
+        return;
+    }
+
+    if (checkExceededFriendsLimitForRegistration(Store.getSystemConfig())) {
         return;
     }
 
@@ -1921,6 +2101,39 @@ const YUELAO_DAILY_LOVE_POLLS = [
     { id: 'p30', q: '如果能重來，你會選擇「早點遇到對的人」還是「先成為更好的自己再相遇」？', optA: '成為更好的自己再相遇，才能好好接住這份緣分', optB: '早點遇到對的人，一起經歷成長、陪彼此變好', baseM: [57, 43], baseF: [52, 48] }
 ];
 
+let currentHomeDailyInteractiveMode = 'poll'; // 預設顯示 'poll'（💘 每日戀愛2選1 題目），點擊右側「🎋 月老籤」按鈕切換至 'fortune'
+
+function switchHomeDailyInteractiveMode(mode) {
+    const nextMode = (mode === 'fortune') ? 'fortune' : 'poll';
+    currentHomeDailyInteractiveMode = nextMode;
+
+    const pollPanel = document.getElementById('dailyLovePollPanel');
+    const fortunePanel = document.getElementById('dailyFortunePanel');
+    const pollSubBadge = document.getElementById('dailyPollBadge');
+    const fortuneSubBadge = document.getElementById('dailyFortuneDateBadge');
+    const btnPoll = document.getElementById('dailySwitchBtn_poll');
+    const btnFortune = document.getElementById('dailySwitchBtn_fortune');
+
+    const isPoll = (nextMode === 'poll');
+    if (pollPanel) pollPanel.classList.toggle('hidden', !isPoll);
+    if (fortunePanel) fortunePanel.classList.toggle('hidden', isPoll);
+
+    if (pollSubBadge) pollSubBadge.classList.toggle('hidden', !isPoll);
+    if (fortuneSubBadge) fortuneSubBadge.classList.toggle('hidden', isPoll);
+
+    const activeBtnCls = 'text-xs px-2.5 sm:px-3 py-1 rounded-full bg-[#c96a7b] text-white border border-[#c96a7b] font-bold shadow-2xs transition cursor-pointer whitespace-nowrap';
+    const inactiveBtnCls = 'text-xs px-2.5 sm:px-3 py-1 rounded-full bg-white text-[#8f4452] border border-pink-200 font-bold hover:bg-pink-50 transition cursor-pointer whitespace-nowrap';
+    if (btnPoll) btnPoll.className = isPoll ? activeBtnCls : inactiveBtnCls;
+    if (btnFortune) btnFortune.className = !isPoll ? activeBtnCls : inactiveBtnCls;
+
+    if (isPoll && typeof renderDailyLovePollCard === 'function') {
+        renderDailyLovePollCard(true);
+    } else if (!isPoll && typeof renderDailyFortuneCard === 'function') {
+        renderDailyFortuneCard(true);
+    }
+}
+window.switchHomeDailyInteractiveMode = switchHomeDailyInteractiveMode;
+
 let dailyLovePollTestOffset = 0;
 let dailyPollCloudCountsCache = {}; // { [key]: { mA, mB, fA, fB } }
 let dailyPollInFlightKeys = new Set();
@@ -2066,11 +2279,12 @@ function renderDailyFortuneCard(forceRender = false) {
     if (!bodyEl) return;
 
     const today = getTaipeiTodayDateStr();
+    const todayShortLabel = `${today.slice(5).replace('-', '/')} 月老籤`;
     const isSandbox = (typeof isLocalSandboxEnv === 'function' && isLocalSandboxEnv());
     if (dateBadge) {
         dateBadge.innerHTML = isSandbox
-            ? `${today.slice(5).replace('-', '/')} 每日一籤 <button type="button" onclick="resetDailyFortuneForTest()" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">🧪 重抽</button>`
-            : `${today.slice(5).replace('-', '/')} 每日一籤`;
+            ? `<button type="button" onclick="resetDailyFortuneForTest()" class="px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">🧪 重抽</button>`
+            : '';
     }
 
     const drawn = getSavedDailyFortune();
@@ -2085,6 +2299,7 @@ function renderDailyFortuneCard(forceRender = false) {
                     🏮
                 </div>
                 <div class="space-y-1">
+                    <div class="text-sm font-extrabold font-serif-jp text-[#8f4452]">${todayShortLabel}</div>
                     <h3 class="text-base font-bold font-serif-jp text-[#7a3542]">求一支今日的月老戀愛籤</h3>
                     <p class="text-xs text-gray-500 leading-relaxed">
                         誠心默念你的名字，看看今天月老為你準備了什麼緣分提示與契合人格！
@@ -2107,7 +2322,10 @@ function renderDailyFortuneCard(forceRender = false) {
     bodyEl.innerHTML = `
         <div class="p-4 rounded-2xl bg-gradient-to-br from-rose-50/90 via-white to-pink-50/90 border border-pink-200/90 space-y-3 shadow-2xs">
             <div class="flex flex-wrap items-center justify-between gap-2 border-b border-pink-100 pb-2.5">
-                <span class="text-sm font-extrabold font-serif-jp text-[#8f4452]">${escapeFateWallHtml(drawn.level)}</span>
+                <div class="flex flex-wrap items-center gap-2 text-sm font-extrabold font-serif-jp text-[#8f4452]">
+                    <span>${todayShortLabel}</span>
+                    <span>${escapeFateWallHtml(drawn.level)}</span>
+                </div>
                 <span class="text-[11px] px-2.5 py-0.5 rounded-full bg-white border border-pink-200 text-[#c96a7b] font-bold">
                     #${escapeFateWallHtml(drawn.keyword)}
                 </span>
@@ -2331,13 +2549,14 @@ function renderDailyLovePollCard(forceRender = false) {
     const countsSig = cachedCounts ? `${cachedCounts.mA},${cachedCounts.mB},${cachedCounts.fA},${cachedCounts.fB}` : 'none';
     const realTotalVotes = cachedCounts ? (cachedCounts.mA + cachedCounts.mB + cachedCounts.fA + cachedCounts.fB) : 0;
     const voteCountBadgeHtml = realTotalVotes >= 15
-        ? `<span class="mr-1.5 px-2 py-0.5 rounded-full bg-rose-50 border border-pink-200 text-[#8f4452] text-[10px] font-bold">已投票 ${realTotalVotes + 20} 人</span>`
+        ? `<span class="px-2 py-0.5 rounded-full bg-rose-50 border border-pink-200 text-[#8f4452] text-[10px] font-bold">已投票 ${realTotalVotes + 20} 人</span>`
         : '';
+    const votedRightTagHtml = savedVote ? `<span class="text-[11px] text-[#c96a7b] font-bold whitespace-nowrap">✅ 已投票</span>` : '';
     if (badgeEl) {
         if (isSandbox) {
-            badgeEl.innerHTML = `${voteCountBadgeHtml}${savedVote ? '✅ 已投票' : '免建檔投票'} <button type="button" onclick="resetDailyLovePollForTest(false)" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">🧪 重選</button><button type="button" onclick="resetDailyLovePollForTest(true)" class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">換題</button>`;
+            badgeEl.innerHTML = `<span class="inline-flex items-center justify-end gap-1.5">${voteCountBadgeHtml}<button type="button" onclick="resetDailyLovePollForTest(false)" class="px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">🧪 重選</button><button type="button" onclick="resetDailyLovePollForTest(true)" class="px-1.5 py-0.5 rounded bg-teal-50 border border-teal-300 text-teal-800 text-[10px] font-bold hover:bg-teal-100">換題</button>${votedRightTagHtml}</span>`;
         } else {
-            badgeEl.innerHTML = `${voteCountBadgeHtml}${savedVote ? '✅ 已投票' : '免建檔即時投票'}`;
+            badgeEl.innerHTML = `<span class="inline-flex items-center justify-end gap-1.5">${voteCountBadgeHtml}${votedRightTagHtml}</span>`;
         }
     }
 

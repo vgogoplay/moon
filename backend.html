@@ -134,6 +134,29 @@
 
     </div>
 
+    <!-- ⚙️ 玩家功能操作 Modal（帳號管理操作 + 後台管理員專屬設定） -->
+    <div id="playerFunctionsModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[88vh] overflow-y-auto p-6 md:p-8 shadow-2xl border-2 border-pink-200 space-y-5">
+            <div class="flex items-center justify-between border-b border-pink-100 pb-3 sticky top-0 bg-white/95 z-10">
+                <div>
+                    <h3 class="text-lg md:text-xl font-bold font-serif-jp text-[#8f4452]" id="playerFunctionsModalTitle">⚙️ 玩家功能設定</h3>
+                    <p class="text-xs text-gray-500">管理帳號限制操作與後台管理員專屬設定</p>
+                </div>
+                <button type="button" onclick="closePlayerFunctionsModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+            <input type="hidden" id="playerFunctionsTargetId">
+            <div id="playerFunctionsModalBody" class="space-y-5"></div>
+            <div class="sticky bottom-0 bg-white/95 pt-3 pb-1 border-t border-pink-100 flex flex-wrap justify-end gap-2.5">
+                <button type="button" onclick="closePlayerFunctionsModal()" class="px-5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                    關閉
+                </button>
+                <button type="button" onclick="savePlayerFunctionsModalSettings()" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#e79aa8] to-[#c96a7b] text-white text-xs md:text-sm font-bold shadow-md hover:opacity-95 transition">
+                    💾 保存功能設定並同步
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- 玩家完整資料檢視 Modal -->
     <div id="playerDetailModal" class="hidden fixed inset-0 bg-black/45 backdrop-blur-sm z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-6 md:p-8 shadow-2xl border border-pink-100">
@@ -283,11 +306,11 @@
     <script src="shared/schedule.js?v=20261125extracredits15"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261123nodup"></script>
-    <script src="shared/cloud-store.js?v=20261125idprotectv19"></script>
+    <script src="shared/cloud-store.js?v=20261127peruserlimitv30"></script>
     <!-- 後台共用狀態與頁面模組 -->
-    <script src="backend/state.js?v=20261125wishlimit5v17"></script>
+    <script src="backend/state.js?v=20261127peruserlimitv21"></script>
     <script src="backend/matching.js?v=20261125idprotectv19"></script>
-    <script src="backend/roster.js?v=20261125idprotectv19"></script>
+    <script src="backend/roster.js?v=20261127peruserlimitv25"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261125firelock16"></script>
 </body>

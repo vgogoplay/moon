@@ -14,6 +14,7 @@ function yuelaoEscapeHtml(value) {
 const STORAGE_KEY = 'yuelao_romance_app_v2';
 const USERS_KEY = 'yuelao_users';
 const USER_INDEX_KEY = 'yuelao_user_index';
+const PUBLIC_STATS_KEY = 'yuelao_public_stats';
 const PAIR_PROFILES_KEY = 'yuelao_pair_profiles';
 const PAIR_IG_KEY = 'yuelao_pair_ig';
 const REPORTS_KEY = 'yuelao_reports';
@@ -2127,10 +2128,8 @@ const CloudSync = {
     },
 
     pollPlayerCold() {
-        const now = Date.now();
-        const needUserIndex = (now - Number(this.lastUserIndexPolledAt || 0)) >= this.PLAYER_USER_INDEX_INTERVAL_MS;
         const coldDyn = [
-            ...(needUserIndex ? [USER_INDEX_KEY] : []),
+            `${PUBLIC_STATS_KEY}/gender`,
             ...this.playerColdDynamicPaths(),
             ...this.playerHotDynamicPaths(true).filter(p => p.startsWith(`${CHATS_KEY}/`) && p !== this.activeRoomPath)
         ];
@@ -2272,8 +2271,8 @@ const CloudSync = {
         this.hydrateTreeFromLocalStorage();
         this.loadPersistedEtags();
         const me = this.playerSelfId();
-        // 第一階段：索引、系統設定、祈願牆、專屬活動、本人私有記錄（確保手機端首屏即顯示專屬活動報名按鈕）
-        const earlyNodes = [USER_INDEX_KEY, 'yuelao_system_batch', WISH_WALL_KEY, CUSTOM_ACTIVITIES_KEY];
+        // 第一階段：輕量男女統計摘要、系統設定、祈願牆、專屬活動、本人私有記錄（首頁進來只讀取男/女人數統計，不下載整包會員索引）
+        const earlyNodes = [`${PUBLIC_STATS_KEY}/gender`, 'yuelao_system_batch', WISH_WALL_KEY, CUSTOM_ACTIVITIES_KEY];
         if (me) earlyNodes.push(`${USERS_KEY}/${me}`);
         await this.fetchPlayerPaths(earlyNodes);
         if (this.tree[CUSTOM_ACTIVITIES_KEY] === undefined && !this.isLocalSandboxMode()) {
@@ -2916,6 +2915,99 @@ const CloudSync = {
         }
     },
 
+    // 按需讀取首頁統計維度（'gender' | 'mbti' | 'region'）：僅當玩家切換下拉選單時才單獨向雲端讀取該分類
+    async fetchPublicStatsCategory(category) {
+        const cat = ['gender', 'mbti', 'region'].includes(String(category)) ? String(category) : 'gender';
+        if (!this.tree) this.tree = {};
+        if (!this.tree[PUBLIC_STATS_KEY] || typeof this.tree[PUBLIC_STATS_KEY] !== 'object') {
+            this.tree[PUBLIC_STATS_KEY] = {};
+        }
+
+        if (this.isLocalSandboxMode()) {
+            const summary = this.computePublicStatsFromUsers(Store.getUsersArray());
+            this.tree[PUBLIC_STATS_KEY][cat] = summary[cat];
+            try { localStorage.setItem(PUBLIC_STATS_KEY, JSON.stringify(this.tree[PUBLIC_STATS_KEY])); } catch (e) {}
+            return summary[cat];
+        }
+
+        // 1. 先嘗試讀取預先聚合的輕量統計節點 yuelao_public_stats/{cat}（約數十 Bytes）
+        const remoteStat = await this.getNodeOnce(`${PUBLIC_STATS_KEY}/${cat}`);
+        if (remoteStat && typeof remoteStat === 'object' && Number(remoteStat.updatedAt || 0) > 0) {
+            this.tree[PUBLIC_STATS_KEY][cat] = remoteStat;
+            try { localStorage.setItem(PUBLIC_STATS_KEY, JSON.stringify(this.tree[PUBLIC_STATS_KEY])); } catch (e) {}
+            return remoteStat;
+        }
+
+        // 2. 若雲端尚未建立該分類聚合節點（舊資料首次查詢），僅針對該位玩家單次讀取 USER_INDEX_KEY 計算並回寫聚合節點
+        const idxData = await this.getNodeOnce(USER_INDEX_KEY);
+        if (idxData && typeof idxData === 'object') {
+            this.applyStreamPatch(USER_INDEX_KEY, idxData);
+            const idxArr = Object.values(idxData).filter(u => u && typeof u === 'object' && u.id);
+            const summary = this.computePublicStatsFromUsers(idxArr);
+            this.tree[PUBLIC_STATS_KEY] = summary;
+            try { localStorage.setItem(PUBLIC_STATS_KEY, JSON.stringify(summary)); } catch (e) {}
+            this.putNode(PUBLIC_STATS_KEY, summary).catch(() => {});
+            return summary[cat];
+        }
+
+        return this.tree[PUBLIC_STATS_KEY][cat] || null;
+    },
+
+    computePublicStatsFromUsers(usersList) {
+        const validUsers = (Array.isArray(usersList) ? usersList : []).filter(u => u && typeof u === 'object' && u.id);
+        let male = 0, female = 0;
+        let iCount = 0, eCount = 0, untestedCount = 0;
+        let north = 0, central = 0, south = 0, east = 0;
+
+        validUsers.forEach(u => {
+            if (u.gender === '男') male++;
+            else if (u.gender === '女') female++;
+
+            const rawMbti = String(u.mbti || '').trim().toUpperCase();
+            const grp = u.mbtiGroup || (typeof inferMbtiGroup === 'function' ? inferMbtiGroup(rawMbti) : '');
+            if (!rawMbti || rawMbti.includes('不知道') || rawMbti.includes('沒測過') || grp === '不知道 / 沒測過') {
+                if (grp === 'I人') iCount++;
+                else if (grp === 'E人') eCount++;
+                else untestedCount++;
+            } else {
+                if (grp === 'I人' || rawMbti.startsWith('I')) iCount++;
+                else if (grp === 'E人' || rawMbti.startsWith('E')) eCount++;
+                else untestedCount++;
+            }
+
+            const reg = String(u.region || (typeof inferRegionByCity === 'function' ? inferRegionByCity(u.city) : '') || '').trim();
+            if (reg === '北部') north++;
+            else if (reg === '中部') central++;
+            else if (reg === '南部') south++;
+            else if (reg === '東部') east++;
+        });
+
+        const nowTs = Date.now();
+        return {
+            gender: { male, female, total: validUsers.length, updatedAt: nowTs },
+            mbti: { iCount, eCount, untestedCount, total: validUsers.length, updatedAt: nowTs },
+            region: { north, central, south, east, total: validUsers.length, updatedAt: nowTs }
+        };
+    },
+
+    async syncPublicStatsSummary(usersList = null) {
+        if (this.isLocalSandboxMode()) return;
+        let list = Array.isArray(usersList) ? usersList : null;
+        if (!list) {
+            if (this.tree && this.tree[USER_INDEX_KEY] && Object.keys(this.tree[USER_INDEX_KEY]).length > 0) {
+                list = Object.values(this.tree[USER_INDEX_KEY]);
+            } else if (this.isBackendContext() && this.tree && this.tree[USERS_KEY] && Object.keys(this.tree[USERS_KEY]).length > 0) {
+                list = Object.values(this.tree[USERS_KEY]);
+            }
+        }
+        if (!list || list.length === 0) return;
+        const summary = this.computePublicStatsFromUsers(list);
+        if (!this.tree) this.tree = {};
+        this.tree[PUBLIC_STATS_KEY] = summary;
+        try { localStorage.setItem(PUBLIC_STATS_KEY, JSON.stringify(summary)); } catch (e) {}
+        await this.putNode(PUBLIC_STATS_KEY, summary);
+    },
+
     // 同步一位會員的公開索引與其配對節點。options.bothSides（後台）時一併寫入對方側資料
     async syncDerivedNodesFor(pid, record, options = {}) {
         const ownerId = String(pid || '').trim();
@@ -2952,7 +3044,10 @@ const CloudSync = {
                 sigsChanged = true;
             }
         }
-        if (sigsChanged) this.saveDerivedSyncSigs();
+        if (sigsChanged) {
+            this.saveDerivedSyncSigs();
+            this.syncPublicStatsSummary().catch(() => {});
+        }
         return entries.length;
     },
 
@@ -3473,7 +3568,10 @@ const Store = {
                 genderLimitEnabled: sys.genderLimitEnabled !== undefined ? Boolean(sys.genderLimitEnabled) : false,
                 genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30,
                 maleDisplayOffset: sys.maleDisplayOffset !== undefined ? Math.max(0, Number(sys.maleDisplayOffset) || 0) : 0,
-                wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true
+                wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true,
+                maxFriendsLimit: sys.maxFriendsLimit !== undefined ? Math.max(0, Number(sys.maxFriendsLimit) || 0) : 5,
+                maleMaxFriendsLimit: sys.maleMaxFriendsLimit !== undefined ? Math.max(1, Number(sys.maleMaxFriendsLimit) || 4) : 4,
+                femaleMaxFriendsLimit: sys.femaleMaxFriendsLimit !== undefined ? Math.max(1, Number(sys.femaleMaxFriendsLimit) || 6) : 6
             };
         } catch (e) {
             return {
@@ -3485,7 +3583,10 @@ const Store = {
                 genderLimitEnabled: false,
                 genderLimitMax: 30,
                 maleDisplayOffset: 0,
-                wishEarlyCloseCanMatch: true
+                wishEarlyCloseCanMatch: true,
+                maxFriendsLimit: 5,
+                maleMaxFriendsLimit: 4,
+                femaleMaxFriendsLimit: 6
             };
         }
     },
@@ -3497,6 +3598,46 @@ const Store = {
         LocalJsonCache.invalidate(SYSTEM_STATE_KEY);
         if (typeof CloudSync !== 'undefined') CloudSync.putNode(SYSTEM_STATE_KEY, updated);
         return updated;
+    },
+
+    getActiveFriendCount(userOrId) {
+        let userObj = null;
+        if (userOrId && typeof userOrId === 'object') {
+            userObj = userOrId;
+        } else if (userOrId) {
+            const pid = String(userOrId).trim();
+            const users = this.getUsersArray();
+            userObj = users.find(u => u && String(u.id).trim() === pid) || null;
+            if (!userObj && typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[USERS_KEY]) {
+                userObj = CloudSync.tree[USERS_KEY][pid] || null;
+            }
+        }
+        const partnerIds = new Set();
+        if (userObj) {
+            const uid = String(userObj.id || '').trim();
+            const hist = (typeof CloudSync !== 'undefined' && typeof CloudSync.normalizeMatchedHistoryList === 'function')
+                ? CloudSync.normalizeMatchedHistoryList(userObj.matchedHistory)
+                : (Array.isArray(userObj.matchedHistory) ? userObj.matchedHistory : []);
+            hist.forEach(h => {
+                const p = String((h && h.partnerId) || '').trim();
+                if (p && p !== uid && !(typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(uid, p))) {
+                    partnerIds.add(p);
+                }
+            });
+            const directId = String(userObj.matchedWithId || '').trim();
+            if (directId && directId !== uid && !(typeof CloudSync !== 'undefined' && typeof CloudSync.isPairRecentlyUnmatched === 'function' && CloudSync.isPairRecentlyUnmatched(uid, directId))) {
+                partnerIds.add(directId);
+            }
+        }
+        if (typeof appState !== 'undefined' && appState && Array.isArray(appState.friends)) {
+            const targetPid = userObj ? String(userObj.id || '').trim() : String(userOrId || '').trim();
+            if (!targetPid || String(appState.playerId || '').trim() === targetPid) {
+                appState.friends.forEach(f => {
+                    if (f && f.id) partnerIds.add(String(f.id).trim());
+                });
+            }
+        }
+        return partnerIds.size;
     },
 
     getGenderCounts() {
@@ -3969,6 +4110,7 @@ const Store = {
                 warningReason: state.warningReason || '',
                 isMatchBanned: Boolean(authMatchSource.isMatchBanned),
                 isChatBanned: Boolean(authMatchSource.isChatBanned),
+                customMaxFriendsLimit: (authMatchSource.customMaxFriendsLimit !== undefined ? authMatchSource.customMaxFriendsLimit : (existingRecord.customMaxFriendsLimit !== undefined ? existingRecord.customMaxFriendsLimit : null)),
                 extraMatchCredits: resolvedExtraCredits,
                 extraCreditDeductedBatches: resolvedDeductedBatches,
                 readMailIds: Array.isArray(state.readMailIds) ? Array.from(new Set(state.readMailIds.map(String))) : [],

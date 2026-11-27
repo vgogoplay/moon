@@ -160,6 +160,9 @@ function getSystemConfig() {
         genderLimitMax: sys.genderLimitMax !== undefined ? Math.max(1, Number(sys.genderLimitMax)) : 30,
         maleDisplayOffset: sys.maleDisplayOffset !== undefined ? Math.max(0, Number(sys.maleDisplayOffset) || 0) : 0,
         wishEarlyCloseCanMatch: sys.wishEarlyCloseCanMatch !== undefined ? Boolean(sys.wishEarlyCloseCanMatch) : true,
+        maxFriendsLimit: sys.maxFriendsLimit !== undefined ? Math.max(0, Number(sys.maxFriendsLimit) || 0) : 5,
+        maleMaxFriendsLimit: sys.maleMaxFriendsLimit !== undefined ? Math.max(1, Number(sys.maleMaxFriendsLimit) || 4) : 4,
+        femaleMaxFriendsLimit: sys.femaleMaxFriendsLimit !== undefined ? Math.max(1, Number(sys.femaleMaxFriendsLimit) || 6) : 6,
         maleExtraSessionPlayerIds: typeof normalizeMaleExtraSessionPlayerIds === 'function'
             ? normalizeMaleExtraSessionPlayerIds(sys.maleExtraSessionPlayerIds)
             : (Array.isArray(sys.maleExtraSessionPlayerIds) ? sys.maleExtraSessionPlayerIds.map(String) : [])
@@ -265,6 +268,84 @@ function updateMaleDisplayOffset() {
     appendLog(`<span class="text-pink-300">[男生固定人數更新]</span> 男生固定人數已調整為 <strong>+${validOffset} 人</strong>（男生上限 ${maxVal} 人，前台顯示共 <strong>${maxVal + validOffset} 人</strong>）。`);
     renderAdminAll();
 }
+
+
+function adjustAdminGenderFriendsLimitStep(genderKey, delta) {
+    const maleInput = document.getElementById('adminMaleMaxFriendsLimitInput');
+    const femaleInput = document.getElementById('adminFemaleMaxFriendsLimitInput');
+    const unlimCb = document.getElementById('adminMaxFriendsUnlimitedCheckbox');
+    const targetInput = genderKey === 'male' ? maleInput : femaleInput;
+    const defaultVal = genderKey === 'male' ? 4 : 6;
+    if (!targetInput) return;
+    if (unlimCb && unlimCb.checked) {
+        unlimCb.checked = false;
+        if (maleInput) maleInput.disabled = false;
+        if (femaleInput) femaleInput.disabled = false;
+    }
+    const curVal = Math.max(1, parseInt(targetInput.value, 10) || defaultVal);
+    const nextVal = Math.max(1, Math.min(999, curVal + Number(delta || 0)));
+    targetInput.value = nextVal;
+    updateAdminMaxFriendsLimit(true);
+}
+
+function updateAdminMaxFriendsLimit(silent = false) {
+    const maleInput = document.getElementById('adminMaleMaxFriendsLimitInput');
+    const femaleInput = document.getElementById('adminFemaleMaxFriendsLimitInput');
+    const unlimCb = document.getElementById('adminMaxFriendsUnlimitedCheckbox');
+    if (!maleInput || !femaleInput) return;
+    const rawMale = parseInt(maleInput.value, 10);
+    const rawFemale = parseInt(femaleInput.value, 10);
+    const validMale = (!isNaN(rawMale) && rawMale >= 1) ? Math.min(999, rawMale) : 4;
+    const validFemale = (!isNaN(rawFemale) && rawFemale >= 1) ? Math.min(999, rawFemale) : 6;
+    maleInput.value = validMale;
+    femaleInput.value = validFemale;
+    maleInput.disabled = false;
+    femaleInput.disabled = false;
+    if (unlimCb) unlimCb.checked = false;
+    setSystemConfig({
+        maxFriendsLimit: 5,
+        maleMaxFriendsLimit: validMale,
+        femaleMaxFriendsLimit: validFemale
+    });
+    appendLog(`<span class="text-pink-300">[好友名單限制更新]</span> 前台報名好友名單上限已設為：<strong>男生 ${validMale} 人 ／ 女生 ${validFemale} 人</strong>（超過禁止報名）。`);
+    renderAdminAll(true);
+    if (!silent) {
+        alert(`✅ 已更新前台報名好友人數上限：\n⚾ 男生超過 ${validMale} 人禁止報名\n🎀 女生超過 ${validFemale} 人禁止報名`);
+    }
+}
+window.adjustAdminGenderFriendsLimitStep = adjustAdminGenderFriendsLimitStep;
+window.adjustAdminMaxFriendsLimitStep = (delta) => adjustAdminGenderFriendsLimitStep('male', delta);
+
+function toggleAdminMaxFriendsUnlimited(isUnlimited) {
+    const maleInput = document.getElementById('adminMaleMaxFriendsLimitInput');
+    const femaleInput = document.getElementById('adminFemaleMaxFriendsLimitInput');
+    if (isUnlimited) {
+        if (maleInput) maleInput.disabled = true;
+        if (femaleInput) femaleInput.disabled = true;
+        setSystemConfig({ maxFriendsLimit: 0 });
+        appendLog(`<span class="text-emerald-300">[好友名單限制更新]</span> 前台報名好友名單上限已切換為 <strong>♾️ 不限制</strong>。`);
+    } else {
+        const curMale = maleInput ? Math.max(1, parseInt(maleInput.value, 10) || 4) : 4;
+        const curFemale = femaleInput ? Math.max(1, parseInt(femaleInput.value, 10) || 6) : 6;
+        if (maleInput) {
+            maleInput.disabled = false;
+            maleInput.value = curMale;
+        }
+        if (femaleInput) {
+            femaleInput.disabled = false;
+            femaleInput.value = curFemale;
+        }
+        setSystemConfig({
+            maxFriendsLimit: 5,
+            maleMaxFriendsLimit: curMale,
+            femaleMaxFriendsLimit: curFemale
+        });
+        appendLog(`<span class="text-pink-300">[好友名單限制更新]</span> 前台報名好友名單上限已恢復為：<strong>男生 ${curMale} 人 ／ 女生 ${curFemale} 人</strong>。`);
+    }
+    renderAdminAll(true);
+}
+window.updateAdminMaxFriendsLimit = updateAdminMaxFriendsLimit;
+window.toggleAdminMaxFriendsUnlimited = toggleAdminMaxFriendsUnlimited;
 
 function toggleWishEarlyCloseCanMatch() {
     const cfg = getSystemConfig();
