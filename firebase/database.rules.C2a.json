@@ -11,6 +11,7 @@
       ".indexOn": ["backupCode"]
     },
     "yuelao_user_index":            { ".write": "auth != null" },
+    "yuelao_public_stats":          { ".write": "auth != null" },
     "yuelao_pair_profiles":         { ".write": "auth != null" },
     "yuelao_pair_ig":               { ".write": "auth != null" },
     "yuelao_wish_wall":             { ".write": "auth != null" },

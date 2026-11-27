@@ -1055,6 +1055,13 @@ const CloudSync = {
                     return sanitized;
                 });
             this.writeLocalIfChanged(USERS_LOCAL_KEY, JSON.stringify(usersForLocalCache));
+            if (this.isBackendContext() && usersArr.length > 0 && this.initialized) {
+                const nowStatSync = Date.now();
+                if (!this._lastBackendStatsSyncAt || (nowStatSync - this._lastBackendStatsSyncAt) > 60000) {
+                    this._lastBackendStatsSyncAt = nowStatSync;
+                    this.syncPublicStatsSummary(usersArr).catch(() => {});
+                }
+            }
         }
         usersArr.forEach(u => {
             if (u && u.id) {
@@ -2935,7 +2942,7 @@ const CloudSync = {
         }
     },
 
-    // 按需讀取首頁統計維度（'gender' | 'mbti' | 'region'）：僅當玩家切換下拉選單時才單獨向雲端讀取該分類
+    // 按需讀取首頁統計維度（'gender' | 'mbti' | 'region'）：僅當玩家切換選項時才單獨向雲端讀取該分類
     async fetchPublicStatsCategory(category) {
         const cat = ['gender', 'mbti', 'region'].includes(String(category)) ? String(category) : 'gender';
         if (!this.tree) this.tree = {};
@@ -2952,18 +2959,30 @@ const CloudSync = {
 
         // 1. 先嘗試讀取預先聚合的輕量統計節點 yuelao_public_stats/{cat}（約數十 Bytes）
         const remoteStat = await this.getNodeOnce(`${PUBLIC_STATS_KEY}/${cat}`);
-        if (remoteStat && typeof remoteStat === 'object' && Number(remoteStat.updatedAt || 0) > 0) {
+        if (remoteStat && typeof remoteStat === 'object' && Number(remoteStat.updatedAt || 0) > 0 && Number(remoteStat.total || 0) > 0) {
             this.tree[PUBLIC_STATS_KEY][cat] = remoteStat;
             try { localStorage.setItem(PUBLIC_STATS_KEY, JSON.stringify(this.tree[PUBLIC_STATS_KEY])); } catch (e) {}
             return remoteStat;
         }
 
-        // 2. 若雲端尚未建立該分類聚合節點（舊資料首次查詢），僅針對該位玩家單次讀取 USER_INDEX_KEY 計算並回寫聚合節點
+        // 2. 次之嘗試讀取公開索引 USER_INDEX_KEY 計算統計
+        let sourceUsers = [];
         const idxData = await this.getNodeOnce(USER_INDEX_KEY);
         if (idxData && typeof idxData === 'object') {
             this.applyStreamPatch(USER_INDEX_KEY, idxData);
-            const idxArr = Object.values(idxData).filter(u => u && typeof u === 'object' && u.id);
-            const summary = this.computePublicStatsFromUsers(idxArr);
+            sourceUsers = Object.values(idxData).filter(u => u && typeof u === 'object' && u.id);
+        }
+
+        // 3. 若正式服尚未建立 yuelao_user_index（舊有 266 筆會員僅存於 yuelao_users），改讀取 yuelao_users 計算完整人數並建立聚合快取
+        if (sourceUsers.length === 0) {
+            const usersData = await this.getNodeOnce(USERS_KEY);
+            if (usersData && typeof usersData === 'object') {
+                sourceUsers = Object.values(usersData).filter(u => u && typeof u === 'object' && u.id);
+            }
+        }
+
+        if (sourceUsers.length > 0) {
+            const summary = this.computePublicStatsFromUsers(sourceUsers);
             this.tree[PUBLIC_STATS_KEY] = summary;
             try { localStorage.setItem(PUBLIC_STATS_KEY, JSON.stringify(summary)); } catch (e) {}
             this.putNode(PUBLIC_STATS_KEY, summary).catch(() => {});
@@ -3014,10 +3033,12 @@ const CloudSync = {
         if (this.isLocalSandboxMode()) return;
         let list = Array.isArray(usersList) ? usersList : null;
         if (!list) {
-            if (this.tree && this.tree[USER_INDEX_KEY] && Object.keys(this.tree[USER_INDEX_KEY]).length > 0) {
-                list = Object.values(this.tree[USER_INDEX_KEY]);
-            } else if (this.isBackendContext() && this.tree && this.tree[USERS_KEY] && Object.keys(this.tree[USERS_KEY]).length > 0) {
+            const idxCount = (this.tree && this.tree[USER_INDEX_KEY]) ? Object.keys(this.tree[USER_INDEX_KEY]).length : 0;
+            const usrCount = (this.tree && this.tree[USERS_KEY]) ? Object.keys(this.tree[USERS_KEY]).length : 0;
+            if (usrCount >= idxCount && usrCount > 0) {
                 list = Object.values(this.tree[USERS_KEY]);
+            } else if (idxCount > 0) {
+                list = Object.values(this.tree[USER_INDEX_KEY]);
             }
         }
         if (!list || list.length === 0) return;
