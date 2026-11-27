@@ -3333,6 +3333,7 @@ const CloudSync = {
             err.code = 'ID_COLLISION';
             throw err;
         }
+        const isTrulyFirstCreate = !baseUser && hasInput('gender') && (cleanRecord.gender === '男' || cleanRecord.gender === '女');
 
         const serialized = JSON.stringify(cleanRecord);
         if (!forcePush && this.lastPushedUsersJson[pid] === serialized) return;
@@ -3381,6 +3382,21 @@ const CloudSync = {
             }
         } else {
             await this.putNode(`${USERS_KEY}/${pid}`, cleanRecord, { throwOnError: Boolean(options && options.throwOnError) });
+            if (isTrulyFirstCreate && this.initialized && !this.isLocalSandboxMode()) {
+                try {
+                    const curG = await this.getNodeOnce(`${PUBLIC_STATS_KEY}/gender`);
+                    if (curG && typeof curG === 'object' && Number(curG.total || 0) > 0) {
+                        const nextG = {
+                            ...curG,
+                            male: Number(curG.male || 0) + (cleanRecord.gender === '男' ? 1 : 0),
+                            female: Number(curG.female || 0) + (cleanRecord.gender === '女' ? 1 : 0),
+                            total: Number(curG.total || 0) + 1,
+                            updatedAt: Date.now()
+                        };
+                        await this.putNode(`${PUBLIC_STATS_KEY}/gender`, nextG);
+                    }
+                } catch (e) {}
+            }
         }
         if (hasInput('matchedHistory')) await this.syncDerivedNodesFor(pid, cleanRecord, { bothSides: this.isBackendContext() });
         const cleanupTasks = [];
@@ -3711,14 +3727,32 @@ const Store = {
     getGenderCounts() {
         try {
             const users = this.getUsersArray();
-            let male = 0;
-            let female = 0;
+            let localMale = 0;
+            let localFemale = 0;
             users.forEach(u => {
                 if (!u || !u.id) return;
-                if (u.gender === '男') male++;
-                else if (u.gender === '女') female++;
+                if (u.gender === '男') localMale++;
+                else if (u.gender === '女') localFemale++;
             });
-            return { male, female };
+
+            let statMale = 0;
+            let statFemale = 0;
+            if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[PUBLIC_STATS_KEY] && CloudSync.tree[PUBLIC_STATS_KEY].gender) {
+                const gNode = CloudSync.tree[PUBLIC_STATS_KEY].gender;
+                statMale = Math.max(0, Number(gNode.male || 0));
+                statFemale = Math.max(0, Number(gNode.female || 0));
+            } else {
+                const cachedStats = LocalJsonCache.get(PUBLIC_STATS_KEY, null);
+                if (cachedStats && cachedStats.gender) {
+                    statMale = Math.max(0, Number(cachedStats.gender.male || 0));
+                    statFemale = Math.max(0, Number(cachedStats.gender.female || 0));
+                }
+            }
+
+            return {
+                male: Math.max(localMale, statMale),
+                female: Math.max(localFemale, statFemale)
+            };
         } catch (e) {
             return { male: 0, female: 0 };
         }
