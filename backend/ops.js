@@ -243,7 +243,7 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
             rulesBox.innerHTML = rules.map(r => `
                 <div class="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-white border border-rose-200 text-xs">
                     <div>
-                        <span class="px-2 py-0.5 rounded bg-rose-100 text-[#8f4452] font-bold mr-2">${r.batch}</span>
+                        <span class="px-2 py-0.5 rounded bg-rose-100 text-[#8f4452] font-bold mr-2">${typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(r.batch) : r.batch}</span>
                         <span>管理員 ID: <strong>${r.adminId}</strong> ⇄ 強制配對對象 ID: <strong>${r.targetId}</strong></span>
                         <span class="ml-2 text-[11px] ${r.executed ? 'text-emerald-600 font-bold' : 'text-amber-600'}">
                             ${r.executed ? '（✓ 已無痕配對完成）' : '（🔒 已鎖定）'}
@@ -475,7 +475,7 @@ function renderOpsPageSection(batch, currentSched, maxDisplayBatch) {
                 sessionOpts.push(info.tueLabel, info.thuLabel, info.satLabel);
             }
         }
-        sessionSel.innerHTML = sessionOpts.map(s => `<option value="${s}">${s}</option>`).join('');
+        sessionSel.innerHTML = sessionOpts.map(s => `<option value="${s}">${typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(s) : s}</option>`).join('');
         if (sessionOpts.includes(prevSessionVal)) {
             sessionSel.value = prevSessionVal;
         } else {

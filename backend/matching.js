@@ -2645,7 +2645,7 @@ function advanceToNextBatch() {
     const nextBatch = getCurrentBatch() + 1;
     setCurrentBatch(nextBatch);
     const nextInfo = getBatchScheduleInfo(nextBatch);
-    appendLog(`<span class="text-amber-300">[屆數刷新]</span> 系統已推進至 <strong>${nextInfo.batchPrefix}（${nextInfo.tueLabel} / ${nextInfo.thuLabel} / ${nextInfo.satLabel}）</strong>！`);
+    appendLog(`<span class="text-amber-300">[周次／屆數刷新]</span> 系統已推進至 <strong>${nextInfo.batchPrefix}（${nextInfo.tueDisplayLabel} / ${nextInfo.thuDisplayLabel} / ${nextInfo.satDisplayLabel}）</strong>！`);
     renderAdminAll();
 }
 
@@ -2814,7 +2814,7 @@ function executeInstantManualMatch(idA, idB) {
     }
 
     const sysCfg = getSystemConfig();
-    const sessionLabel = `第${sysCfg.currentBatch}屆(強制配對)`;
+    const sessionLabel = `${(typeof formatBatchDisplayPrefix === 'function' ? formatBatchDisplayPrefix(sysCfg.currentBatch) : `第${sysCfg.currentBatch}屆`)}(強制配對)`;
     const nowMs = Date.now();
     const nowTimeStr = new Date(nowMs).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
 

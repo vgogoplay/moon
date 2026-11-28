@@ -651,30 +651,16 @@ const CloudSync = {
             }
         });
 
-        // 嚴格 1 對 1 場次保護：同一個常規週二／週四／週六單一場次（無 activityId 且非強制配對）每人最多只能配對 1 位對象
-        const dedupedList = Array.from(byPartner.values());
-        dedupedList.sort((a, b) => Number(a.matchedAt || 0) - Number(b.matchedAt || 0));
-        const seenRegularSessionSet = new Set();
-        const finalItems = [];
-        dedupedList.forEach(entry => {
-            const isEntryForceProtected = Boolean(
-                entry.isForceRepaired ||
-                String(entry.session || '').includes('強制') ||
-                String(entry.matchDetail || '').includes('強制')
-            );
-            if (!entry.activityId && entry.session && !isEntryForceProtected) {
-                const normSess = (typeof normalizeSessionLabel === 'function')
-                    ? normalizeSessionLabel(entry.session)
-                    : String(entry.session).trim();
+        // 保持雙向配對完整性：依 matchedAt 排序並標準化場次名稱，絕不在正規化層單邊丟棄已配對對象
+        const finalItems = Array.from(byPartner.values());
+        finalItems.sort((a, b) => Number(a.matchedAt || 0) - Number(b.matchedAt || 0));
+        finalItems.forEach(entry => {
+            if (!entry.activityId && entry.session && typeof normalizeSessionLabel === 'function') {
+                const normSess = normalizeSessionLabel(entry.session);
                 if (/^第\s*\d+\s*屆.+\([二三四六]\)$/.test(normSess)) {
-                    if (seenRegularSessionSet.has(normSess)) {
-                        return;
-                    }
-                    seenRegularSessionSet.add(normSess);
                     entry.session = normSess;
                 }
             }
-            finalItems.push(entry);
         });
         return finalItems;
     },

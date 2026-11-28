@@ -1,4 +1,4 @@
-/* backend/activity-stats.js - 後台某屆／單場／自定義活動報名、配對成功與失敗名單統計紀錄 */
+/* backend/activity-stats.js - 後台各周（第1~4周）／各屆（第5屆起）／單場／自定義活動報名、配對成功與失敗名單統計紀錄 */
 
 let showAllActivitiesStatsTable = false;
 let actDetailRosterStatusFilter = 'ALL'; // 'ALL' | 'MATCHED' | 'UNMATCHED'
@@ -104,7 +104,7 @@ function renderSupplementaryMatchPreviewModalBody() {
     const noMatchRows = allCandidateRows.filter(r => !r.willMatch);
 
     const sessBadge = document.getElementById('suppPreviewSessionBadge');
-    if (sessBadge) sessBadge.textContent = sessions.join(' ＋ ');
+    if (sessBadge) sessBadge.textContent = sessions.map(s => typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(s) : s).join(' ＋ ');
 
     const totEl = document.getElementById('suppPreviewTotalCount');
     if (totEl) totEl.textContent = `${totalUnmatched} 人`;
@@ -170,7 +170,7 @@ function renderSupplementaryMatchPreviewModalBody() {
                     : (r.gender === '女' ? `<span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold text-[11px] ml-1">女</span>` : '');
                 const metaText = [r.age ? `${r.age}歲` : '', r.region || ''].filter(Boolean).join('・');
                 const sessTag = showSessionTag
-                    ? `<div class="text-[10px] text-pink-600 font-semibold mt-0.5">[${escapeActStatHtml(r.session)}]</div>`
+                    ? `<div class="text-[10px] text-pink-600 font-semibold mt-0.5">[${escapeActStatHtml(typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(r.session) : r.session)}]</div>`
                     : '';
 
                 let detailCellHtml = '';
@@ -532,7 +532,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
                     const gBadgeHtml = pGender === '男' 
                         ? `<span class="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 font-bold text-[10px] ml-1">男</span>`
                         : (pGender === '女' ? `<span class="px-1.5 py-0.5 rounded bg-pink-100 text-[#8f4452] font-bold text-[10px] ml-1">女</span>` : '');
-                    return `💘 <strong>${escapeActStatHtml(pName)}</strong>${gBadgeHtml} <span class="font-mono text-gray-500">(ID:${escapeActStatHtml(pId)})</span> <span class="text-[11px] text-pink-600">[${escapeActStatHtml(lk.session || '')}]</span>`;
+                    return `💘 <strong>${escapeActStatHtml(pName)}</strong>${gBadgeHtml} <span class="font-mono text-gray-500">(ID:${escapeActStatHtml(pId)})</span> <span class="text-[11px] text-pink-600">[${escapeActStatHtml(typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(lk.session || '') : (lk.session || ''))}]</span>`;
                 }).join('<br>');
                 const roleDesc = links.map(lk => {
                     const pId = String(lk.partnerId || '').trim();
@@ -581,7 +581,7 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
             label: isLegacyTwoDayBatch
                 ? `${info.batchPrefix}（${info.wedDateStr}(三) + ${info.satDateStr}(六)）`
                 : `${info.batchPrefix}（${info.tueDateStr}(二) + ${info.thuDateStr}(四) + ${info.satDateStr}(六)）`,
-            typeLabel: '常規屆數（整屆）',
+            typeLabel: Number(bNum) <= 4 ? '常規周次（整周）' : '常規屆數（整屆）',
             regUsers: finalBatchRegUsers,
             matchedUsers,
             matchedPairs: uniquePairKeys.size,
@@ -809,9 +809,10 @@ function computeSingleActivityStats(targetKey, users, customActsList) {
             });
         });
 
+        const displaySessionLabel = typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(sessionLabel) : sessionLabel;
         return {
             key: targetKey,
-            label: sessionLabel,
+            label: displaySessionLabel,
             typeLabel: '常規單一場次',
             regUsers: finalSessionRegUsers,
             matchedUsers,
@@ -1051,7 +1052,7 @@ function renderSelectedActivityRosterDetails(activeStats) {
     } else if (Array.isArray(activeStats.batchSessions) && activeStats.batchSessions.length >= 2 && unmatchedItems.length > 0) {
         const batchArgsStr = activeStats.batchSessions.map(lbl => `'${escapeActStatHtml(lbl)}'`).join(', ');
         const perSessionBtnsHtml = activeStats.batchSessions.map(sLbl =>
-            `<button type="button" onclick="runSupplementaryMatchForSession('${escapeActStatHtml(sLbl)}')" class="px-3 py-1.5 rounded-xl bg-white border border-pink-300 text-[#8f4452] text-xs font-bold hover:bg-pink-50 transition">💘 補跑 ${escapeActStatHtml(sLbl)}</button>`
+            `<button type="button" onclick="runSupplementaryMatchForSession('${escapeActStatHtml(sLbl)}')" class="px-3 py-1.5 rounded-xl bg-white border border-pink-300 text-[#8f4452] text-xs font-bold hover:bg-pink-50 transition">💘 補跑 ${escapeActStatHtml(typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(sLbl) : sLbl)}</button>`
         ).join('\n            ');
         suppMatchBtnHtml += `
             ${perSessionBtnsHtml}
@@ -1106,7 +1107,7 @@ function renderSelectedActivityRosterDetails(activeStats) {
                         <h3 class="text-sm font-bold text-[#8f4452]">📋 配對成功與失敗（尚未配對）人員名單紀錄</h3>
                         ${activeStats.savedSnapshotAt ? `<span class="text-[11px] px-2 py-0.5 rounded-full bg-white border border-pink-200 text-gray-500">結算紀錄時間：${escapeActStatHtml(activeStats.savedSnapshotAt)}</span>` : ''}
                     </div>
-                    <p class="text-[11px] text-gray-500 mt-0.5">完整紀錄本場次／該屆所有報名者的配對結果，以及每位未配對玩家的具體原因診斷</p>
+                    <p class="text-[11px] text-gray-500 mt-0.5">完整紀錄本場次／該周（屆）所有報名者的配對結果，以及每位未配對玩家的具體原因診斷</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                     ${suppMatchBtnHtml}
@@ -1182,11 +1183,11 @@ function renderActivityMatchStatsPanel(users, customActsList, currentBatch, maxD
             });
             opts.push({
                 value: `session:${info.wedLabel}`,
-                label: `　└ 單場：${info.wedLabel}`
+                label: `　└ 單場：${info.wedDisplayLabel}`
             });
             opts.push({
                 value: `session:${info.satLabel}`,
-                label: `　└ 單場：${info.satLabel}`
+                label: `　└ 單場：${info.satDisplayLabel}`
             });
         } else {
             opts.push({
@@ -1195,15 +1196,15 @@ function renderActivityMatchStatsPanel(users, customActsList, currentBatch, maxD
             });
             opts.push({
                 value: `session:${info.tueLabel}`,
-                label: `　└ 單場：${info.tueLabel}`
+                label: `　└ 單場：${info.tueDisplayLabel}`
             });
             opts.push({
                 value: `session:${info.thuLabel}`,
-                label: `　└ 單場：${info.thuLabel}`
+                label: `　└ 單場：${info.thuDisplayLabel}`
             });
             opts.push({
                 value: `session:${info.satLabel}`,
-                label: `　└ 單場：${info.satLabel}`
+                label: `　└ 單場：${info.satDisplayLabel}`
             });
         }
     }

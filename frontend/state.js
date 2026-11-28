@@ -550,7 +550,8 @@ function syncFromSharedStorage() {
                     appState.confessionUnlockAt = calcConfessionUnlockTime(now);
                 }
 
-                const cleanDisplaySession = String(item.session || '').replace(/・?強制補齊/g, '').trim();
+                const rawCleanSession = String(item.session || '').replace(/・?強制補齊/g, '').trim();
+                const cleanDisplaySession = typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(rawCleanSession) : rawCleanSession;
                 const cleanDisplayDetail = String(item.matchDetail || '').replace(/・?強制補齊/g, '').trim();
                 const detailPart = cleanDisplayDetail ? `（${cleanDisplayDetail}）` : '';
                 const matchPrefix = item.activityId

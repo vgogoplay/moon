@@ -21,9 +21,25 @@ function formatMonthDay(dateObj) {
     return `${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
 }
 
+// 分段接續命名（畫面顯示用）：第 1~4 週顯示「第X周」，第 5 週起接續顯示「第5屆、第6屆、第7屆...」
+function formatBatchDisplayPrefix(batchNum) {
+    const b = Math.max(1, parseInt(batchNum, 10) || 1);
+    return b <= 4 ? `第${b}周` : `第${b}屆`;
+}
+
+// 將底層標準儲存鍵值（如 "第3屆11/26(四)"）或顯示字串轉換為前台／後台顯示文字（第1~4周 / 第5屆起）
+function formatSessionDisplayLabel(sessionStr) {
+    const raw = String(sessionStr || '').trim();
+    if (!raw) return '';
+    return raw.replace(/^第\s*(\d+)\s*[屆周週]/, (_, numStr) => {
+        const b = Math.max(1, parseInt(numStr, 10) || 1);
+        return formatBatchDisplayPrefix(b);
+    });
+}
+
 function getBatchScheduleInfo(batchNum) {
     const b = Math.max(1, Number(batchNum || 1));
-    const baseSunday = new Date(2026, 10, 8, 0, 0, 0, 0); // 2026/11/08 (日) 起算第1屆，固定每週二、四、六 20:00
+    const baseSunday = new Date(2026, 10, 8, 0, 0, 0, 0); // 2026/11/08 (日) 起算第1周，固定每週二、四、六 20:00
     const sunday = new Date(baseSunday);
     sunday.setDate(baseSunday.getDate() + (b - 1) * 7);
 
@@ -47,14 +63,24 @@ function getBatchScheduleInfo(batchNum) {
     const thuDateStr = formatMonthDay(thu);
     const satDateStr = formatMonthDay(sat);
 
-    const tueLabel = `第${b}屆${tueDateStr}(二)`;
-    const wedLabel = `第${b}屆${wedDateStr}(三)`;
-    const thuLabel = `第${b}屆${thuDateStr}(四)`;
-    const satLabel = `第${b}屆${satDateStr}(六)`;
+    // 底層標準儲存鍵值維持「第{b}屆...」，確保歷史統計資料（ActivityRegArchive / yuelao_session_match_results）100% 相容
+    const canonicalPrefix = `第${b}屆`;
+    const displayPrefix = formatBatchDisplayPrefix(b);
+
+    const tueLabel = `${canonicalPrefix}${tueDateStr}(二)`;
+    const wedLabel = `${canonicalPrefix}${wedDateStr}(三)`;
+    const thuLabel = `${canonicalPrefix}${thuDateStr}(四)`;
+    const satLabel = `${canonicalPrefix}${satDateStr}(六)`;
+
+    const tueDisplayLabel = `${displayPrefix}${tueDateStr}(二)`;
+    const wedDisplayLabel = `${displayPrefix}${wedDateStr}(三)`;
+    const thuDisplayLabel = `${displayPrefix}${thuDateStr}(四)`;
+    const satDisplayLabel = `${displayPrefix}${satDateStr}(六)`;
 
     return {
         batch: b,
-        batchPrefix: `第${b}屆`,
+        canonicalPrefix,
+        batchPrefix: displayPrefix,
         sunday,
         monday,
         tue,
@@ -69,14 +95,19 @@ function getBatchScheduleInfo(batchNum) {
         wedLabel,
         thuLabel,
         satLabel,
-        sessions: [tueLabel, thuLabel, satLabel]
+        tueDisplayLabel,
+        wedDisplayLabel,
+        thuDisplayLabel,
+        satDisplayLabel,
+        sessions: [tueLabel, thuLabel, satLabel],
+        displaySessions: [tueDisplayLabel, thuDisplayLabel, satDisplayLabel]
     };
 }
 
 function normalizeSessionLabel(sessionStr) {
     const raw = String(sessionStr || '').trim();
     if (!raw) return '';
-    const batchMatch = raw.match(/^第\s*(\d+)\s*屆/);
+    const batchMatch = raw.match(/^第\s*(\d+)\s*[屆周週]/);
     if (!batchMatch) return raw;
     const b = Math.max(1, parseInt(batchMatch[1], 10));
     const info = getBatchScheduleInfo(b);
@@ -84,7 +115,7 @@ function normalizeSessionLabel(sessionStr) {
     if (/(四|星期四|週四)/.test(raw)) return info.thuLabel;
     if (/(六|星期六|週六)/.test(raw)) return info.satLabel;
     if (/(三|星期三|週三)/.test(raw)) return info.wedLabel;
-    return info.batchPrefix;
+    return info.canonicalPrefix;
 }
 
 function isSameSession(s1, s2) {
@@ -218,8 +249,10 @@ function applyOneTimeMaleBatch3ThuCleanup(userObj) {
 }
 
 function extractBatchLabel(sessionStr) {
-    const m = String(sessionStr || '').match(/^第\s*\d+\s*屆/);
-    return m ? m[0].replace(/\s+/g, '') : String(sessionStr || '');
+    const m = String(sessionStr || '').match(/^第\s*(\d+)\s*[屆周週]/);
+    if (!m) return String(sessionStr || '');
+    const b = Math.max(1, parseInt(m[1], 10));
+    return `第${b}屆`;
 }
 
 function calcAutoBatchNumber(now = new Date()) {

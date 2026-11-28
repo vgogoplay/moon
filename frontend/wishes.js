@@ -908,15 +908,19 @@ async function selectWishResponderAndMatch(wishId, anonNumber) {
 
     localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
 
-    // 寫入配對日誌與建立雙方聊天室開場白
+    // 寫入配對日誌與建立雙方聊天室開場白（先確保雙方名單皆寫入成功，再建立聊天室）
     if (typeof CloudSync !== 'undefined') {
-        if (typeof CloudSync.recordMatchLog === 'function') {
-            CloudSync.recordMatchLog(meUser, partnerUser, sessionLabel, nowTs, matchDetail);
+        try {
+            await CloudSync.upsertUser(meUser, true, { isMatchMutation: true, throwOnError: true });
+            await CloudSync.upsertUser(partnerUser, true, { isMatchMutation: true, throwOnError: true });
+            if (typeof CloudSync.recordMatchLog === 'function') {
+                CloudSync.recordMatchLog(meUser, partnerUser, sessionLabel, nowTs, matchDetail);
+            }
+        } catch (syncErr) {
+            console.error('[wishes] 雙向配對寫入雲端失敗，已中止建立聊天室:', syncErr);
+            showMiniNotice('⚠️ 網路連線不穩', '配對資料寫入雲端失敗，請稍後再試一次！');
+            return;
         }
-        await Promise.all([
-            CloudSync.upsertUser(meUser, true, { isMatchMutation: true }),
-            CloudSync.upsertUser(partnerUser, true, { isMatchMutation: true })
-        ]);
     }
 
     if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {

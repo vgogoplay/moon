@@ -1463,7 +1463,7 @@ function renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayB
                     </td>
                     <td class="p-3 text-xs min-w-[140px]">
                         ${(() => {
-                            const regBadges = sessions.map(s => `<span class="inline-flex items-center gap-1 px-2 py-0.5 mr-1 mb-1 rounded-full bg-pink-100 text-[#8f4452] font-semibold whitespace-nowrap">${s}<button type="button" onclick="clearPlayerRegularSession('${u.id}', '${s}')" title="取消此場次報名並同步至前台" class="text-rose-600 hover:text-rose-900 font-bold ml-0.5">✕</button></span>`);
+                            const regBadges = sessions.map(s => { const dispS = typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(s) : s; return `<span class="inline-flex items-center gap-1 px-2 py-0.5 mr-1 mb-1 rounded-full bg-pink-100 text-[#8f4452] font-semibold whitespace-nowrap">${dispS}<button type="button" onclick="clearPlayerRegularSession('${u.id}', '${s}')" title="取消此場次報名並同步至前台" class="text-rose-600 hover:text-rose-900 font-bold ml-0.5">✕</button></span>`; });
                             const cRegs = (u.customActivityRegs && typeof u.customActivityRegs === 'object') ? Object.values(u.customActivityRegs) : [];
                             cRegs.forEach(cr => {
                                 if (cr && cr.activityName) {

@@ -533,7 +533,7 @@ function handleApplyClick() {
     const isThuClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(schedCheck.thuLabel, nowCheckTs);
     const isSatClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(schedCheck.satLabel, nowCheckTs);
     if (isTueClosed && isThuClosed && isSatClosed) {
-        showMiniNotice('⏳ 本屆場次已截止報名', `${schedCheck.batchPrefix}（${schedCheck.tueLabel}、${schedCheck.thuLabel}、${schedCheck.satLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
+        showMiniNotice('⏳ 本期場次已截止報名', `${schedCheck.batchPrefix}（${schedCheck.tueDisplayLabel}、${schedCheck.thuDisplayLabel}、${schedCheck.satDisplayLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
         return;
     }
 
@@ -633,6 +633,7 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
     const closedUsedSessions = getClosedRegisteredSessionsInCurrentBatch(nowTs);
     let initialCheckedCount = closedUsedSessions.length;
     listEl.innerHTML = [tueLabel, thuLabel, satLabel].map(opt => {
+        const displayOpt = typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(opt) : opt;
         const isClosed = (typeof isRegularSessionRegistrationClosed === 'function')
             ? isRegularSessionRegistrationClosed(opt, nowTs)
             : false;
@@ -651,7 +652,7 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
                 <label data-session-closed="1" ${wasRegistered ? 'data-closed-registered="1"' : ''} title="${wasRegistered ? '此場次已報名並結束，已計入本週場次額度' : '此場次已於當日 20:00 截止報名，無法再勾選'}" class="flex items-center gap-2.5 p-3 rounded-2xl border ${wasRegistered ? 'border-amber-200 bg-amber-50/60 text-gray-500' : 'border-gray-200 bg-gray-100/90 text-gray-400 opacity-80'} cursor-not-allowed select-none">
                     <input type="checkbox" name="regSessionCheck" value="${opt}" ${wasRegistered ? 'checked' : ''} disabled data-time-closed="1" class="w-4 h-4 accent-amber-500 cursor-not-allowed">
                     <div class="min-w-0">
-                        <div class="font-bold text-xs ${wasRegistered ? 'text-gray-600' : 'text-gray-400 line-through'}">${opt}</div>
+                        <div class="font-bold text-xs ${wasRegistered ? 'text-gray-600' : 'text-gray-400 line-through'}">${displayOpt}</div>
                         <div class="text-[10px] ${wasRegistered ? 'text-amber-700' : 'text-rose-500'} font-bold mt-0.5">${closedStatusText}</div>
                     </div>
                 </label>
@@ -662,7 +663,7 @@ function renderRegisterModalSessionOptions(nowTs = Date.now()) {
             <label data-session-card="1" class="flex items-center gap-2.5 p-3 rounded-2xl border border-pink-200 bg-pink-50/40 cursor-pointer hover:bg-pink-50 transition">
                 <input type="checkbox" name="regSessionCheck" value="${opt}" ${checked ? 'checked' : ''} onchange="onRegSessionCheckChange()" class="accent-[#c96a7b] w-4 h-4">
                 <div class="min-w-0">
-                    <div data-session-title="1" class="font-bold text-xs text-[#8f4452]">${opt}</div>
+                    <div data-session-title="1" class="font-bold text-xs text-[#8f4452]">${displayOpt}</div>
                     <div data-session-sub="1" class="text-[10px] text-emerald-700 font-semibold mt-0.5">🟢 開放報名中（當日 20:00 截止）</div>
                 </div>
             </label>
@@ -692,7 +693,7 @@ function openRegisterModal() {
     const isSatClosed = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.satLabel, nowTs);
     if (isTueClosed && isThuClosed && isSatClosed) {
         closeRegisterModal();
-        showMiniNotice('⏳ 本屆場次已截止報名', `${sched.batchPrefix}（${sched.tueLabel}、${sched.thuLabel}、${sched.satLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
+        showMiniNotice('⏳ 本期場次已截止報名', `${sched.batchPrefix}（${sched.tueDisplayLabel}、${sched.thuDisplayLabel}、${sched.satDisplayLabel}）皆已過 20:00 截止時間，請靜待下一期開放報名！`);
         return;
     }
 
@@ -1283,7 +1284,7 @@ async function confirmRegistration() {
     }
     if (blockedClosedSessions.length > 0 && selectedSessions.length === 0) {
         renderRegisterModalSessionOptions(nowSubmitTs);
-        showMiniNotice('🚫 該場次已截止報名', `【${blockedClosedSessions.join('、')}】已超過 20:00 報名截止時間，請改選其他尚未截止的場次！`);
+        showMiniNotice('🚫 該場次已截止報名', `【${blockedClosedSessions.map(s => typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(s) : s).join('、')}】已超過 20:00 報名截止時間，請改選其他尚未截止的場次！`);
         return;
     }
 
@@ -1331,7 +1332,7 @@ async function confirmRegistration() {
         return;
     }
 
-    showMiniNotice('🌸 報名成功', `已登錄場次：【${selectedSessions.join('、')}】\n\n${desc}`);
+    showMiniNotice('🌸 報名成功', `已登錄場次：【${selectedSessions.map(s => typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(s) : s).join('、')}】\n\n${desc}`);
 }
 
 // ==================== 第 2 種活動：後台創建專屬活動（獨立報名與條件設定） ====================
@@ -1794,14 +1795,14 @@ function refreshAllUI() {
     const isSatClosedNow = (typeof isRegularSessionRegistrationClosed === 'function') && isRegularSessionRegistrationClosed(sched.satLabel, nowRefreshTs);
     const isAllBatchSessionsClosed = isTueClosedNow && isThuClosedNow && isSatClosedNow;
     const openBatchSessionLabels = [
-        !isTueClosedNow ? sched.tueLabel : '',
-        !isThuClosedNow ? sched.thuLabel : '',
-        !isSatClosedNow ? sched.satLabel : ''
+        !isTueClosedNow ? sched.tueDisplayLabel : '',
+        !isThuClosedNow ? sched.thuDisplayLabel : '',
+        !isSatClosedNow ? sched.satDisplayLabel : ''
     ].filter(Boolean);
     const closedBatchSessionLabels = [
-        isTueClosedNow ? sched.tueLabel : '',
-        isThuClosedNow ? sched.thuLabel : '',
-        isSatClosedNow ? sched.satLabel : ''
+        isTueClosedNow ? sched.tueDisplayLabel : '',
+        isThuClosedNow ? sched.thuDisplayLabel : '',
+        isSatClosedNow ? sched.satDisplayLabel : ''
     ].filter(Boolean);
 
     const normalizedAllSessions = Array.from(new Set((appState.registeredSessions || []).map(s => normalizeSessionLabel(s)).filter(Boolean)));
@@ -1872,7 +1873,7 @@ function refreshAllUI() {
         badge.textContent = `⏳ ${sched.batchPrefix}已截止報名`;
         applyBtn.disabled = true;
         applyBtn.textContent = `⏳ ${sched.batchPrefix}已截止報名（請靜待下期開放）`;
-        alertBox.innerHTML = `<span class="text-gray-500 font-bold">${sched.tueLabel}、${sched.thuLabel} 與 ${sched.satLabel} 皆已過 20:00 截止報名</span>，請靜待下一期開放報名！`;
+        alertBox.innerHTML = `<span class="text-gray-500 font-bold">${sched.tueDisplayLabel}、${sched.thuDisplayLabel} 與 ${sched.satDisplayLabel} 皆已過 20:00 截止報名</span>，請靜待下一期開放報名！`;
     } else if (currentBatchSessions.length > 0) {
         const criteriaSummary = formatCriteriaSummaryText(appState.exactMatchCriteria || {}, appState.mustMatchKeys || []);
         const closedHint = closedBatchSessionLabels.length > 0
@@ -1881,7 +1882,7 @@ function refreshAllUI() {
         badge.textContent = `⏳ 已報名 (${currentBatchSessions.length}場)`;
         applyBtn.disabled = false;
         applyBtn.textContent = '✅ 已報名';
-        alertBox.innerHTML = `你已成功報名 <strong>${currentBatchSessions.join('、')}</strong>！<br>配對條件：<strong>${criteriaSummary}</strong>。${closedHint}`;
+        alertBox.innerHTML = `你已成功報名 <strong>${currentBatchSessions.map(s => typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(s) : s).join('、')}</strong>！<br>配對條件：<strong>${criteriaSummary}</strong>。${closedHint}`;
     } else {
         badge.textContent = `✨ ${sched.batchPrefix}開始報名中`;
         applyBtn.disabled = false;

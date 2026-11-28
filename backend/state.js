@@ -1740,7 +1740,7 @@ function renderAdminAll(forceUpdate = false) {
             if (m) maxUserBatch = Math.max(maxUserBatch, parseInt(m[1], 10));
         }
     });
-    const maxDisplayBatch = Math.max(4, batch + 2, maxUserBatch);
+    const maxDisplayBatch = Math.max(7, batch + 2, maxUserBatch);
 
     if (typeof renderMemberPageSection === 'function') {
         renderMemberPageSection(users, sysCfg, batch, currentSched, maxDisplayBatch, forceUpdate);

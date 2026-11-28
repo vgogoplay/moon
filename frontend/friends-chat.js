@@ -597,7 +597,7 @@ function renderFriendsSection() {
                                 ` : ''}
                                 ${hasCardUnread ? `<span class="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold shrink-0">新訊息</span>` : ''}
                             </div>
-                            <p class="text-[11px] text-gray-500 truncate">${yuelaoEscapeHtml(String(friend.sessionLabel || '七日緣分').replace(/・?強制補齊/g, '').trim() || '七日緣分')}</p>
+                            <p class="text-[11px] text-gray-500 truncate">${yuelaoEscapeHtml((typeof formatSessionDisplayLabel === 'function' ? formatSessionDisplayLabel(String(friend.sessionLabel || '七日緣分').replace(/・?強制補齊/g, '').trim()) : String(friend.sessionLabel || '七日緣分').replace(/・?強制補齊/g, '').trim()) || '七日緣分')}</p>
                         </div>
                     </div>
                     <div class="flex flex-col items-end gap-1.5 shrink-0">
@@ -1729,7 +1729,7 @@ async function recordMutualContinueVote(myId, partnerId, voterNickname, isSimula
         let item = owner.matchedHistory.find(h => String(h.partnerId) === String(other.id));
         if (!item) {
             item = {
-                session: owner.matchedSession || `第 ${getCurrentBatchNumber()} 屆`,
+                session: owner.matchedSession || `第${getCurrentBatchNumber()}屆`,
                 partnerId: String(other.id),
                 partnerName: other.nickname || '',
                 matchedAt: owner.matchedAt || Date.now(),
