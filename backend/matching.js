@@ -3228,8 +3228,7 @@ async function rematchMissingActivityPairsFromSelected(overrideTargetVal = null)
 
 確定要將以下 ${toRematch.length} 對重新配對成好友並開啟聊天室嗎？
 
-${previewLines.join('
-')}`;
+${previewLines.join('\n')}`;
         if (!confirm(confirmMsg)) {
             return;
         }
