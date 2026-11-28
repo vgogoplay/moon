@@ -25,6 +25,9 @@
                     <select id="activityStatsTargetSelect" onchange="renderAdminAll()" class="p-2 admin-input-box font-bold text-[#8f4452] min-w-[230px]">
                         <option value="" selected>請選擇</option>
                     </select>
+                    <button type="button" onclick="rematchMissingActivityPairsFromSelected()" id="rematchMissingActivityPairsBtn" title="依據此活動的配對成功名單，若雙方目前都不是好友則自動重新回補配對，已經是好友的會自動略過" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold hover:opacity-95 transition shadow-2xs">
+                        💞 回補此活動遺漏好友
+                    </button>
                     <button type="button" onclick="toggleAllActivitiesStatsTable()" id="toggleAllStatsTableBtn" class="px-3.5 py-2 rounded-xl bg-white border border-pink-300 text-[#8f4452] font-semibold hover:bg-pink-100 transition">
                         📋 展開全部活動總覽
                     </button>
@@ -300,7 +303,7 @@
     <script src="shared/cloud-store.js?v=20261128noautopurgev43"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261125wishlimit5v17"></script>
-    <script src="backend/matching.js?v=20261127mockchatv20"></script>
+    <script src="backend/matching.js?v=20261128rematchmissingv21"></script>
     <script src="backend/activity-stats.js?v=20261123tue46"></script>
     <script src="backend/custom-activities.js?v=20261120rematch2"></script>
     <!-- 渲染左側選單與登入驗證 -->

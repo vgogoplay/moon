@@ -2973,3 +2973,391 @@ async function runAuditUserIdIntegrity() {
     `;
 }
 window.runAuditUserIdIntegrity = runAuditUserIdIntegrity;
+
+
+// ==================== 💞 活動管理：依該活動「配對成功名單」回補目前不是好友的雙方配對 ====================
+function areUsersCurrentlyFriends(userA, userB) {
+    if (!userA || !userB || !userA.id || !userB.id) return false;
+    const idA = String(userA.id).trim();
+    const idB = String(userB.id).trim();
+    if (!idA || !idB || idA === idB) return false;
+
+    const hasPartnerInUser = (owner, targetPid) => {
+        if (!owner) return false;
+        if (String(owner.matchedWithId || '').trim() === targetPid) return true;
+        const rawHist = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+            ? CloudSync.mapToArray(owner.matchedHistory)
+            : (Array.isArray(owner.matchedHistory) ? owner.matchedHistory : []);
+        return rawHist.some(h => h && String(h.partnerId || '').trim() === targetPid);
+    };
+
+    // 必須雙方名單都互有對方才算「當前已經是好友」；若任一方缺少或雙方都沒有，則需要回補！
+    return hasPartnerInUser(userA, idB) && hasPartnerInUser(userB, idA);
+}
+
+function collectMatchedPairsForSelectedTarget(rawTargetVal, users) {
+    const targetVal = String(rawTargetVal || '').trim();
+    if (!targetVal) return { label: '', pairs: [] };
+
+    const smrKey = (typeof SESSION_MATCH_RESULTS_KEY !== 'undefined')
+        ? SESSION_MATCH_RESULTS_KEY
+        : 'yuelao_session_match_results';
+    let localSmrMap = {};
+    try {
+        localSmrMap = JSON.parse(localStorage.getItem(smrKey) || '{}') || {};
+    } catch (e) {}
+    const cloudSmrMap = (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[smrKey] && typeof CloudSync.tree[smrKey] === 'object')
+        ? CloudSync.tree[smrKey]
+        : {};
+    const allSnapshots = [...Object.values(localSmrMap), ...Object.values(cloudSmrMap)];
+
+    const pairMap = new Map(); // canonical pairKey -> { idA, idB, session, activityId, matchedAt, matchDetail }
+    const addPairCandidate = (id1, id2, sessionStr, actId = null, ts = Date.now(), detail = '') => {
+        const a = String(id1 || '').trim();
+        const b = String(id2 || '').trim();
+        if (!a || !b || a === b) return;
+        const pk = [a, b].sort().join('__');
+        if (!pairMap.has(pk)) {
+            pairMap.set(pk, {
+                idA: a,
+                idB: b,
+                session: String(sessionStr || '').trim(),
+                activityId: actId ? String(actId).trim() : null,
+                matchedAt: Number(ts) || Date.now(),
+                matchDetail: String(detail || '').trim()
+            });
+        }
+    };
+
+    // 1. 自定義活動 (`custom:ACT_ID` 或 `ACT_ID`)
+    const isCustomTarget = targetVal.startsWith('custom:') || targetVal.startsWith('ACT_');
+    if (isCustomTarget) {
+        const actId = targetVal.replace(/^custom:/, '').trim();
+        const acts = (typeof getCustomActivities === 'function')
+            ? getCustomActivities()
+            : JSON.parse(localStorage.getItem(CUSTOM_ACTIVITIES_KEY) || '[]');
+        const actObj = (Array.isArray(acts) ? acts : []).find(a => a && String(a.id).trim() === actId) || null;
+        const actLabel = actObj ? String(actObj.name || actId).trim() : actId;
+
+        allSnapshots.forEach(snap => {
+            if (!snap || typeof snap !== 'object') return;
+            const matchSnap = String(snap.activityId || '').trim() === actId ||
+                String(snap.id || '').includes(actId) ||
+                (actLabel && String(snap.session || '').trim() === actLabel);
+            if (!matchSnap) return;
+            (snap.matchedPairs || []).forEach(p => {
+                if (p && p.idA && p.idB) {
+                    addPairCandidate(p.idA, p.idB, actLabel, actId, p.matchedAt || snap.executedAtTs, p.matchDetail || '');
+                }
+            });
+            (snap.matchedUsers || []).forEach(mu => {
+                if (mu && mu.playerId && mu.partnerId) {
+                    addPairCandidate(mu.playerId, mu.partnerId, actLabel, actId, mu.matchedAt || snap.executedAtTs, mu.matchDetail || '');
+                }
+            });
+        });
+
+        // 同步從配對日誌 (`yuelao_match_logs`) 撈取該專屬活動的配對成功紀錄
+        let matchLogs = [];
+        try { matchLogs = JSON.parse(localStorage.getItem(MATCH_LOGS_KEY) || '[]'); } catch (e) {}
+        if (typeof CloudSync !== 'undefined' && CloudSync.tree && CloudSync.tree[MATCH_LOGS_KEY]) {
+            matchLogs = [...matchLogs, ...CloudSync.mapToArray(CloudSync.tree[MATCH_LOGS_KEY])];
+        }
+        matchLogs.forEach(ml => {
+            if (!ml || !ml.idA || !ml.idB) return;
+            if ((actLabel && String(ml.session || '').trim() === actLabel) || String(ml.session || '').includes(actId)) {
+                addPairCandidate(ml.idA, ml.idB, actLabel, actId, ml.ts, ml.source || '');
+            }
+        });
+
+        return { label: actLabel, pairs: Array.from(pairMap.values()) };
+    }
+
+    // 2. 整屆統計 (`batch:第X屆`)
+    if (targetVal.startsWith('batch:')) {
+        const batchLabel = targetVal.replace(/^batch:/, '').trim();
+        allSnapshots.forEach(snap => {
+            if (!snap || typeof snap !== 'object') return;
+            const snapBatch = String(snap.batchLabel || (typeof extractBatchLabel === 'function' ? extractBatchLabel(snap.session || '') : '')).trim();
+            if (snapBatch !== batchLabel) return;
+            const sessName = String(snap.session || batchLabel).trim();
+            (snap.matchedPairs || []).forEach(p => {
+                if (p && p.idA && p.idB) {
+                    addPairCandidate(p.idA, p.idB, sessName, null, p.matchedAt || snap.executedAtTs, p.matchDetail || '');
+                }
+            });
+            (snap.matchedUsers || []).forEach(mu => {
+                if (mu && mu.playerId && mu.partnerId) {
+                    addPairCandidate(mu.playerId, mu.partnerId, sessName, null, mu.matchedAt || snap.executedAtTs, mu.matchDetail || '');
+                }
+            });
+        });
+        return { label: batchLabel, pairs: Array.from(pairMap.values()) };
+    }
+
+    // 3. 單一場次 (`session:第X屆...` 或直接場次字串)
+    const rawSess = targetVal.startsWith('session:') ? targetVal.replace(/^session:/, '').trim() : targetVal;
+    const normSession = (typeof normalizeSessionLabel === 'function') ? normalizeSessionLabel(rawSess) : rawSess;
+    const docKey = (typeof ActivityRegArchive !== 'undefined' && typeof ActivityRegArchive.sanitizeSeg === 'function')
+        ? ActivityRegArchive.sanitizeSeg(normSession)
+        : normSession.replace(/[\/.#$\[\]\s]+/g, '_');
+
+    allSnapshots.forEach(snap => {
+        if (!snap || typeof snap !== 'object') return;
+        const isMatch = String(snap.id || '') === docKey ||
+            (snap.session && (typeof isSameSession === 'function' ? isSameSession(snap.session, normSession) : String(snap.session).trim() === normSession));
+        if (!isMatch) return;
+        (snap.matchedPairs || []).forEach(p => {
+            if (p && p.idA && p.idB) {
+                addPairCandidate(p.idA, p.idB, normSession, null, p.matchedAt || snap.executedAtTs, p.matchDetail || '');
+            }
+        });
+        (snap.matchedUsers || []).forEach(mu => {
+            if (mu && mu.playerId && mu.partnerId) {
+                addPairCandidate(mu.playerId, mu.partnerId, normSession, null, mu.matchedAt || snap.executedAtTs, mu.matchDetail || '');
+            }
+        });
+    });
+
+    // 同時掃描會員資料中仍留有該場次歷史配對紀錄的組合
+    (users || []).forEach(u => {
+        if (!u || !u.id) return;
+        const uid = String(u.id).trim();
+        const rawHist = (typeof CloudSync !== 'undefined' && typeof CloudSync.mapToArray === 'function')
+            ? CloudSync.mapToArray(u.matchedHistory)
+            : (Array.isArray(u.matchedHistory) ? u.matchedHistory : []);
+        rawHist.forEach(h => {
+            if (!h || h.activityId || !h.partnerId) return;
+            const sameSess = (typeof isSameSession === 'function') ? isSameSession(h.session, normSession) : String(h.session || '').trim() === normSession;
+            if (sameSess) {
+                addPairCandidate(uid, h.partnerId, normSession, null, h.matchedAt || Date.now(), h.matchDetail || '');
+            }
+        });
+    });
+
+    return { label: normSession, pairs: Array.from(pairMap.values()) };
+}
+
+let _rematchMissingActivityInFlight = false;
+
+async function rematchMissingActivityPairsFromSelected(overrideTargetVal = null) {
+    if (_rematchMissingActivityInFlight) return;
+    const selEl = document.getElementById('activityStatsTargetSelect');
+    const targetVal = String(overrideTargetVal || (selEl && selEl.value) || '').trim();
+    if (!targetVal) {
+        alert('請先在「統計對象」下拉選單選擇要回補的屆數、場次或專屬活動！');
+        if (selEl) selEl.focus();
+        return;
+    }
+
+    _rematchMissingActivityInFlight = true;
+    const topBtn = document.getElementById('rematchMissingActivityPairsBtn');
+    const inlineBtn = document.getElementById('inlineRematchMissingActivityBtn');
+    const origTopText = topBtn ? topBtn.textContent : '';
+    const origInlineText = inlineBtn ? inlineBtn.textContent : '';
+    if (topBtn) {
+        topBtn.disabled = true;
+        topBtn.textContent = '⏳ 檢查名單中...';
+    }
+    if (inlineBtn) {
+        inlineBtn.disabled = true;
+        inlineBtn.textContent = '⏳ 檢查名單中...';
+    }
+
+    try {
+        if (typeof CloudSync !== 'undefined' && typeof CloudSync.ensureBackendNodes === 'function') {
+            await CloudSync.ensureBackendNodes([USERS_KEY, SESSION_MATCH_RESULTS_KEY, CUSTOM_ACTIVITIES_KEY, MATCH_LOGS_KEY, UNMATCHED_PAIRS_CLOUD_NODE]);
+        }
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('users');
+        }
+
+        const users = getUsers();
+        const userById = new Map();
+        users.forEach(u => {
+            if (u && u.id) userById.set(String(u.id).trim(), u);
+        });
+
+        const { label, pairs } = collectMatchedPairsForSelectedTarget(targetVal, users);
+        if (pairs.length === 0) {
+            alert(`ℹ️【${label || targetVal}】目前沒有找到歷史配對成功名單紀錄。`);
+            return;
+        }
+
+        const toRematch = [];
+        let alreadyFriendsCount = 0;
+        let missingAccountCount = 0;
+
+        pairs.forEach(p => {
+            const uA = userById.get(p.idA);
+            const uB = userById.get(p.idB);
+            if (!uA || !uB) {
+                missingAccountCount++;
+                return;
+            }
+            if (areUsersCurrentlyFriends(uA, uB)) {
+                alreadyFriendsCount++;
+                return;
+            }
+            toRematch.push({ ...p, uA, uB });
+        });
+
+        if (toRematch.length === 0) {
+            alert(`✅【${label}】檢查完成！
+
+・該活動配對成功總對數：${pairs.length} 對
+・當前已經是好友（已略過）：${alreadyFriendsCount} 對${missingAccountCount > 0 ? `
+・帳號已不存在：${missingAccountCount} 對` : ''}
+
+所有有效配對目前都已經是好友，無需重新回補！`);
+            return;
+        }
+
+        const previewLines = toRematch.slice(0, 12).map((item, idx) =>
+            `#${idx + 1} ${item.uA.nickname || item.idA} (${item.idA}) ⇄ ${item.uB.nickname || item.idB} (${item.idB})`
+        );
+        if (toRematch.length > 12) {
+            previewLines.push(`...其餘 ${toRematch.length - 12} 對`);
+        }
+
+        const confirmMsg = `【${label}】比對結果：
+
+・該活動歷史配對成功：${pairs.length} 對
+・當前已經是好友（將自動略過）：${alreadyFriendsCount} 對
+・目前雙方不是好友（即將重新回補配對）：${toRematch.length} 對
+
+確定要將以下 ${toRematch.length} 對重新配對成好友並開啟聊天室嗎？
+
+${previewLines.join('
+')}`;
+        if (!confirm(confirmMsg)) {
+            return;
+        }
+
+        if (topBtn) topBtn.textContent = `⏳ 正在回補 ${toRematch.length} 對...`;
+        if (inlineBtn) inlineBtn.textContent = `⏳ 正在回補 ${toRematch.length} 對...`;
+
+        const nowMs = Date.now();
+        const nowTimeStr = new Date(nowMs).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+        const affectedUserIds = new Set();
+        const expectedPartnerMap = new Map();
+        const addExp = (uid, pid) => {
+            if (!expectedPartnerMap.has(uid)) expectedPartnerMap.set(uid, new Set());
+            expectedPartnerMap.get(uid).add(pid);
+        };
+
+        for (const item of toRematch) {
+            const { idA, idB, uA, uB, session, activityId, matchDetail } = item;
+
+            // 1. 清除先前可能存在的永久解除配對墓碑，確保雙方可重新恢復好友關係
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
+                await CloudSync.clearPairUnmatched(idA, idB);
+            }
+
+            // 2. 移除單邊殘留的舊紀錄（避免重複），再重新寫入雙向配對紀錄
+            const cleanHalf = (owner, partnerId) => {
+                if (!Array.isArray(owner.matchedHistory)) owner.matchedHistory = [];
+                owner.matchedHistory = owner.matchedHistory.filter(h => String(h.partnerId || '').trim() !== partnerId);
+            };
+            cleanHalf(uA, idB);
+            cleanHalf(uB, idA);
+
+            const baseSess = session || label || '活動回補配對';
+            const protectedSess = baseSess.includes('・強制補齊') ? baseSess : `${baseSess}・強制補齊`;
+            const detailTag = matchDetail ? `${matchDetail}・強制補齊` : '活動名單回補・強制補齊';
+
+            recordPairMatch(uA, uB, protectedSess, nowMs, activityId, detailTag);
+            [uA, uB].forEach(uObj => {
+                const lastEntry = Array.isArray(uObj.matchedHistory) ? uObj.matchedHistory[uObj.matchedHistory.length - 1] : null;
+                if (lastEntry) {
+                    lastEntry.isForceRepaired = true;
+                    lastEntry.session = protectedSess;
+                    lastEntry.matchDetail = detailTag;
+                }
+            });
+
+            // 3. 補建聊天室開場訊息（若該房間目前無訊息）
+            const sysText = `💞【${baseSess}】管理員已依據活動配對成功名單為你們重新回補好友關係，現在可以繼續聊天囉！`;
+            if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
+                ChatStore.ensureThread(idA, idB, [
+                    { senderId: 'system', text: sysText, time: nowTimeStr, ts: nowMs }
+                ]);
+            }
+
+            affectedUserIds.add(idA);
+            affectedUserIds.add(idB);
+            addExp(idA, idB);
+            addExp(idB, idA);
+        }
+
+        await persistRepairedUsersToLocalAndCloud(users, Array.from(affectedUserIds), expectedPartnerMap);
+
+        if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+            AdminMemoryCache.invalidate('users');
+            AdminMemoryCache.invalidate('chats');
+        }
+        if (typeof appendLog === 'function') {
+            appendLog(`<span class="text-emerald-300">[活動名單回補配對]</span> 管理員已針對「<strong>${escapeMaintenanceHtml(label)}</strong>」重新回補 <strong>${toRematch.length} 對</strong>目前非好友的歷史配對（略過已為好友 ${alreadyFriendsCount} 對）。`);
+        }
+        if (typeof renderAdminAll === 'function') {
+            renderAdminAll(true);
+        }
+
+        alert(`✅【${label}】回補完成！
+
+・已重新回補配對：${toRematch.length} 對（${toRematch.length * 2} 人）
+・原本已是好友（已略過）：${alreadyFriendsCount} 對
+
+雙方前後台好友名單與聊天室已同步恢復！`);
+    } catch (err) {
+        console.error('[rematch-missing-activity] 回補失敗', err);
+        alert(`⚠️ 回補過程中發生異常（${(err && err.message) || '連線逾時'}），請稍後再試！`);
+    } finally {
+        _rematchMissingActivityInFlight = false;
+        if (topBtn) {
+            topBtn.disabled = false;
+            topBtn.textContent = origTopText || '💞 回補此活動遺漏好友';
+        }
+        if (inlineBtn) {
+            inlineBtn.disabled = false;
+            inlineBtn.textContent = origInlineText || '💞 一鍵回補非好友配對';
+        }
+    }
+}
+
+// 自動在「配對成功名單」區塊標題列旁同步插入回補按鈕，方便直接對照名單點擊
+(function bindActivityDetailRematchButtonObserver() {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    document.addEventListener('DOMContentLoaded', () => {
+        const detailSec = document.getElementById('selActMatchDetailSection');
+        if (!detailSec) return;
+        const injectInlineBtn = () => {
+            if (detailSec.classList.contains('hidden')) return;
+            if (document.getElementById('inlineRematchMissingActivityBtn')) return;
+            const headings = detailSec.querySelectorAll('h3, h4, div, span');
+            for (const el of headings) {
+                if (el.children.length === 0 && el.textContent && el.textContent.includes('配對成功名單')) {
+                    const parentRow = el.parentElement;
+                    if (parentRow && !parentRow.querySelector('#inlineRematchMissingActivityBtn')) {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.id = 'inlineRematchMissingActivityBtn';
+                        btn.onclick = () => rematchMissingActivityPairsFromSelected();
+                        btn.className = 'ml-auto px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-xs font-bold shadow-2xs hover:opacity-95 transition shrink-0';
+                        btn.textContent = '💞 一鍵回補非好友配對';
+                        parentRow.classList.add('flex', 'flex-wrap', 'items-center', 'justify-between', 'gap-2');
+                        parentRow.appendChild(btn);
+                    }
+                    break;
+                }
+            }
+        };
+        const obs = new MutationObserver(() => injectInlineBtn());
+        obs.observe(detailSec, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+        injectInlineBtn();
+    });
+})();
+
+window.rematchMissingActivityPairsFromSelected = rematchMissingActivityPairsFromSelected;
+window.areUsersCurrentlyFriends = areUsersCurrentlyFriends;
+window.collectMatchedPairsForSelectedTarget = collectMatchedPairsForSelectedTarget;
