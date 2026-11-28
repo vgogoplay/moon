@@ -852,11 +852,15 @@ const CloudSync = {
                         ...(Array.isArray(h.continueVotes) ? h.continueVotes.map(String) : [])
                     ]));
                     const nextIg = Boolean(existingMirror.igUnlocked || h.igUnlocked);
-                    const nextMatchedAt = Math.max(Number(existingMirror.matchedAt || 0), Number(h.matchedAt || 0)) || existingMirror.matchedAt;
+                    const tsA = Number(existingMirror.matchedAt || 0);
+                    const tsB = Number(h.matchedAt || 0);
+                    const nextMatchedAt = nextIg
+                        ? (Math.max(tsA, tsB) || tsA || tsB)
+                        : ((tsA > 0 && tsB > 0) ? Math.min(tsA, tsB) : (tsA || tsB));
                     if (
                         mergedVotes.length !== (existingMirror.continueVotes || []).length ||
                         Boolean(existingMirror.igUnlocked) !== nextIg ||
-                        Number(existingMirror.matchedAt || 0) !== nextMatchedAt
+                        tsA !== nextMatchedAt
                     ) {
                         existingMirror.continueVotes = mergedVotes;
                         existingMirror.igUnlocked = nextIg;
@@ -866,6 +870,16 @@ const CloudSync = {
                             partner.matchedAt = nextMatchedAt;
                         }
                         repairedUsers.set(partnerId, partner);
+                    }
+                    if (tsB !== nextMatchedAt || Boolean(h.igUnlocked) !== nextIg || mergedVotes.length !== (h.continueVotes || []).length) {
+                        h.continueVotes = mergedVotes;
+                        h.igUnlocked = nextIg;
+                        h.matchedAt = nextMatchedAt;
+                        u.matchedHistory = this.normalizeMatchedHistoryList(uHist);
+                        if (String(u.matchedWithId) === partnerId) {
+                            u.matchedAt = nextMatchedAt;
+                        }
+                        repairedUsers.set(uid, u);
                     }
                 }
             });

@@ -373,7 +373,13 @@ function syncSingleDiscrepancyPairToUsers(users, idA, idB, nowTs = Date.now()) {
     const existingInB = uB.matchedHistory.find(h => h && String(h.partnerId).trim() === pidA);
     const rawSharedSession = (existingInA && existingInA.session) || (existingInB && existingInB.session) || uA.matchedSession || uB.matchedSession || '資料維護補齊配對';
     const sharedSession = rawSharedSession.includes('・強制補齊') ? rawSharedSession : `${rawSharedSession}・強制補齊`;
-    const sharedMatchedAt = Number((existingInA && existingInA.matchedAt) || (existingInB && existingInB.matchedAt) || uA.matchedAt || uB.matchedAt || nowTs);
+    const candidateMatchedTsList = [
+        existingInA && Number(existingInA.matchedAt),
+        existingInB && Number(existingInB.matchedAt),
+        String(uA.matchedWithId || '').trim() === pidB ? Number(uA.matchedAt) : 0,
+        String(uB.matchedWithId || '').trim() === pidA ? Number(uB.matchedAt) : 0
+    ].filter(t => t && !Number.isNaN(t) && t > 0);
+    const sharedMatchedAt = candidateMatchedTsList.length > 0 ? Math.min(...candidateMatchedTsList) : nowTs;
 
     if (!existingInA) {
         uA.matchedHistory.push({
@@ -3246,12 +3252,29 @@ ${previewLines.join('\n')}`;
         };
 
         for (const item of toRematch) {
-            const { idA, idB, uA, uB, session, activityId, matchDetail } = item;
+            const { idA, idB, uA, uB, session, activityId, matchDetail, matchedAt: origSnapMatchedAt } = item;
 
             // 1. 清除先前可能存在的永久解除配對墓碑，確保雙方可重新恢復好友關係
             if (typeof CloudSync !== 'undefined' && typeof CloudSync.clearPairUnmatched === 'function') {
                 await CloudSync.clearPairUnmatched(idA, idB);
             }
+
+            // 保留現存任一方的原始配對時間（避免另一方未遺失已達剩餘 0 天，被補齊方卻重置成 7 天導致無法同時按繼續配對）
+            const prevInA = Array.isArray(uA.matchedHistory) ? uA.matchedHistory.find(h => h && String(h.partnerId || '').trim() === idB) : null;
+            const prevInB = Array.isArray(uB.matchedHistory) ? uB.matchedHistory.find(h => h && String(h.partnerId || '').trim() === idA) : null;
+            const preservedTsCandidates = [
+                prevInA && Number(prevInA.matchedAt),
+                prevInB && Number(prevInB.matchedAt),
+                String(uA.matchedWithId || '').trim() === idB ? Number(uA.matchedAt) : 0,
+                String(uB.matchedWithId || '').trim() === idA ? Number(uB.matchedAt) : 0,
+                Number(origSnapMatchedAt)
+            ].filter(t => t && !Number.isNaN(t) && t > 0);
+            const effectiveMatchTs = preservedTsCandidates.length > 0 ? Math.min(...preservedTsCandidates) : nowMs;
+            const preservedIgUnlocked = Boolean((prevInA && prevInA.igUnlocked) || (prevInB && prevInB.igUnlocked));
+            const preservedVotes = Array.from(new Set([
+                ...(prevInA && Array.isArray(prevInA.continueVotes) ? prevInA.continueVotes.map(String) : []),
+                ...(prevInB && Array.isArray(prevInB.continueVotes) ? prevInB.continueVotes.map(String) : [])
+            ]));
 
             // 2. 移除單邊殘留的舊紀錄（避免重複），再重新寫入雙向配對紀錄
             const cleanHalf = (owner, partnerId) => {
@@ -3265,7 +3288,14 @@ ${previewLines.join('\n')}`;
             const protectedSess = baseSess.includes('・強制補齊') ? baseSess : `${baseSess}・強制補齊`;
             const detailTag = matchDetail ? `${matchDetail}・強制補齊` : '活動名單回補・強制補齊';
 
-            recordPairMatch(uA, uB, protectedSess, nowMs, activityId, detailTag);
+            recordPairMatch(uA, uB, protectedSess, effectiveMatchTs, activityId, detailTag);
+            [uA, uB].forEach(uObj => {
+                const lastEntry = Array.isArray(uObj.matchedHistory) ? uObj.matchedHistory[uObj.matchedHistory.length - 1] : null;
+                if (lastEntry) {
+                    if (preservedIgUnlocked) lastEntry.igUnlocked = true;
+                    if (preservedVotes.length > 0) lastEntry.continueVotes = [...preservedVotes];
+                }
+            });
             [uA, uB].forEach(uObj => {
                 const lastEntry = Array.isArray(uObj.matchedHistory) ? uObj.matchedHistory[uObj.matchedHistory.length - 1] : null;
                 if (lastEntry) {

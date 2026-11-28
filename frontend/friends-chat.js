@@ -1788,6 +1788,16 @@ async function recordMutualContinueVote(myId, partnerId, voterNickname, isSimula
         return true;
     } else {
         const votesArr = Array.from(voteSet);
+        const alignedBaseTs = Math.min(
+            Number(itemA.matchedAt || 0) || Infinity,
+            Number(itemB.matchedAt || 0) || Infinity
+        );
+        if (Number.isFinite(alignedBaseTs) && alignedBaseTs > 0) {
+            itemA.matchedAt = alignedBaseTs;
+            itemB.matchedAt = alignedBaseTs;
+            if (String(userA.matchedWithId) === idB) userA.matchedAt = alignedBaseTs;
+            if (String(userB.matchedWithId) === idA) userB.matchedAt = alignedBaseTs;
+        }
         itemA.continueVotes = votesArr;
         itemB.continueVotes = votesArr;
         if (typeof CloudSync !== 'undefined') {
