@@ -1346,17 +1346,69 @@ async function restoreFromBackupCode() {
     }
     loadedState.mustMatchKeys = Array.isArray(matchedUser.mustMatchKeys) ? [...matchedUser.mustMatchKeys] : [];
 
-    // 清空本地舊好友快取，完全依據雲端最新 matchedHistory 重建好友名單，確保每次登入一致
+    // 1. 將查到的會員寫入本地 USERS_LOCAL_KEY 與 CloudSync 待同步保護，避免 syncFromSharedStorage 誤判為無資料而重置
+    const updatedUsersList = Array.isArray(users) ? [...users] : [];
+    const uIdx = updatedUsersList.findIndex(u => u && String(u.id).trim() === pid);
+    const sanitizedMatchedUser = { ...matchedUser, id: pid };
+    delete sanitizedMatchedUser.lastSaveIp;
+    delete sanitizedMatchedUser.lastSaveIpAt;
+    if (uIdx >= 0) updatedUsersList[uIdx] = sanitizedMatchedUser;
+    else updatedUsersList.push(sanitizedMatchedUser);
+    try {
+        localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(updatedUsersList));
+        if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_LOCAL_KEY);
+    } catch (e) {}
+
+    // 2. 清空本地舊好友快取，完全依據雲端最新 matchedHistory 重建好友名單，確保每次登入一致
     loadedState.friends = [];
     appState = loadedState;
     hasUnsavedProfileDraft = false;
+    pendingProfileFormRerender = false;
     lastRenderedChatSignature = '';
+    lastRenderedUnlockedSignature = '';
+    sessionStorage.setItem(TAB_PLAYER_ID_KEY, pid);
+
+    if (typeof CloudSync !== 'undefined') {
+        if (typeof CloudSync.setSharedPendingUser === 'function') {
+            CloudSync.setSharedPendingUser(pid, sanitizedMatchedUser, 30000);
+        }
+        if (!CloudSync.tree) CloudSync.tree = {};
+        if (!CloudSync.tree[USERS_KEY] || typeof CloudSync.tree[USERS_KEY] !== 'object') {
+            CloudSync.tree[USERS_KEY] = {};
+        }
+        CloudSync.tree[USERS_KEY][pid] = { ...sanitizedMatchedUser };
+    }
+
     syncFromSharedStorage();
     Store.save(appState, false, true);
     renderProfileForm();
     refreshAllUI();
     updateMailboxBadge();
+    if (typeof updateReportReplyBadge === 'function') updateReportReplyBadge();
+    if (typeof updateForumUnreadIndicators === 'function') updateForumUnreadIndicators();
     closeBackupModal();
+
+    // 3. 背景立即向雲端拉取該玩家的最新節點、配對好友卡片、IG 與聊天室紀錄（無需刷新瀏覽器）
+    if (typeof CloudSync !== 'undefined' && CloudSync.initialized && !CloudSync.isLocalSandboxMode()) {
+        (async () => {
+            try {
+                if (typeof CloudSync.fetchPlayerPaths === 'function') {
+                    await CloudSync.fetchPlayerPaths([`${USERS_KEY}/${pid}`], { chatLimit: 30 });
+                    const cardPaths = (typeof CloudSync.getFriendCardPaths === 'function') ? CloudSync.getFriendCardPaths() : [];
+                    const chatPaths = (typeof CloudSync.playerHotDynamicPaths === 'function') ? CloudSync.playerHotDynamicPaths(true) : [];
+                    if (cardPaths.length > 0 || chatPaths.length > 0) {
+                        await CloudSync.fetchPlayerPaths([...cardPaths, ...chatPaths], { chatLimit: 30 });
+                    }
+                    if (typeof CloudSync.composePlayerUsers === 'function') CloudSync.composePlayerUsers();
+                    if (typeof CloudSync.applyTreeToLocalStorage === 'function') CloudSync.applyTreeToLocalStorage();
+                    syncFromSharedStorage();
+                    renderProfileForm();
+                    refreshAllUI();
+                    updateMailboxBadge();
+                }
+            } catch (err) {}
+        })();
+    }
 
     showMiniNotice(
         '🌸 讀取紀錄成功',
