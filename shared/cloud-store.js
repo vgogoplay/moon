@@ -365,6 +365,21 @@ const CloudSync = {
     clearPairUnmatched(idA, idB) {
         const pk = this.makeUnmatchedPairKey(idA, idB);
         if (!pk) return Promise.resolve();
+        const sigs = this.loadDerivedSyncSigs();
+        if (sigs) {
+            let sigChanged = false;
+            [idA, idB].forEach(uid => {
+                const u = String(uid || '').trim();
+                if (!u) return;
+                [`${PAIR_PROFILES_KEY}/${pk}/${u}`, `${PAIR_IG_KEY}/${pk}/${u}`].forEach(sp => {
+                    if (Object.prototype.hasOwnProperty.call(sigs, sp)) {
+                        delete sigs[sp];
+                        sigChanged = true;
+                    }
+                });
+            });
+            if (sigChanged) this.saveDerivedSyncSigs();
+        }
         const map = this.loadSharedUnmatchedPairs();
         if (Object.prototype.hasOwnProperty.call(map, pk)) {
             delete map[pk];
@@ -2324,7 +2339,7 @@ const CloudSync = {
             await this.fetchPlayerPaths([CUSTOM_ACTIVITIES_KEY]);
         }
         // 第二階段：其餘熱門節點與聊天室（排除第一階段已抓過的本人節點，首頁僅檢查最新 1 則以顯示未讀紅點）
-        const secondStagePaths = [...this.PLAYER_HOT_NODES, ...this.playerDynamicPaths()].filter(p => !earlyNodes.includes(p));
+        const secondStagePaths = [...this.PLAYER_HOT_NODES, ...this.playerDynamicPaths(), ...this.getFriendCardPaths()].filter(p => !earlyNodes.includes(p));
         await this.fetchPlayerPaths(secondStagePaths, { chatLimit: 1 });
         this.composePlayerUsers();
         this.hasLoadedFullTree = true;
@@ -4448,6 +4463,14 @@ const ChatStore = {
             this.saveAll(all);
             if (typeof CloudSync !== 'undefined') {
                 all[key].forEach(mObj => CloudSync.putNode(`${CHATS_KEY}/${key}/${mObj.id}`, mObj));
+                const lastInitMsg = all[key][all[key].length - 1];
+                if (lastInitMsg) {
+                    CloudSync.patchNode(`${CHAT_META_KEY}/${key}`, {
+                        lastMsg: lastInitMsg,
+                        lastTs: Number(lastInitMsg.ts || Date.now()),
+                        msgCount: this.getTotalWeightedCount(all[key])
+                    });
+                }
             }
         }
         return all[key];

@@ -3275,7 +3275,20 @@ ${previewLines.join('\n')}`;
                 }
             });
 
-            // 3. 補建聊天室開場訊息（若該房間目前無訊息）
+            // 3. 強制同步雙方公開資料快照 (`yuelao_pair_profiles` / `yuelao_pair_ig`)，確保前台即時顯示好友卡片與聊天室
+            if (typeof CloudSync !== 'undefined' && CloudSync.initialized) {
+                const pk = CloudSync.pairKeyOf(idA, idB);
+                const profA = (typeof buildPairProfileRecord === 'function') ? buildPairProfileRecord(uA) : null;
+                const profB = (typeof buildPairProfileRecord === 'function') ? buildPairProfileRecord(uB) : null;
+                const igA = (typeof buildPairIgRecord === 'function') ? buildPairIgRecord(uA) : null;
+                const igB = (typeof buildPairIgRecord === 'function') ? buildPairIgRecord(uB) : null;
+                if (profA) await CloudSync.putNode(`${PAIR_PROFILES_KEY}/${pk}/${idA}`, profA);
+                if (profB) await CloudSync.putNode(`${PAIR_PROFILES_KEY}/${pk}/${idB}`, profB);
+                await CloudSync.putNode(`${PAIR_IG_KEY}/${pk}/${idA}`, igA);
+                await CloudSync.putNode(`${PAIR_IG_KEY}/${pk}/${idB}`, igB);
+            }
+
+            // 4. 補建聊天室開場訊息（若該房間目前無訊息）
             const sysText = `💞【${baseSess}】管理員已依據活動配對成功名單為你們重新回補好友關係，現在可以繼續聊天囉！`;
             if (typeof ChatStore !== 'undefined' && typeof ChatStore.ensureThread === 'function') {
                 ChatStore.ensureThread(idA, idB, [

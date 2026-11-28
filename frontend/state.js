@@ -528,9 +528,21 @@ function syncFromSharedStorage() {
             });
         }
 
+        let needFetchMissingPartnerProfiles = false;
         historyList.forEach(item => {
-            const partner = userById.get(String(item.partnerId));
-            if (partner && !appState.friends.some(f => String(f.id) === String(partner.id))) {
+            const pidStr = String(item.partnerId || '').trim();
+            if (!pidStr) return;
+            const fetchedPartner = userById.get(pidStr);
+            if (!fetchedPartner) {
+                needFetchMissingPartnerProfiles = true;
+            }
+            const partner = fetchedPartner || {
+                id: pidStr,
+                nickname: String(item.partnerName || '').trim() || `好友_${pidStr}`,
+                gender: pidStr.startsWith('1') ? '男' : (pidStr.startsWith('2') ? '女' : ''),
+                privacy: { gender: 'open', icebreakerQuestion: 'open' }
+            };
+            if (!appState.friends.some(f => String(f.id) === String(partner.id))) {
                 const now = item.matchedAt || Date.now();
                 const willReachMulti = appState.friends.length >= 1;
                 if (willReachMulti && !appState.confessionUnlockAt) {
@@ -580,6 +592,18 @@ function syncFromSharedStorage() {
                 stateChanged = true;
             }
         });
+        if (needFetchMissingPartnerProfiles && typeof CloudSync !== 'undefined' && CloudSync.initialized && !CloudSync.isLocalSandboxMode() && !CloudSync._fetchingMissingFriendProfiles) {
+            CloudSync._fetchingMissingFriendProfiles = true;
+            const cardPaths = (typeof CloudSync.getFriendCardPaths === 'function') ? CloudSync.getFriendCardPaths() : [];
+            const chatPaths = (typeof CloudSync.playerHotDynamicPaths === 'function') ? CloudSync.playerHotDynamicPaths(true) : [];
+            CloudSync.fetchPlayerPaths([...cardPaths, ...chatPaths], { chatLimit: 30 }).then(() => {
+                CloudSync.composePlayerUsers();
+                CloudSync.applyTreeToLocalStorage();
+                syncFromSharedStorage();
+            }).catch(() => {}).finally(() => {
+                CloudSync._fetchingMissingFriendProfiles = false;
+            });
+        }
 
         // 4. 檢查後台是否已彈性解除特定配對（僅移除被解除的那位好友，其餘好友完整保留，並去重防止重複卡片）
         const activeBackendPartnerIds = new Set(historyList.map(h => String(h.partnerId)));
@@ -980,8 +1004,11 @@ function switchTab(tabName) {
                 CloudSync.pollPlayerHot();
             }
             if (typeof CloudSync.getFriendCardPaths === 'function' && typeof CloudSync.fetchPlayerPaths === 'function') {
-                CloudSync.fetchPlayerPaths(CloudSync.getFriendCardPaths()).then(() => {
+                const chatPaths = (typeof CloudSync.playerHotDynamicPaths === 'function') ? CloudSync.playerHotDynamicPaths(true) : [];
+                CloudSync.fetchPlayerPaths([...CloudSync.getFriendCardPaths(), ...chatPaths], { chatLimit: 30 }).then(() => {
                     CloudSync.composePlayerUsers();
+                    CloudSync.applyTreeToLocalStorage();
+                    syncFromSharedStorage();
                     renderFriendsSection();
                 });
             }
