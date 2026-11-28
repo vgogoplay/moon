@@ -23,7 +23,7 @@
                             聊天室 0 間 ／ 訊息 0 則
                         </span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-1">點選左側配對聊天室展開對話紀錄；若聊天室超過 <strong>3 天</strong>無更新或無新訊息，系統將於每日 <strong>07:00、15:00、22:00</strong> 排程結算（即使整點當下未開後台，後續開啟本聊天室頁面時亦會自動補檢查並刪除聊天紀錄、不保存且解除雙方好友配對）</p>
+                    <p class="text-xs text-gray-500 mt-1">點選左側配對聊天室展開對話紀錄；目前<strong>已關閉 3 天無互動自動清除</strong>，如需清理請使用右側「🧹 檢查剩餘 &lt; 6 小時」或進入聊天室後手動刪除並解除雙方好友</p>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -160,11 +160,11 @@
     <script src="shared/schedule.js?v=20261125extracredits15"></script>
     <script src="shared/schema.js?v=20261120opt"></script>
     <script src="shared/auth.js?v=20261123nodup"></script>
-    <script src="shared/cloud-store.js?v=20261128autopurgev42"></script>
+    <script src="shared/cloud-store.js?v=20261128noautopurgev43"></script>
     <!-- 後台共用狀態與頁面模組 -->
     <script src="backend/state.js?v=20261125wishlimit5v17"></script>
     <script src="backend/matching.js?v=20261127mockchatv20"></script>
-    <script src="backend/chats.js?v=20261128autopurgev22"></script>
+    <script src="backend/chats.js?v=20261128noautopurgev23"></script>
     <!-- 渲染左側選單與登入驗證 -->
     <script src="backend/layout.js?v=20261125firelock16"></script>
 </body>
