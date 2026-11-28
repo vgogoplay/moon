@@ -4579,26 +4579,41 @@ const ChatStore = {
         if (changed) this.saveAll(all);
     },
 
-    // 取得每日固定檢查時段鍵值（每日 07:00、15:00、22:00，各 15 分鐘執行視窗）
+    // 取得最近一次已跨過的固定檢查時段鍵值（每日 07:00、15:00、22:00；即使整點當下未開後台，後續開啟後台聊天室頁面即自動補執行該時段清理）
     getInactiveChatPurgeSlotKey(nowTs = Date.now()) {
         const d = new Date(Number(nowTs) || Date.now());
         if (Number.isNaN(d.getTime())) return '';
         const hr = d.getHours();
-        const min = d.getMinutes();
-        if (![7, 15, 22].includes(hr) || min > 15) return '';
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
-        const hh = String(hr).padStart(2, '0');
+        let slotDate = new Date(d.getTime());
+        let slotHour = 22;
+        if (hr >= 22) {
+            slotHour = 22;
+        } else if (hr >= 15) {
+            slotHour = 15;
+        } else if (hr >= 7) {
+            slotHour = 7;
+        } else {
+            // 00:00 ~ 06:59 歸屬於前一日 22:00 時段
+            slotDate.setDate(slotDate.getDate() - 1);
+            slotHour = 22;
+        }
+        const yyyy = slotDate.getFullYear();
+        const mm = String(slotDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(slotDate.getDate()).padStart(2, '0');
+        const hh = String(slotHour).padStart(2, '0');
         return `${yyyy}-${mm}-${dd}_${hh}:00`;
     },
 
-    // 超過 3 天（72 小時）無更新或無新訊息：每日 07:00、15:00、22:00 自動檢查，刪除聊天紀錄（刪除不保存）並自動解除會員列表雙方好友配對
-    purgeInactiveRooms(nowTs = Date.now(), maxInactiveMs = 3 * 24 * 60 * 60 * 1000, options = {}) {
+    // 超過 3 天（72 小時）無更新或無新訊息：每日 07:00、15:00、22:00 自動檢查（開啟後台聊天室頁面時若已過該時段且尚未執行即自動補清），刪除聊天紀錄（刪除不保存）並自動解除會員列表雙方好友配對
+    async purgeInactiveRooms(nowTs = Date.now(), maxInactiveMs = 3 * 24 * 60 * 60 * 1000, options = {}) {
         const forceCheck = Boolean(options && options.force);
         const slotLockKey = 'yuelao_last_inactive_chat_purge_slot';
         const cloudPurgeLogNode = 'yuelao_inactive_chat_purge_logs';
         const slotKey = this.getInactiveChatPurgeSlotKey(nowTs);
+
+        if (typeof CloudSync !== 'undefined' && (!CloudSync.initialized || CloudSync.inFlightWrites > 0)) {
+            return [];
+        }
 
         if (!forceCheck) {
             if (!slotKey) {
@@ -4609,19 +4624,23 @@ const ChatStore = {
                     return [];
                 }
             } catch (e) {}
-            if (
-                typeof CloudSync !== 'undefined' &&
-                CloudSync.tree &&
-                CloudSync.tree[cloudPurgeLogNode] &&
-                CloudSync.tree[cloudPurgeLogNode][slotKey]
-            ) {
-                try { localStorage.setItem(slotLockKey, slotKey); } catch (e) {}
-                return [];
+            if (typeof CloudSync !== 'undefined') {
+                if (CloudSync.tree && CloudSync.tree[cloudPurgeLogNode] && CloudSync.tree[cloudPurgeLogNode][slotKey]) {
+                    try { localStorage.setItem(slotLockKey, slotKey); } catch (e) {}
+                    return [];
+                }
+                if (!CloudSync.isLocalSandboxMode()) {
+                    const remoteSlotLog = await CloudSync.getNodeOnce(`${cloudPurgeLogNode}/${slotKey}`);
+                    if (remoteSlotLog === undefined) {
+                        return [];
+                    }
+                    if (remoteSlotLog && typeof remoteSlotLog === 'object') {
+                        CloudSync.applyStreamPatch(`${cloudPurgeLogNode}/${slotKey}`, remoteSlotLog);
+                        try { localStorage.setItem(slotLockKey, slotKey); } catch (e) {}
+                        return [];
+                    }
+                }
             }
-        }
-
-        if (typeof CloudSync !== 'undefined' && (!CloudSync.initialized || !CloudSync.hasLoadedFullTree || CloudSync.inFlightWrites > 0)) {
-            return [];
         }
 
         if (slotKey) {
@@ -4668,7 +4687,7 @@ const ChatStore = {
         });
 
         if (slotKey && typeof CloudSync !== 'undefined' && CloudSync.initialized) {
-            CloudSync.putNode(`${cloudPurgeLogNode}/${slotKey}`, {
+            await CloudSync.putNode(`${cloudPurgeLogNode}/${slotKey}`, {
                 slotKey,
                 executedAtTs: nowTs,
                 purgedCount: expiredPairs.length
@@ -4685,55 +4704,50 @@ const ChatStore = {
             users = [];
         }
 
-        const touchedUsersMap = new Map();
-
-        expiredPairs.forEach(item => {
-            const { idA, idB } = item;
-            // 1. 刪除聊天紀錄（不保存）並標記近期解除配對防止舊快照回補
-            this.clearChat(idA, idB);
-
-            // 2. 會員列表雙方自動解除配對
-            users.forEach(u => {
-                if (!u || !u.id) return;
-                const uid = String(u.id).trim();
-                if (uid !== idA && uid !== idB) return;
-
-                const partnerId = (uid === idA) ? idB : idA;
-                let modified = false;
-
-                if (Array.isArray(u.matchedHistory)) {
-                    const nextHist = u.matchedHistory.filter(h => String(h.partnerId) !== partnerId);
-                    if (nextHist.length !== u.matchedHistory.length) {
-                        u.matchedHistory = nextHist;
-                        modified = true;
-                    }
-                }
-
-                if (String(u.matchedWithId) === partnerId) {
-                    const fallbackHist = (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0)
-                        ? u.matchedHistory[u.matchedHistory.length - 1]
-                        : null;
-                    u.matchedSession = fallbackHist ? (fallbackHist.session || null) : null;
-                    u.matchedWithId = fallbackHist ? (fallbackHist.partnerId || null) : null;
-                    u.matchedWithName = fallbackHist ? (fallbackHist.partnerName || null) : null;
-                    u.matchedAt = fallbackHist ? (fallbackHist.matchedAt || null) : null;
-                    modified = true;
-                }
-
-                if (modified) {
-                    touchedUsersMap.set(uid, u);
-                }
-            });
+        const userById = new Map();
+        users.forEach(u => {
+            if (u && u.id) userById.set(String(u.id).trim(), u);
         });
 
-        if (touchedUsersMap.size > 0) {
-            localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
-            if (typeof CloudSync !== 'undefined') {
-                touchedUsersMap.forEach(u => {
-                    CloudSync.upsertUser(u, true, { isMatchMutation: true });
+        for (const item of expiredPairs) {
+            const { idA, idB } = item;
+            const userA = userById.get(idA) || null;
+            const userB = userById.get(idB) || null;
+
+            if (typeof CloudSync !== 'undefined' && typeof CloudSync.unmatchUsersInCloud === 'function') {
+                await CloudSync.unmatchUsersInCloud(idA, idB, userA, userB);
+            } else {
+                this.clearChat(idA, idB);
+            }
+
+            if (typeof applyUnmatchPairToUsersList === 'function') {
+                applyUnmatchPairToUsersList(users, idA, idB);
+            } else {
+                users.forEach(u => {
+                    if (!u || !u.id) return;
+                    const uid = String(u.id).trim();
+                    if (uid !== idA && uid !== idB) return;
+                    const partnerId = (uid === idA) ? idB : idA;
+                    if (Array.isArray(u.matchedHistory)) {
+                        u.matchedHistory = u.matchedHistory.filter(h => String(h.partnerId) !== partnerId);
+                    }
+                    if (String(u.matchedWithId) === partnerId) {
+                        const fallbackHist = (Array.isArray(u.matchedHistory) && u.matchedHistory.length > 0)
+                            ? u.matchedHistory[u.matchedHistory.length - 1]
+                            : null;
+                        u.matchedSession = fallbackHist ? (fallbackHist.session || null) : null;
+                        u.matchedWithId = fallbackHist ? (fallbackHist.partnerId || null) : null;
+                        u.matchedWithName = fallbackHist ? (fallbackHist.partnerName || null) : null;
+                        u.matchedAt = fallbackHist ? (fallbackHist.matchedAt || null) : null;
+                    }
                 });
             }
         }
+
+        try {
+            localStorage.setItem(USERS_LOCAL_KEY, JSON.stringify(users));
+            if (typeof LocalJsonCache !== 'undefined') LocalJsonCache.invalidate(USERS_LOCAL_KEY);
+        } catch (e) {}
 
         return expiredPairs;
     }

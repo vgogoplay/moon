@@ -379,7 +379,36 @@ function buildAdminChatSingleBubbleHtml(m, activeRoom, msgKey) {
     `;
 }
 
+let _adminChatsAutoPurgeInFlight = false;
+let _lastAdminChatsAutoPurgeCheckAt = 0;
+
+function triggerBackendChatsPageAutoPurge() {
+    if (_adminChatsAutoPurgeInFlight) return;
+    if (typeof ChatStore === 'undefined' || typeof ChatStore.purgeInactiveRooms !== 'function') return;
+    if (typeof CloudSync === 'undefined' || !CloudSync.initialized || CloudSync.inFlightWrites > 0) return;
+    const nowTs = Date.now();
+    if (nowTs - _lastAdminChatsAutoPurgeCheckAt < 15000) return;
+    _lastAdminChatsAutoPurgeCheckAt = nowTs;
+    _adminChatsAutoPurgeInFlight = true;
+    Promise.resolve(ChatStore.purgeInactiveRooms(nowTs)).then(purged => {
+        if (Array.isArray(purged) && purged.length > 0) {
+            if (typeof AdminMemoryCache !== 'undefined' && typeof AdminMemoryCache.invalidate === 'function') {
+                AdminMemoryCache.invalidate('chats');
+                AdminMemoryCache.invalidate('users');
+            }
+            cachedAdminChatSourceRef = null;
+            lastAdminChatRoomsSig = '';
+            if (typeof renderAdminAll === 'function') {
+                renderAdminAll(true);
+            }
+        }
+    }).catch(() => {}).finally(() => {
+        _adminChatsAutoPurgeInFlight = false;
+    });
+}
+
 function renderChatsPageSection(users, forceRender = false) {
+    triggerBackendChatsPageAutoPurge();
     const roomsListBox = document.getElementById('adminChatRoomsList');
     const roomsPaginationBar = document.getElementById('adminChatRoomsPaginationBar');
     const detailHeaderBox = document.getElementById('adminChatDetailHeader');
